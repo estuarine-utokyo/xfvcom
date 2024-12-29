@@ -1,6 +1,6 @@
 # xfvcom
 
-**xfvcom** is a Python package designed to streamline preprocessing and postprocessing for the Finite Volume Community Ocean Model ([FVCOM](https://github.com/jsasaki-utokyo/FVCOM)). Built on top of `xarray`, this package simplifies large-scale ocean model data analysis and visualization.
+**xfvcom** is a Python package designed to streamline preprocessing and postprocessing for the Finite Volume Community Ocean Model ([FVCOM](https://github.com/FVCOM-GitHub/FVCOM)). Built on top of `xarray`, this package simplifies large-scale ocean model data analysis and visualization.
 
 ---
 
