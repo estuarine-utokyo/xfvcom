@@ -1,12 +1,12 @@
 # xfvcom
 
-**xfvcom** is a Python package designed to streamline preprocessing and postprocessing for the Finite Volume Community Ocean Model ([FVCOM](https://github.com/FVCOM-GitHub/FVCOM)). Built on top of `xarray`, this package simplifies large-scale ocean model data analysis and visualization.
+**xfvcom** is a Python package designed to streamline preprocessing and postprocessing for the Finite Volume Community Ocean Model ([FVCOM](https://github.com/FVCOM-GitHub/FVCOM)). Built on top of [xarray](https://docs.xarray.dev/en/stable/), this package simplifies large-scale ocean model data analysis and visualization. This package is under construction.
 
 ---
 
 ## Features
 
-- **Load FVCOM data**: Easily load NetCDF-format FVCOM output files.
+- **Load FVCOM data**: Easily load NetCDF-format FVCOM input and output files.
 - **Coordinate transformation**: Convert between UTM coordinates and geographic coordinates (longitude/latitude).
 - **Depth calculation**: Add depth variables based on water levels, sigma layers, and bathymetry.
 - **Analysis tools**: Find nearest nodes and filter variables based on specific dimensions.
@@ -40,7 +40,7 @@ Follow these steps to install the package in development mode:
 
 3. Install the package in development mode:
    ```bash
-   pip install -e .
+   pip install -e .           # Most common
    pip install --no-deps -e . # Disable pip dependency resolution and install only the development package
    ```
 
@@ -72,11 +72,11 @@ print(f"Nearest node index: {nearest_node}")
 from xfvcom import FvcomPlotConfig, FvcomPlotter
 
 # Configure plot settings
-plot_config = FvcomPlotConfig(figsize=(10, 4), dpi=300)
+plot_config = FvcomPlotConfig(figsize=(8, 2), dpi=300)
 plotter = FvcomPlotter(dataset, plot_config)
 
 # Plot time series
-time_series_plot = plotter.plot_time_series(var_name="zeta", index=nearest_node, start="2020-01-01", end="2020-12-31")
+time_series_plot = plotter.plot_time_series(var_name="zeta", index=nearest_node, start="2020-01-01", end="2020-12-31", rolling_window=25)
 ```
 
 ---
