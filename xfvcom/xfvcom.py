@@ -1,3 +1,5 @@
+# xfvcom.py: A Python module for loading, analyzing, and plotting FVCOM model output data in xfvcom package.
+# Author: Jun Sasaki
 import os
 import numpy as np
 import xarray as xr
@@ -118,30 +120,49 @@ class FvcomDataLoader:
         self.ds["latc"] = xr.DataArray(latc, dims="nele")
 
     def _add_depth_variables(self):
-        """Add 'z' and 'z_dfs' depth variables to the dataset."""
-        z = xr.apply_ufunc(
-            lambda zeta, siglay, h: zeta + siglay * (h + zeta),
-            self.ds.zeta, self.ds.siglay, self.ds.h,
-            input_core_dims=[["time", "node"], ["siglay"], ["node"]],
-            output_core_dims=[["time", "siglay", "node"]],
-            vectorize=True, dask="parallelized"
-        )
-        z_dfs = self.ds.zeta - z
-
-        self.ds['z'] = z
-        self.ds['z_dfs'] = z_dfs
-
-        self.ds['z'].attrs['long_name'] = 'Depth'
-        self.ds['z'].attrs['standard_name'] = 'Depth at siglay'
-        self.ds['z'].attrs['units'] = 'm'
-        self.ds['z'].attrs['positive'] = 'up'
-        self.ds['z'].attrs['origin'] = 'still water level'
-
-        self.ds['z_dfs'].attrs['long_name'] = 'Depth from surface'
-        self.ds['z_dfs'].attrs['standard_name'] = 'Depth at siglay from the surface'
-        self.ds['z_dfs'].attrs['units'] = 'm'
-        self.ds['z_dfs'].attrs['positive'] = 'down'
-        self.ds['z_dfs'].attrs['origin'] = 'surface'
+        """Add 'z' and 'z_dfs' depth variables to the dataset. `z_dfs` is depth from the surface in positive."""
+        try:
+            ## The following is too slow and revised using numpy's broadcasting as follows.
+            # self.ds['z'] = (("siglay", "time", "node" ), np.array([self.ds.zeta + siglay * (self.ds.h + self.# ds.zeta) for siglay in self.ds.siglay]))
+            # self.ds['z_dfs'] = self.ds.zeta - self.ds.z
+            # self.ds['z'] = self.ds['z'].transpose("time", "siglay", "node")
+            # self.ds['z_dfs'] = self.ds['z_dfs'].transpose("time", "siglay", "node")
+            ## Revised for speeding up using numpy's broadcasing
+            time_size = self.ds.time.shape[0]
+            siglay_size = self.ds.siglay.shape[0]
+            node_size = self.ds.node.shape[0]
+            # h を numpy 配列として取得し、形状を (1, 1, node) にブロードキャスト
+            # Obtain h as a numpy array and broadcast the shape (1, 1, node).
+            h_np = self.ds.h.values[np.newaxis, np.newaxis, :]
+            h_broadcasted = np.broadcast_to(h_np, (time_size, siglay_size, node_size))
+            # siglay を numpy 配列として取得し、形状を (siglay, 1, node) にブロードキャストしてから、(time, siglay, node) にリシェイプ
+            # Obtain siglay as a numpy array and broadcast the shape (siglay, 1, node) and reshape to (time, siglay, node).
+            siglay_np = self.ds.siglay.values[:, np.newaxis, :]
+            siglay_broadcasted = np.broadcast_to(siglay_np, (siglay_size, time_size, node_size)).transpose(1, 0, 2)
+            # zeta はすでに (time, node) の形状なので、そのまま使用
+            # zeta is already in the shape of (time, node), so use it as is.
+            zeta_np = self.ds.zeta.values
+            # 計算実行: zeta + siglay * (h + zeta)、ここで適切にブロードキャストを使用
+            # Execute the calculation: zeta + siglay * (h + zeta) using broadcasting appropriately.
+            result = zeta_np[:, np.newaxis, :] + siglay_broadcasted * (h_broadcasted + zeta_np[:, np.newaxis, :])
+            # 新しい DataArray を作成
+            # Create a new DataArray.
+            # new_da_corrected = xr.DataArray(result, dims=("time", "siglay", "node"))
+            self.ds['z'] = xr.DataArray(result, dims=("time", "siglay", "node"))
+            self.ds['z_dfs'] = (self.ds.zeta - self.ds.z).transpose("time", "siglay", "node")
+            ## Add attributes
+            self.ds['z'].attrs['long_name'] = 'Depth'
+            self.ds['z'].attrs['standard_name'] = 'Depth at siglay'
+            self.ds['z'].attrs['units'] = 'm'
+            self.ds['z'].attrs['positive'] = 'up'
+            self.ds['z'].attrs['origin'] = 'still water lavel'
+            self.ds['z_dfs'].attrs['long_name'] = 'Depth'
+            self.ds['z_dfs'].attrs['standard_name'] = 'Depth at siglay from the surface'
+            self.ds['z_dfs'].attrs['units'] = 'm'
+            self.ds['z_dfs'].attrs['positive'] = 'down'
+            self.ds['z_dfs'].attrs['origin'] = 'surface'
+        except Exception as e:
+            raise ValueError(f"Error in adding depth variables: {e}")
 
     def _xy_to_lonlat(self, x, y):
         """Convert UTM (x, y) to geographic coordinates (lon, lat)."""
@@ -167,9 +188,11 @@ class FvcomDataLoader:
         tolerance = np.timedelta64(time_tolerance, 'm')
 
         # 時間を datetime64 に変換
+        # Convert time to datetime64
         time = self.ds['time'].values.astype('datetime64[s]')
         #time = self.ds['time'].values
         # 誤差範囲内で正時にスナップ
+        # Snap to the nearest hour within the tolerance range
         corrected_time = (time + tolerance // 2).astype('datetime64[h]').astype('datetime64[ns]')
         self.ds['time'] = corrected_time
 
@@ -257,7 +280,7 @@ class FvcomPlotter(PlotHelperMixin):
         self.ds = dataset
         self.cfg = plot_config
 
-    def plot_time_series(self, var_name, index, start=None, end=None, rolling_window=None,
+    def plot_timeseries(self, var_name, log=False, index=None, k=None, start=None, end=None, rolling_window=None,
                          ax=None, save_path=None, **kwargs):
         """
         Plot a time series for a specified variable at a given node or element index.
@@ -265,6 +288,7 @@ class FvcomPlotter(PlotHelperMixin):
         Parameters:
         - var_name: Name of the variable to plot.
         - index: Index of the `node` or `nele` to plot.
+        - k: Vertical layer index for 3D variables (optional).
         - dim: Dimension to use ('node' or 'nele' or nobc).
         - start: Start time for the plot (datetime or string).
         - end: End time for the plot (datetime or string).
@@ -288,8 +312,21 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             raise ValueError(f"Variable {var_name} does not have 'node' or 'nele' as a dimension.")
         
+        variable_dims = self.ds[var_name].dims
+        if "siglay" in variable_dims:
+            dimk = "siglay"
+        elif "siglev" in variable_dims:
+            dimk = "siglev"
+        else:
+            if k is not None:
+                raise ValueError(f"Variable {var_name} does not have 'siglay' or 'siglev' as a dimension.")
+        
         # Select the data
-        data = self.ds[var_name].isel({dim: index})
+        if k is not None:
+            data = self.ds[var_name].isel({dim: index, dimk: k})
+        else:
+            data = self.ds[var_name].isel({dim: index})
+
         # Apply rolling mean if specified
         if rolling_window:
             data = data.rolling(time=rolling_window, center=True).mean()
@@ -304,6 +341,12 @@ class FvcomPlotter(PlotHelperMixin):
         data = data.isel(time=time_mask)
         time = time[time_mask]
 
+        if log: # Check if log scale is requested
+            if data.min() <= 0:
+                print("Warning: Logarithmic scale cannot be used with non-positive values.")
+                print("Switching to linear scale.")
+                log = False
+
         # If no axis is provided, create a new one
         if ax is None:
             figsize = kwargs.get("figsize", self.cfg.figsize)
@@ -312,11 +355,20 @@ class FvcomPlotter(PlotHelperMixin):
             fig = ax.figure  # Get the figure from the provided axis
         # Plotting
         color = kwargs.get('color', self.cfg.plot_color)
-        ax.plot(time, data, label=f"{var_name} ({dim}={index})", color=color, **kwargs)
+        if k is not None:
+            label = f"{var_name} ({dim}={index}, {dimk}={k})"
+        else:
+            label = f"{var_name} ({dim}={index})"
+        ax.plot(time, data, label=label, color=color, **kwargs)
+        if log: # Set log scale if specified
+            ax.set_yscale('log')
 
         # Formatting
         rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
-        title = f"Time Series of {var_name} ({dim}={index}){rolling_text}"
+        if k is not None:
+            title = f"Time Series of {var_name} ({dim}={index}, {dimk}={k}){rolling_text}"
+        else:
+            title = f"Time Series of {var_name} ({dim}={index}){rolling_text}"
         ax.set_title(title, fontsize=self.cfg.fontsize['xlabel'])
         ax.set_xlabel("Time", fontsize=self.cfg.fontsize['xlabel'])
         ax.set_ylabel(var_name, fontsize=self.cfg.fontsize['ylabel'])
@@ -347,7 +399,7 @@ class FvcomPlotter(PlotHelperMixin):
             **kwargs
         )
 
-    def plot_time_series_for_river(self, var_name, river_index, start=None, end=None, rolling_window=None,
+    def plot_timeseries_for_river(self, var_name, river_index, start=None, end=None, rolling_window=None,
                                    ax=None, save_path=None, **kwargs):
         """
         Plot a time series for a specified variable at a given river index.
@@ -527,6 +579,123 @@ class FvcomPlotter(PlotHelperMixin):
             plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
         
         return ax
+
+    def plot_timeseries_2d(self, var_name, index=None, start=None, end=None, depth=False, rolling_window=None, ax=None, 
+                                   ylim=None, levels=20, cmap=None, save_path=None, **kwargs):
+        """
+        Plot a 2D time series for a specified variable as a contour map with time on the x-axis and a vertical coordinate (siglay/siglev) on the y-axis.
+
+        Parameters:
+        - var_name: Name of the variable to plot.
+        - index: Index of the `node` or `nele` to plot (default: None).
+        - start: Start time for the plot (datetime or string).
+        - end: End time for the plot (datetime or string).
+        - ax: matplotlib axis object. If None, a new axis will be created.
+        - save_path: Path to save the plot as an image (optional).
+        - **kwargs: Additional arguments for customization (e.g., levels, cmap).
+        """
+        if var_name not in self.ds:
+            print(f"Error: The variable '{var_name}' is not found in the dataset.")
+            return None
+
+        # Auto-detect the vertical coordinate
+        if "siglay" in self.ds[var_name].dims:
+            y_coord = "siglay"
+        elif "siglev" in self.ds[var_name].dims:
+            y_coord = "siglev"
+        else:
+            raise ValueError(f"Variable {var_name} does not have 'siglay' or 'siglev' as a vertical coordinate.")
+
+        # Validate the variable's dimensions
+        if "time" not in self.ds[var_name].dims:
+            raise ValueError(f"Variable {var_name} does not have 'time' as a dimension.")
+
+        # Select the data for the specified index
+        # Validate the dimension
+        variable_dims = self.ds[var_name].dims
+        if "node" in variable_dims:
+            dim = "node"
+        elif "nele" in variable_dims:
+            dim = "nele"
+        else:
+            raise ValueError(f"Variable {var_name} does not have 'node' or 'nele' as a dimension.")
+
+        data = self.ds[var_name]
+        if index is not None:
+            data = data.isel({dim: index})
+        else:
+            raise ValueError("Index for 'node' or 'nele' must be provided.")
+
+        # Apply rolling mean if specified
+        if rolling_window:
+            data = data.rolling(time=rolling_window, center=True).mean()
+        
+        # Time range filtering
+        time = data["time"]
+        if start:
+            start = np.datetime64(start)
+        if end:
+            end = np.datetime64(end)
+        time_mask = (time >= start) & (time <= end) if start and end else slice(None)
+        data = data.isel(time=time_mask)
+        # Transpose data to ensure (Ny, Nx) shape
+        data = data.transpose(y_coord, "time")
+
+        # Extract time, vertical coordinate, and data values
+        time_vals = data["time"].values  # (Nx,)
+        y_vals = data[y_coord].values  # (Ny,)
+        z_vals = data.values  # (Ny, Nx)
+
+        # Ensure data dimensions are correct
+        if z_vals.shape != (len(y_vals), len(time_vals)):
+            raise ValueError(
+                f"Shape mismatch: data={z_vals.shape}, time={len(time_vals)}, vertical={len(y_vals)}"
+            )
+
+        # Create 2D grid for time and vertical coordinate
+        time_grid, y_grid = np.meshgrid(time_vals, y_vals, indexing="xy")
+        if depth:
+            z = self.ds.z.isel(time=time_mask)[:,:,index].T.values
+            if z.shape != (len(y_vals), len(time_vals)):
+                raise ValueError(
+                    f"Shape mismatch: depth={z.shape}, time={len(time_vals)}, vertical={len(y_vals)}"
+                )
+            else:
+                y_grid = z
+                y_coord = "Depth (m)"
+
+        # Create a new axis if not provided
+        if ax is None:
+            figsize = kwargs.get("figsize", self.cfg.figsize)
+            fig, ax = plt.subplots(figsize=figsize)
+
+        # Plot contour map
+        levels = levels or kwargs.get("levels", 20)  # Number of contour levels
+        cmap = cmap or kwargs.pop("cmap", "viridis") 
+        contour = ax.contourf(time_grid, y_grid, z_vals, levels=levels, cmap=cmap, **kwargs)
+        cbar = plt.colorbar(contour, ax=ax)
+        cbar.set_label(var_name, fontsize=self.cfg.fontsize['ylabel'])
+
+        # Format axes
+        if ylim is not None:
+            ax.set_ylim(ylim)
+        rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+        title = f"Time Series of {var_name} ({dim}={index}){rolling_text}"
+
+        ax.set_title(title, fontsize=self.cfg.fontsize['xlabel'])
+        ax.set_xlabel("Time", fontsize=self.cfg.fontsize['xlabel'])
+        ax.set_ylabel(y_coord, fontsize=self.cfg.fontsize['ylabel'])
+        date_format = kwargs.get('date_format', self.cfg.date_format)
+        ax.xaxis.set_major_formatter(DateFormatter(date_format))
+        fig.autofmt_xdate()
+
+        # Save or show the plot
+        if save_path:
+            dpi = kwargs.get("dpi", self.cfg.dpi)
+            plt.savefig(save_path, dpi=dpi, bbox_inches="tight")
+
+        return ax
+
 
 # Example usage
 if __name__ == "__main__":
