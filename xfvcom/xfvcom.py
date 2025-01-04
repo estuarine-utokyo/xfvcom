@@ -6,7 +6,7 @@ from sklearn.neighbors import NearestNeighbors
 import matplotlib.pyplot as plt
 from datetime import datetime
 from matplotlib.dates import DateFormatter
-from helpers import PlotHelperMixin
+from .helpers import PlotHelperMixin
 
 class FvcomDataLoader:
     """
