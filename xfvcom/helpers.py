@@ -5,7 +5,7 @@ class PlotHelperMixin:
     A mixin class to provide helper methods for batch plotting and other common operations.
     """
 
-    def plot_variables_in_batches(self, plotter, vars, index, batch_size=4, start=None, end=None, save_prefix="plot", **kwargs):
+    def plot_timeseries_in_batches(self, plotter, vars, index, log=None, batch_size=4, k=None, start=None, end=None, save_prefix="plot", **kwargs):
         """
         Plot variables in batches.
 
@@ -37,7 +37,7 @@ class PlotHelperMixin:
 
             # 各変数のプロット
             for var, ax in zip(batch_vars, axes):
-                plotter.plot_time_series(var_name=var, index=index, start=start, end=end, ax=ax, **kwargs)
+                plotter.plot_timeseries(var_name=var, index=index, log=log, k=k, start=start, end=end, ax=ax, **kwargs)
                 ax.set_title(var, fontsize=14)
 
             # 図全体の調整
@@ -51,7 +51,7 @@ class PlotHelperMixin:
 
         print(f"Saved {num_batches} figures as '{save_prefix}_batch_#.png'.")
 
-    def plot_rivers_in_batches(self, plotter, var_name, batch_size=4, start=None, end=None, save_prefix="river_plot", **kwargs):
+    def plot_timeseries_for_river_in_batches(self, plotter, var_name, batch_size=4, start=None, end=None, save_prefix="river_plot", **kwargs):
         """
         Plot a single variable for all rivers in batches.
 
@@ -87,7 +87,7 @@ class PlotHelperMixin:
 
             # 各 river のプロット
             for river_index, ax in zip(river_indices, axes):
-                plotter.plot_time_series_for_river(
+                plotter.plot_timeseries_for_river(
                     var_name=var_name, river_index=river_index, start=start, end=end, ax=ax, **kwargs
                 )
                 #ax.set_title(f"{var_name} for river {river_index}", fontsize=14)

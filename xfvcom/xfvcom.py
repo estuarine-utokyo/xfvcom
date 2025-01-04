@@ -8,6 +8,7 @@ from sklearn.neighbors import NearestNeighbors
 import matplotlib.pyplot as plt
 from datetime import datetime
 from matplotlib.dates import DateFormatter
+from matplotlib.colors import Normalize, BoundaryNorm
 from .helpers import PlotHelperMixin
 
 class FvcomDataLoader:
@@ -280,7 +281,7 @@ class FvcomPlotter(PlotHelperMixin):
         self.ds = dataset
         self.cfg = plot_config
 
-    def plot_timeseries(self, var_name, log=False, index=None, k=None, start=None, end=None, rolling_window=None,
+    def plot_timeseries(self, var_name, index, log=False, k=None, start=None, end=None, rolling_window=None,
                          ax=None, save_path=None, **kwargs):
         """
         Plot a time series for a specified variable at a given node or element index.
@@ -581,7 +582,8 @@ class FvcomPlotter(PlotHelperMixin):
         return ax
 
     def plot_timeseries_2d(self, var_name, index=None, start=None, end=None, depth=False, rolling_window=None, ax=None, 
-                                   ylim=None, levels=20, cmap=None, save_path=None, **kwargs):
+                                   ylim=None, levels=20, vmin=None, vmax=None, cmap=None, save_path=None, method='contourf',
+                                   add_contour=False, label_contours=False, **kwargs):
         """
         Plot a 2D time series for a specified variable as a contour map with time on the x-axis and a vertical coordinate (siglay/siglev) on the y-axis.
 
@@ -669,13 +671,40 @@ class FvcomPlotter(PlotHelperMixin):
             figsize = kwargs.get("figsize", self.cfg.figsize)
             fig, ax = plt.subplots(figsize=figsize)
 
-        # Plot contour map
-        levels = levels or kwargs.get("levels", 20)  # Number of contour levels
+        # Plot using contourf or pcolormesh
         cmap = cmap or kwargs.pop("cmap", "viridis") 
-        contour = ax.contourf(time_grid, y_grid, z_vals, levels=levels, cmap=cmap, **kwargs)
-        cbar = plt.colorbar(contour, ax=ax)
+        auto_levels = True
+        if vmin is not None or vmax is not None:
+            auto_levels = False
+        vmin = vmin or kwargs.pop("vmin", z_vals.min())
+        vmax = vmax or kwargs.pop("vmax", z_vals.max())
+        levels = levels or kwargs.get("levels", 20)  # Number of contour levels
+        if isinstance(levels, int):
+            levels = np.linspace(vmin, vmax, levels)
+        elif isinstance(levels, (list, np.ndarray)):
+            levels = np.array(levels)
+            auto_levels = False
+        if auto_levels:
+            norm = Normalize(vmin=vmin, vmax=vmax)
+        else:
+            norm = BoundaryNorm(levels, ncolors=256, clip=False)
+        if method == "contourf":
+            cf = ax.contourf(time_grid, y_grid, z_vals, levels=levels, cmap=cmap, norm=norm, extend='both', **kwargs)
+            cbar = plt.colorbar(cf, ax=ax, extend='both')
+            if add_contour:
+                cs = ax.contour(time_grid, y_grid, z_vals, levels=levels, colors='k', linewidths=0.5)
+                if label_contours:
+                    plt.clabel(cs, inline=True, fontsize=8)
+        elif method == "pcolormesh":
+            mesh = ax.pcolormesh(time_grid, y_grid, z_vals, cmap=cmap, **kwargs)
+            cbar = plt.colorbar(mesh, ax=ax)
+        else:
+            raise ValueError(f"Invalid method '{method}' for plotting 2D time series.")
+        
+        # Format colorbar
         cbar.set_label(var_name, fontsize=self.cfg.fontsize['ylabel'])
-
+        # Add contour labels if requested
+        
         # Format axes
         if ylim is not None:
             ax.set_ylim(ylim)
@@ -688,6 +717,7 @@ class FvcomPlotter(PlotHelperMixin):
         date_format = kwargs.get('date_format', self.cfg.date_format)
         ax.xaxis.set_major_formatter(DateFormatter(date_format))
         fig.autofmt_xdate()
+
 
         # Save or show the plot
         if save_path:
