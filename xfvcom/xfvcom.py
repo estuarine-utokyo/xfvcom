@@ -355,7 +355,7 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             fig = ax.figure  # Get the figure from the provided axis
         # Plotting
-        color = kwargs.get('color', self.cfg.plot_color)
+        color = kwargs.pop('color', self.cfg.plot_color)
         if k is not None:
             label = f"{var_name} ({dim}={index}, {dimk}={k})"
         else:
@@ -457,7 +457,8 @@ class FvcomPlotter(PlotHelperMixin):
             fig = ax.figure  # Get the figure from the provided axis
 
         # Plotting
-        color = kwargs.get('color', self.cfg.plot_color)
+        #color = kwargs.get('color', self.cfg.plot_color)
+        color = kwargs.pop('color', self.cfg.plot_color)
         ax.plot(time, data, label=f"{var_name} (river={river_index})", color=color, **kwargs)
 
         # Formatting
