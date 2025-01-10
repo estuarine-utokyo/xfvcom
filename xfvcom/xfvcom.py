@@ -15,13 +15,13 @@ class FvcomDataLoader:
     """
     Responsible for loading FVCOM output NetCDF files into an xarray.Dataset.
     """
-    def __init__(self, dirpath=None, ncfile=None, utm2geo=True, zone=54, north=True,
+    def __init__(self, base_path=None, ncfile=None, utm2geo=True, zone=54, north=True,
                  inverse=False, time_tolerance=None, **kwargs):
         """
         Initialize the FvcomDataLoader instance.
         
         Parameters:
-        - dirpath: Directory path where the NetCDF file is located.
+        - base_path: Directory path where the NetCDF file is located.
         - ncfile: Name of the NetCDF file to load.
         - utm2geo: Convert UTM coordinates to geographic (lon, lat).
         - zone: UTM zone number.
@@ -30,9 +30,9 @@ class FvcomDataLoader:
         - time_tolerence: Tolerence in minutes in integer to snap time to the nearest hour.
         - **kwargs: Additional keyword arguments for xarray.open_dataset.
         """
-        dirpath = os.path.expanduser(dirpath) if dirpath else None
-        dirpath = self._add_trailing_slash(dirpath) if dirpath else None
-        self.ncfilepath = f"{dirpath}{ncfile}" if dirpath else ncfile
+        base_path = os.path.expanduser(base_path) if base_path else None
+        base_path = self._add_trailing_slash(base_path) if base_path else None
+        self.ncfilepath = f"{base_path}{ncfile}" if base_path else ncfile
         self.engine = kwargs.get("engine", "netcdf4")
         self.chunks = kwargs.get("chunks", None)
         self.decode_times = kwargs.get("decode_times", False)
@@ -731,7 +731,7 @@ class FvcomPlotter(PlotHelperMixin):
 # Example usage
 if __name__ == "__main__":
     # Load data
-    loader = FvcomDataLoader(dirpath="/path/to/data", ncfile="sample.nc")
+    loader = FvcomDataLoader(base_path="/path/to/data", ncfile="sample.nc")
     
     # Analyze
     analyzer = FvcomAnalyzer(loader.ds)
