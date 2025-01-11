@@ -1,14 +1,42 @@
+import pandas as pd
 import matplotlib.pyplot as plt
 from math import ceil
 import os
 import imageio.v2 as imageio
 from multiprocessing import Pool
+from .helpers_utils import clean_kwargs, unpack_plot_kwargs
 
 def generate_frame(args):
-    time, siglay, plotter, output_dir = args
-    save_path = os.path.join(output_dir, f"frame_{time}.png")
-    da = plotter.ds['temp'].isel(time=time, siglay=siglay)
-    plotter.plot_2d(da=da, save_path=save_path)
+    """
+    Generate a frame for a GIF animation.
+
+    Parameters:
+    - args: Tuple containing (time, data_array, plotter, output_dir, base_name, plot_kwargs).
+
+    Returns:
+    - File path to the generated frame.
+    """
+
+    time, data_array, plotter, output_dir, base_name, plot_kwargs = args
+    # Unpack and clean plot_kwargs
+    #print("Original plot_kwargs:", plot_kwargs)
+    plot_kwargs = unpack_plot_kwargs(plot_kwargs)
+    #print("Unpacked plot_kwargs:", plot_kwargs)
+    plot_kwargs = clean_kwargs(plotter.plot_2d, plot_kwargs)
+    #print("Cleaned plot_kwargs:", plot_kwargs)
+
+
+    da = data_array.isel(time=time)
+    save_path = os.path.join(output_dir, f"{base_name}_{time}.png")
+
+    #filtered_kwargs = PlotHelperMixin.clean_kwargs(plotter.plot_2d, plot_kwargs)
+    #print(f"fitlered_kwargs: {filtered_kwargs}")
+    #print(f"plot_kwargs: {plot_kwargs}")
+    plotter.plot_2d(da=da, save_path=save_path, **plot_kwargs)
+    #plotter.plot_2d(da=da, save_path=save_path, verbose=plot_kwargs.get("verbose", False), 
+    #                vmin=plot_kwargs.get("vmin", None), vmax=plot_kwargs.get("vmax", None),
+    #                levels=plot_kwargs.get("levels", None), **plot_kwargs)
+
     return save_path
 
 class PlotHelperMixin:
@@ -115,34 +143,57 @@ class PlotHelperMixin:
         print(f"Saved {num_batches} figures as '{save_prefix}_batch_#.png'.")
 
     # Create a GIF animation using FvcomPlotter.plot_2d method
-    def generate_frames(self, variable, siglay, output_dir, plotter, **kwargs):
+    def generate_frames(self, data_array, output_dir, plotter, base_name="frame", **plot_kwargs):
         """
         Generate frames for a GIF animation.
-        """
-        os.makedirs(output_dir, exist_ok=True)
-        time_indices = range(plotter.ds.sizes["time"])  # 全timeステップ
 
-        # マルチプロセスでフレームを生成
+        Parameters:
+        - data_array: xarray.DataArray (dimensions: time, node) to plot.
+        - output_dir: Directory to save the frames. `~` will be expanded to the user's home directory.
+        - plotter: An instance of FvcomPlotter.
+        - base_name: Base name for frame files (default: "frame").
+        - **kwargs: Additional arguments passed to the plotter.
+
+        Returns:
+        - A list of file paths to the generated frames.
+        """
+
+        output_dir = os.path.expanduser(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+    
+        time_indices = range(data_array.sizes["time"])  # 全timeステップ
+
+        # Arguments for the generate_frame function
+        args_list = [
+            (time, data_array, plotter, output_dir, base_name, plot_kwargs) for time in time_indices
+        ]
+
+
+        # Generate frames in parallel
         with Pool() as pool:
-            frames = pool.map(
-                generate_frame, [(time, siglay, plotter, output_dir) for time in time_indices]
-            )
+            frames = pool.map(generate_frame, args_list)
 
         return frames
 
-    def create_gif(self, frames, output_gif, fps=10, cleanup=True):
+    def create_gif(self, frames, output_gif=None, fps=10, cleanup=True):
         """
         Create a GIF animation from a list of frames.
 
         Parameters:
         - frames: List of file paths to the frames.
-        - output_gif: Output file path for the GIF.
+        - output_gif: Output file path for the GIF. - output_gif: Output file path for the GIF. 
+          If None, defaults to "output.gif". `~/` will be expanded to the user's home directory.
         - fps: Frames per second for the GIF.
         - cleanup: If True, delete the frame files after creating the GIF.
 
         Returns:
         - None
         """
+
+        if output_gif is None:
+            output_gif = "output.gif"  # Default GIF file name
+        output_gif = os.path.expanduser(output_gif)
+        
         with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
             for frame in frames:
                 image = imageio.imread(frame)
@@ -151,3 +202,6 @@ class PlotHelperMixin:
         if cleanup:
             for frame in frames:
                 os.remove(frame)
+
+        print(f"Saved the GIF animation as '{output_gif}'.")
+

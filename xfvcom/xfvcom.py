@@ -16,6 +16,7 @@ import cartopy.feature as cfeature
 #from cartopy.io.img_tiles import StadiaMapsTiles
 #from cartopy.io.img_tiles import Stamen
 from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
+import inspect
 from .helpers import PlotHelperMixin
 
 class FvcomDataLoader:
@@ -741,7 +742,7 @@ class FvcomPlotter(PlotHelperMixin):
 
     def plot_2d(self, da=None, with_mesh=False, vmin=None, vmax=None, levels=20, ax=None, save_path=None, 
                   use_latlon=True, projection=ccrs.Mercator(), plot_grid=False,
-                  add_tiles=False, tile_provider=None, debug=False, **kwargs):
+                  add_tiles=False, tile_provider=None, verbose=False, **kwargs):
         """
         Plot the triangular mesh of the FVCOM grid.
 
@@ -766,6 +767,7 @@ class FvcomPlotter(PlotHelperMixin):
         Mercator is not lon/lat coords, so transform=ccrs.PlateCarree() is necessary.
         
         """
+               
         # Extract coordinates
         if use_latlon:
             x = self.ds["lon"].values
@@ -786,12 +788,13 @@ class FvcomPlotter(PlotHelperMixin):
         # Output ranges and connectivity
         xmin, xmax = x.min(), x.max()
         ymin, ymax = y.min(), y.max()
-        print(f"x range: {xmin} to {xmax}")
-        print(f"y range: {ymin} to {ymax}")
-        print(f"nv shape: {nv.shape}, nv min: {nv.min()}, nv max: {nv.max()}")
+        if verbose:
+            print(f"x range: {xmin} to {xmax}")
+            print(f"y range: {ymin} to {ymax}")
+            print(f"nv shape: {nv.shape}, nv min: {nv.min()}, nv max: {nv.max()}")
 
         # Validate nv and coordinates
-        if debug:
+        if verbose:
             if np.isnan(x).any() or np.isnan(y).any():
                 raise ValueError("NaN values found in node coordinates.")
             if np.isinf(x).any() or np.isinf(y).any():
@@ -805,7 +808,8 @@ class FvcomPlotter(PlotHelperMixin):
         # Create Triangulation
         try:
             triang = tri.Triangulation(x, y, triangles=nv_ccw)
-            print(f"Number of triangles: {len(triang.triangles)}")
+            if verbose:
+                print(f"Number of triangles: {len(triang.triangles)}")
         except ValueError as e:
             print(f"Error creating Triangulation: {e}")
             return None
@@ -830,6 +834,10 @@ class FvcomPlotter(PlotHelperMixin):
         linestyle = kwargs.pop('linestyle', '--')  # Line style for lat/lon gridlines
         #linewidth = kwargs.pop('linewidth', 0.5)  # Line width for lat/lon gridlines
         
+        # Filter tricontourf-specific kwargs to avoid conflicts
+        valid_tricontourf_args = inspect.signature(ax.tricontourf).parameters.keys()
+        tricontourf_kwargs = {key: kwargs[key] for key in valid_tricontourf_args if key in kwargs}
+
         # Prepare color plot
         if da is not None:
             cmap = kwargs.pop("cmap", "viridis") 
@@ -838,13 +846,23 @@ class FvcomPlotter(PlotHelperMixin):
                 auto_levels = False
             vmin = vmin or kwargs.pop("vmin", values.min())
             vmax = vmax or kwargs.pop("vmax", values.max())
-            print(f"Color range: {vmin} to {vmax}")
+
+            if verbose:
+                print(f"Color range: {vmin} to {vmax}")
+
             levels = levels or kwargs.pop("levels", 20)  # Number of contour levels
             if isinstance(levels, int):
                 levels = np.linspace(vmin, vmax, levels)
+                auto_levels = False
             elif isinstance(levels, (list, np.ndarray)):
                 levels = np.array(levels)
+                levels = levels[(levels >= vmin) & (levels <= vmax)]
+                if len(levels) == 0:
+                    raise ValueError("Filtered levels are empty after applying vmin and vmax.")
                 auto_levels = False
+            else:
+                raise ValueError("Invalid levels argument. Must be an integer or a list of levels.")
+
             if auto_levels:
                 norm = Normalize(vmin=vmin, vmax=vmax)
             else:
@@ -854,7 +872,7 @@ class FvcomPlotter(PlotHelperMixin):
         if not use_latlon:
             title = kwargs.pop("title", "FVCOM Mesh (Cartesian)")
             if da is not None:
-                cf = ax.tricontourf(triang, values, levels=levels, cmap=cmap, norm=norm, extend='both', **kwargs)
+                cf = ax.tricontourf(triang, values, levels=levels, cmap=cmap, norm=norm, extend='both', **tricontourf_kwargs)
                 cbar = plt.colorbar(cf, ax=ax, extend='both', orientation='vertical', shrink=1.0)
                 cbar.set_label(cbar_label, fontsize=self.cfg.fontsize['cbar_label'], labelpad=10)
             if with_mesh:
@@ -883,7 +901,7 @@ class FvcomPlotter(PlotHelperMixin):
             title = kwargs.pop("title", "FVCOM Mesh (Lat/Lon)")
             if da is not None:
                 cf = ax.tricontourf(triang, values, levels=levels, cmap=cmap, norm=norm, extend='both',
-                                    transform=ccrs.PlateCarree(),**kwargs)
+                                    transform=ccrs.PlateCarree(), **tricontourf_kwargs)
                 cbar = plt.colorbar(cf, ax=ax, extend='both', orientation='vertical', shrink=1.0)
                 cbar.set_label(cbar_label, fontsize=self.cfg.fontsize["cbar_label"], labelpad=10)
             if with_mesh:
@@ -924,6 +942,7 @@ class FvcomPlotter(PlotHelperMixin):
         if save_path:
             dpi = kwargs.get("dpi", self.cfg.dpi)
             fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
+            print(f"Plot saved to: {save_path}")
 
         return ax
 
