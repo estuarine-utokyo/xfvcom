@@ -8,7 +8,14 @@ from sklearn.neighbors import NearestNeighbors
 import matplotlib.pyplot as plt
 from datetime import datetime
 from matplotlib.dates import DateFormatter
+import matplotlib.cm as cm
 from matplotlib.colors import Normalize, BoundaryNorm
+import matplotlib.tri as tri
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+#from cartopy.io.img_tiles import StadiaMapsTiles
+from cartopy.io.img_tiles import Stamen
+from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
 from .helpers import PlotHelperMixin
 
 class FvcomDataLoader:
@@ -250,7 +257,7 @@ class FvcomPlotConfig:
     """
     Stores plot configuration settings.
     """
-    def __init__(self, figsize=(8,2), width=800, height=200, fontsize=None, dpi=300, **kwargs):
+    def __init__(self, figsize=(8,2), width=800, height=200, dpi=300, fontsize=None,  **kwargs):
         self.figsize = figsize
         self.width = width
         self.height = height
@@ -726,6 +733,178 @@ class FvcomPlotter(PlotHelperMixin):
             plt.savefig(save_path, dpi=dpi, bbox_inches="tight")
 
         return ax
+
+    def plot_mesh(self, da=None, with_mesh=False, vmin=None, vmax=None, levels=20, ax=None, save_path=None, 
+                  use_latlon=True, projection=ccrs.Mercator(), plot_grid=False,
+                  add_tiles=False, tile_provider=Stamen('terrain'), **kwargs):
+        """
+        Plot the triangular mesh of the FVCOM grid.
+
+        Parameters:
+        - da: DataArray to plot. Default is None (wireframe).
+        - with_mesh: If True, plot the mesh lines. Default is True.
+        - vmin: Minimum value for color scaling.
+        - vmax: Maximum value for color scaling.
+        - levels: Number of contour levels or a list of levels.
+        - ax: matplotlib axis object. If None, a new axis will be created.
+        - save_path: Path to save the plot as an image (optional).
+        - use_latlon: If True, use (lon, lat) for nodes. If False, use (x, y).
+        - projection: Cartopy projection for geographic plotting. Default is PlateCarree.
+        - add_tiles: If True, add a tile map (for lat/lon plotting only).
+        - tile_provider: Tile provider for the background.
+        - **kwargs: Additional arguments for customization.
+        
+        Note:
+        projection in the following can be ccrs.Mercator(), which is the best in mid-latitudes.
+            plt.subplots(figsize=figsize, subplot_kw={'projection': projection})
+        The other parts, transform=ccrs.PlateCarree() must be set to inform lon/lat coords are used.
+        Mercator is not lon/lat coords, so transform=ccrs.PlateCarree() is necessary.
+        
+        """
+        # Extract coordinates
+        if use_latlon:
+            x = self.ds["lon"].values
+            y = self.ds["lat"].values
+        else:
+            x = self.ds["x"].values
+            y = self.ds["y"].values
+
+        if da is not None:
+            z_vals = da.values    
+        else:
+            with_mesh=True
+        # Extract triangle connectivity
+        nv = self.ds["nv"].values.T - 1  # Convert to 0-based indexing
+
+        # Debugging: Output ranges and connectivity
+        print(f"x range: {x.min()} to {x.max()}")
+        print(f"y range: {y.min()} to {y.max()}")
+        print(f"nv shape: {nv.shape}, nv min: {nv.min()}, nv max: {nv.max()}")
+
+        # Validate nv and coordinates
+        if np.isnan(x).any() or np.isnan(y).any():
+            raise ValueError("NaN values found in node coordinates.")
+        if np.isinf(x).any() or np.isinf(y).any():
+            raise ValueError("Infinite values found in node coordinates.")
+        if (nv < 0).any() or (nv >= len(x)).any():
+            raise ValueError("Invalid indices in nv. Check if nv points to valid nodes.")
+
+        # Reverse node order for counter-clockwise triangles
+        nv_ccw = nv[:, ::-1]
+
+        # Create Triangulation
+        try:
+            triang = tri.Triangulation(x, y, triangles=nv_ccw)
+            print(f"Number of triangles: {len(triang.triangles)}")
+        except ValueError as e:
+            print(f"Error creating Triangulation: {e}")
+            return None
+
+        # Set up axis
+        if ax is None:
+            figsize = kwargs.get("figsize", self.cfg.figsize)
+            if use_latlon:
+                fig, ax = plt.subplots(figsize=figsize, subplot_kw={'projection': projection})
+            else:
+                fig, ax = plt.subplots(figsize=figsize)  # No projection for Cartesian
+        else:
+            fig = ax.figure
+
+        # Argument treatment to avoid conflicts with **kwargs
+        with_mesh = kwargs.pop('with_mesh', with_mesh)  # Remove with_mesh from kwargs
+        lw = kwargs.pop('lw', 0.5)  # Line width for mesh plot
+        color = kwargs.pop('color', "#36454F")  # Line color for mesh plot
+        linestyle = kwargs.pop('linestyle', '--')  # Line style for lat/lon gridlines
+        linewidth = kwargs.pop('linewidth', 0.5)  # Line width for lat/lon gridlines
+        
+        # Prepare color plot
+        if da is not None:
+            cmap = kwargs.pop("cmap", "viridis") 
+            auto_levels = True
+            if vmin is not None or vmax is not None:
+                auto_levels = False
+            vmin = vmin or kwargs.pop("vmin", z_vals.min())
+            vmax = vmax or kwargs.pop("vmax", z_vals.max())
+            print(f"Color range: {vmin} to {vmax}")
+            levels = levels or kwargs.pop("levels", 20)  # Number of contour levels
+            if isinstance(levels, int):
+                levels = np.linspace(vmin, vmax, levels)
+            elif isinstance(levels, (list, np.ndarray)):
+                levels = np.array(levels)
+                auto_levels = False
+            if auto_levels:
+                norm = Normalize(vmin=vmin, vmax=vmax)
+            else:
+                norm = BoundaryNorm(levels, ncolors=256, clip=False)
+
+        # Handle Cartesian coordinates
+        if not use_latlon:
+            if da is not None:
+                cf = ax.tricontourf(triang, z_vals, levels=levels, cmap=cmap, norm=norm, extend='both', **kwargs)
+                cbar = plt.colorbar(cf, ax=ax, extend='both', orientation='vertical', shrink=1.0)
+            if with_mesh:
+                ax.triplot(triang, color=color, lw=lw)
+            ax.set_xlim(x.min(), x.max())
+            ax.set_ylim(y.min(), y.max())
+            ax.set_title("FVCOM Mesh (Cartesian)", fontsize=self.cfg.fontsize.get("xlabel", 12))
+            ax.set_xlabel("X (m)", fontsize=self.cfg.fontsize.get("xlabel", 12))
+            ax.set_ylabel("Y (m)", fontsize=self.cfg.fontsize.get("ylabel", 12))
+            ax.set_aspect("equal")
+        # Handle lat/lon coordinates
+        else:
+            #if add_tiles:
+            #    ax.add_image(tile_provider, 8)
+            #if da is not None:
+            #    ax.add_patch(plt.Rectangle(
+            #    (x.min(), y.min()),   # 左下の座標
+            #     x.max() - x.min(),    # 横幅
+            #     y.max() - y.min(),    # 縦幅
+            #    color="lightgray",         # 塗りつぶしの色
+            #    transform=ccrs.PlateCarree(),  # 緯度経度座標系での指定
+            #    zorder=0  # 他のプロットの下に描画
+            #    ))
+            cf = ax.tricontourf(triang, z_vals, levels=levels, cmap=cmap, norm=norm, extend='both',
+                                transform=ccrs.PlateCarree(),**kwargs)
+            cbar = plt.colorbar(cf, ax=ax, extend='both', orientation='vertical', shrink=1.0)
+            if with_mesh:
+                # Always use PlateCarree here.
+                ax.triplot(triang, color=color, lw=lw, transform=ccrs.PlateCarree())
+            # Use set_extent for lat/lon ranges
+            ax.set_extent([x.min(), x.max(), y.min(), y.max()], crs=ccrs.PlateCarree())
+            #ax.set_extent([x.min(), x.max(), y.min(), y.max()], crs=projection)
+            ax.set_title("FVCOM Mesh (Lat/Lon)", fontsize=self.cfg.fontsize.get("xlabel", 12))
+            ax.set_xlabel("Longitude", fontsize=self.cfg.fontsize.get("xlabel", 12))
+            ax.set_ylabel("Latitude", fontsize=self.cfg.fontsize.get("ylabel", 12))
+            ax.set_aspect('equal')
+
+            # Add gridlines for lat/lon. Always use PlateCarree here.
+            if plot_grid:
+                gl = ax.gridlines(draw_labels=True, crs=ccrs.PlateCarree(), linestyle=linestyle, linewidth=linewidth)
+                gl.top_labels = False
+                gl.right_labels = False
+                gl.xlabel_style = {'size': 11}
+                gl.ylabel_style = {'size': 11}
+            else:
+                gl = ax.gridlines(draw_labels=False, crs=ccrs.PlateCarree(), linestyle=linestyle, linewidth=0)
+                lon_ticks = gl.xlocator.tick_values(x.min(), x.max())
+                lat_ticks = gl.ylocator.tick_values(y.min(), y.max())
+                ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())
+                ax.set_yticks(lat_ticks, crs=ccrs.PlateCarree())
+                ax.xaxis.set_major_formatter(LongitudeFormatter())
+                ax.yaxis.set_major_formatter(LatitudeFormatter())            # ラベルを自動設定
+                x_min_proj, y_min_proj = projection.transform_point(x.min(), y.min(), src_crs=ccrs.PlateCarree())
+                x_max_proj, y_max_proj = projection.transform_point(x.max(), y.max(), src_crs=ccrs.PlateCarree())
+                ax.set_xlim(x_min_proj, x_max_proj)
+                ax.set_ylim(y_min_proj, y_max_proj)
+                ax.tick_params(labelsize=11, labelcolor='black')
+
+        # Save the plot if requested
+        if save_path:
+            dpi = kwargs.get("dpi", self.cfg.dpi)
+            fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
+
+        return ax
+
 
 
 # Example usage
