@@ -14,7 +14,7 @@ import matplotlib.tri as tri
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 #from cartopy.io.img_tiles import StadiaMapsTiles
-from cartopy.io.img_tiles import Stamen
+#from cartopy.io.img_tiles import Stamen
 from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
 from .helpers import PlotHelperMixin
 
@@ -261,7 +261,12 @@ class FvcomPlotConfig:
         self.figsize = figsize
         self.width = width
         self.height = height
-        self.fontsize = fontsize or {'xticks': 11, 'yticks': 11, 'xlabel': 12, 'ylabel': 12}
+        default_fontsize = {
+            'xticks': 11, 'yticks': 11, 'xlabel': 12, 'ylabel': 12, 'title': 14,
+            'legend': 12, 'annotation': 12, 'colorbar': 11, 'tick_params': 11,
+            'text': 12, 'legend_title': 12, 'cbar_title': 14, 'cbar_label': 14
+        }
+        self.fontsize = {**default_fontsize, **(fontsize or {})}
         self.dpi = dpi
         self.plot_color = kwargs.get("plot_color", "red")
         self.date_format = kwargs.get('date_format', '%Y-%m-%d')
@@ -377,7 +382,7 @@ class FvcomPlotter(PlotHelperMixin):
             title = f"Time Series of {var_name} ({dim}={index}, {dimk}={k}){rolling_text}"
         else:
             title = f"Time Series of {var_name} ({dim}={index}){rolling_text}"
-        ax.set_title(title, fontsize=self.cfg.fontsize['xlabel'])
+        ax.set_title(title, fontsize=self.cfg.fontsize['title'])
         ax.set_xlabel("Time", fontsize=self.cfg.fontsize['xlabel'])
         ax.set_ylabel(var_name, fontsize=self.cfg.fontsize['ylabel'])
         date_format = kwargs.get('date_format', self.cfg.date_format)
@@ -471,7 +476,7 @@ class FvcomPlotter(PlotHelperMixin):
         # Formatting
         rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
         title = f"Time Series of {var_name} for {river_name} (river={river_index}){rolling_text}"
-        ax.set_title(title, fontsize=self.cfg.fontsize['xlabel'])
+        ax.set_title(title, fontsize=self.cfg.fontsize['title'])
         ax.set_xlabel("Time", fontsize=self.cfg.fontsize['xlabel'])
         ax.set_ylabel(var_name, fontsize=self.cfg.fontsize['ylabel'])
         date_format = kwargs.get('date_format', self.cfg.date_format)
@@ -575,7 +580,7 @@ class FvcomPlotter(PlotHelperMixin):
         rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
         nele_text = f" (nele={nele})" if nele is not None else ""
         title = f"Wind Vector and Speed Time Series {nele_text}{rolling_text}"
-        ax.set_title(title, fontsize=self.cfg.fontsize['xlabel'])
+        ax.set_title(title, fontsize=self.cfg.fontsize['title'])
         ax.set_xlabel("Time", fontsize=self.cfg.fontsize['xlabel'])
         ax.set_ylabel("Wind Speed (m/s)", fontsize=self.cfg.fontsize['ylabel'])
         ax.xaxis.set_major_formatter(DateFormatter(date_format))
@@ -654,12 +659,12 @@ class FvcomPlotter(PlotHelperMixin):
         # Extract time, vertical coordinate, and data values
         time_vals = data["time"].values  # (Nx,)
         y_vals = data[y_coord].values  # (Ny,)
-        z_vals = data.values  # (Ny, Nx)
+        values = data.values  # (Ny, Nx)
 
         # Ensure data dimensions are correct
-        if z_vals.shape != (len(y_vals), len(time_vals)):
+        if values.shape != (len(y_vals), len(time_vals)):
             raise ValueError(
-                f"Shape mismatch: data={z_vals.shape}, time={len(time_vals)}, vertical={len(y_vals)}"
+                f"Shape mismatch: data={values.shape}, time={len(time_vals)}, vertical={len(y_vals)}"
             )
 
         # Create 2D grid for time and vertical coordinate
@@ -684,8 +689,8 @@ class FvcomPlotter(PlotHelperMixin):
         auto_levels = True
         if vmin is not None or vmax is not None:
             auto_levels = False
-        vmin = vmin or kwargs.pop("vmin", z_vals.min())
-        vmax = vmax or kwargs.pop("vmax", z_vals.max())
+        vmin = vmin or kwargs.pop("vmin", values.min())
+        vmax = vmax or kwargs.pop("vmax", values.max())
         levels = levels or kwargs.get("levels", 20)  # Number of contour levels
         if isinstance(levels, int):
             levels = np.linspace(vmin, vmax, levels)
@@ -697,14 +702,14 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             norm = BoundaryNorm(levels, ncolors=256, clip=False)
         if method == "contourf":
-            cf = ax.contourf(time_grid, y_grid, z_vals, levels=levels, cmap=cmap, norm=norm, extend='both', **kwargs)
+            cf = ax.contourf(time_grid, y_grid, values, levels=levels, cmap=cmap, norm=norm, extend='both', **kwargs)
             cbar = plt.colorbar(cf, ax=ax, extend='both')
             if add_contour:
-                cs = ax.contour(time_grid, y_grid, z_vals, levels=levels, colors='k', linewidths=0.5)
+                cs = ax.contour(time_grid, y_grid, values, levels=levels, colors='k', linewidths=0.5)
                 if label_contours:
                     plt.clabel(cs, inline=True, fontsize=8)
         elif method == "pcolormesh":
-            mesh = ax.pcolormesh(time_grid, y_grid, z_vals, cmap=cmap, **kwargs)
+            mesh = ax.pcolormesh(time_grid, y_grid, values, cmap=cmap, **kwargs)
             cbar = plt.colorbar(mesh, ax=ax)
         else:
             raise ValueError(f"Invalid method '{method}' for plotting 2D time series.")
@@ -719,7 +724,7 @@ class FvcomPlotter(PlotHelperMixin):
         rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
         title = f"Time Series of {var_name} ({dim}={index}){rolling_text}"
 
-        ax.set_title(title, fontsize=self.cfg.fontsize['xlabel'])
+        ax.set_title(title, fontsize=self.cfg.fontsize['title'])
         ax.set_xlabel("Time", fontsize=self.cfg.fontsize['xlabel'])
         ax.set_ylabel(y_coord, fontsize=self.cfg.fontsize['ylabel'])
         date_format = kwargs.get('date_format', self.cfg.date_format)
@@ -734,9 +739,9 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def plot_mesh(self, da=None, with_mesh=False, vmin=None, vmax=None, levels=20, ax=None, save_path=None, 
+    def plot_2d(self, da=None, with_mesh=False, vmin=None, vmax=None, levels=20, ax=None, save_path=None, 
                   use_latlon=True, projection=ccrs.Mercator(), plot_grid=False,
-                  add_tiles=False, tile_provider=Stamen('terrain'), **kwargs):
+                  add_tiles=False, tile_provider=None, debug=False, **kwargs):
         """
         Plot the triangular mesh of the FVCOM grid.
 
@@ -770,24 +775,29 @@ class FvcomPlotter(PlotHelperMixin):
             y = self.ds["y"].values
 
         if da is not None:
-            z_vals = da.values    
+            values = da.values
+            default_cbar_label = f"{da.long_name} ({da.units})"
+            cbar_label = kwargs.get("cbar_label", default_cbar_label)
         else:
             with_mesh=True
         # Extract triangle connectivity
         nv = self.ds["nv"].values.T - 1  # Convert to 0-based indexing
 
-        # Debugging: Output ranges and connectivity
-        print(f"x range: {x.min()} to {x.max()}")
-        print(f"y range: {y.min()} to {y.max()}")
+        # Output ranges and connectivity
+        xmin, xmax = x.min(), x.max()
+        ymin, ymax = y.min(), y.max()
+        print(f"x range: {xmin} to {xmax}")
+        print(f"y range: {ymin} to {ymax}")
         print(f"nv shape: {nv.shape}, nv min: {nv.min()}, nv max: {nv.max()}")
 
         # Validate nv and coordinates
-        if np.isnan(x).any() or np.isnan(y).any():
-            raise ValueError("NaN values found in node coordinates.")
-        if np.isinf(x).any() or np.isinf(y).any():
-            raise ValueError("Infinite values found in node coordinates.")
-        if (nv < 0).any() or (nv >= len(x)).any():
-            raise ValueError("Invalid indices in nv. Check if nv points to valid nodes.")
+        if debug:
+            if np.isnan(x).any() or np.isnan(y).any():
+                raise ValueError("NaN values found in node coordinates.")
+            if np.isinf(x).any() or np.isinf(y).any():
+                raise ValueError("Infinite values found in node coordinates.")
+            if (nv < 0).any() or (nv >= len(x)).any():
+                raise ValueError("Invalid indices in nv. Check if nv points to valid nodes.")
 
         # Reverse node order for counter-clockwise triangles
         nv_ccw = nv[:, ::-1]
@@ -813,9 +823,12 @@ class FvcomPlotter(PlotHelperMixin):
         # Argument treatment to avoid conflicts with **kwargs
         with_mesh = kwargs.pop('with_mesh', with_mesh)  # Remove with_mesh from kwargs
         lw = kwargs.pop('lw', 0.5)  # Line width for mesh plot
+        
+        #if not with_mesh:
+        #    lw = 0
         color = kwargs.pop('color', "#36454F")  # Line color for mesh plot
         linestyle = kwargs.pop('linestyle', '--')  # Line style for lat/lon gridlines
-        linewidth = kwargs.pop('linewidth', 0.5)  # Line width for lat/lon gridlines
+        #linewidth = kwargs.pop('linewidth', 0.5)  # Line width for lat/lon gridlines
         
         # Prepare color plot
         if da is not None:
@@ -823,8 +836,8 @@ class FvcomPlotter(PlotHelperMixin):
             auto_levels = True
             if vmin is not None or vmax is not None:
                 auto_levels = False
-            vmin = vmin or kwargs.pop("vmin", z_vals.min())
-            vmax = vmax or kwargs.pop("vmax", z_vals.max())
+            vmin = vmin or kwargs.pop("vmin", values.min())
+            vmax = vmax or kwargs.pop("vmax", values.max())
             print(f"Color range: {vmin} to {vmax}")
             levels = levels or kwargs.pop("levels", 20)  # Number of contour levels
             if isinstance(levels, int):
@@ -839,16 +852,20 @@ class FvcomPlotter(PlotHelperMixin):
 
         # Handle Cartesian coordinates
         if not use_latlon:
+            title = kwargs.pop("title", "FVCOM Mesh (Cartesian)")
             if da is not None:
-                cf = ax.tricontourf(triang, z_vals, levels=levels, cmap=cmap, norm=norm, extend='both', **kwargs)
+                cf = ax.tricontourf(triang, values, levels=levels, cmap=cmap, norm=norm, extend='both', **kwargs)
                 cbar = plt.colorbar(cf, ax=ax, extend='both', orientation='vertical', shrink=1.0)
+                cbar.set_label(cbar_label, fontsize=self.cfg.fontsize['cbar_label'], labelpad=10)
             if with_mesh:
                 ax.triplot(triang, color=color, lw=lw)
-            ax.set_xlim(x.min(), x.max())
-            ax.set_ylim(y.min(), y.max())
-            ax.set_title("FVCOM Mesh (Cartesian)", fontsize=self.cfg.fontsize.get("xlabel", 12))
-            ax.set_xlabel("X (m)", fontsize=self.cfg.fontsize.get("xlabel", 12))
-            ax.set_ylabel("Y (m)", fontsize=self.cfg.fontsize.get("ylabel", 12))
+            ax.set_xlim(xmin, xmax)
+            ax.set_ylim(ymin, ymax)
+            ax.set_title(title, fontsize=self.cfg.fontsize["title"])
+            xlabel = kwargs.get("xlabel", "X (m)")
+            ylabel = kwargs.get("ylabel", "Y (m)")
+            ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize["xlabel"])
+            ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize["ylabel"])
             ax.set_aspect("equal")
         # Handle lat/lon coordinates
         else:
@@ -856,44 +873,49 @@ class FvcomPlotter(PlotHelperMixin):
             #    ax.add_image(tile_provider, 8)
             #if da is not None:
             #    ax.add_patch(plt.Rectangle(
-            #    (x.min(), y.min()),   # 左下の座標
-            #     x.max() - x.min(),    # 横幅
-            #     y.max() - y.min(),    # 縦幅
+            #    (xmin, ymin),   # 左下の座標
+            #     xmax - xmin,    # 横幅
+            #     ymax - ymin,    # 縦幅
             #    color="lightgray",         # 塗りつぶしの色
             #    transform=ccrs.PlateCarree(),  # 緯度経度座標系での指定
             #    zorder=0  # 他のプロットの下に描画
             #    ))
-            cf = ax.tricontourf(triang, z_vals, levels=levels, cmap=cmap, norm=norm, extend='both',
-                                transform=ccrs.PlateCarree(),**kwargs)
-            cbar = plt.colorbar(cf, ax=ax, extend='both', orientation='vertical', shrink=1.0)
+            title = kwargs.pop("title", "FVCOM Mesh (Lat/Lon)")
+            if da is not None:
+                cf = ax.tricontourf(triang, values, levels=levels, cmap=cmap, norm=norm, extend='both',
+                                    transform=ccrs.PlateCarree(),**kwargs)
+                cbar = plt.colorbar(cf, ax=ax, extend='both', orientation='vertical', shrink=1.0)
+                cbar.set_label(cbar_label, fontsize=self.cfg.fontsize["cbar_label"], labelpad=10)
             if with_mesh:
                 # Always use PlateCarree here.
                 ax.triplot(triang, color=color, lw=lw, transform=ccrs.PlateCarree())
             # Use set_extent for lat/lon ranges
-            ax.set_extent([x.min(), x.max(), y.min(), y.max()], crs=ccrs.PlateCarree())
-            #ax.set_extent([x.min(), x.max(), y.min(), y.max()], crs=projection)
-            ax.set_title("FVCOM Mesh (Lat/Lon)", fontsize=self.cfg.fontsize.get("xlabel", 12))
-            ax.set_xlabel("Longitude", fontsize=self.cfg.fontsize.get("xlabel", 12))
-            ax.set_ylabel("Latitude", fontsize=self.cfg.fontsize.get("ylabel", 12))
+            ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())
+            #ax.set_extent([xmin, xmax, ymin, ymax], crs=projection)
+            ax.set_title(title, fontsize=self.cfg.fontsize["title"])
+            xlabel = kwargs.get("xlabel", "Longitude")
+            ylabel = kwargs.get("ylabel", "Latitude")
+            ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize["xlabel"])
+            ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize["ylabel"])
             ax.set_aspect('equal')
 
             # Add gridlines for lat/lon. Always use PlateCarree here.
             if plot_grid:
-                gl = ax.gridlines(draw_labels=True, crs=ccrs.PlateCarree(), linestyle=linestyle, linewidth=linewidth)
+                gl = ax.gridlines(draw_labels=True, crs=ccrs.PlateCarree(), linestyle=linestyle, lw=lw)
                 gl.top_labels = False
                 gl.right_labels = False
                 gl.xlabel_style = {'size': 11}
                 gl.ylabel_style = {'size': 11}
             else:
-                gl = ax.gridlines(draw_labels=False, crs=ccrs.PlateCarree(), linestyle=linestyle, linewidth=0)
-                lon_ticks = gl.xlocator.tick_values(x.min(), x.max())
-                lat_ticks = gl.ylocator.tick_values(y.min(), y.max())
+                gl = ax.gridlines(draw_labels=False, crs=ccrs.PlateCarree(), linestyle=linestyle, lw=lw)
+                lon_ticks = gl.xlocator.tick_values(xmin, xmax)
+                lat_ticks = gl.ylocator.tick_values(ymin, ymax)
                 ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())
                 ax.set_yticks(lat_ticks, crs=ccrs.PlateCarree())
                 ax.xaxis.set_major_formatter(LongitudeFormatter())
-                ax.yaxis.set_major_formatter(LatitudeFormatter())            # ラベルを自動設定
-                x_min_proj, y_min_proj = projection.transform_point(x.min(), y.min(), src_crs=ccrs.PlateCarree())
-                x_max_proj, y_max_proj = projection.transform_point(x.max(), y.max(), src_crs=ccrs.PlateCarree())
+                ax.yaxis.set_major_formatter(LatitudeFormatter())
+                x_min_proj, y_min_proj = projection.transform_point(xmin, ymin, src_crs=ccrs.PlateCarree())
+                x_max_proj, y_max_proj = projection.transform_point(xmax, ymax, src_crs=ccrs.PlateCarree())
                 ax.set_xlim(x_min_proj, x_max_proj)
                 ax.set_ylim(y_min_proj, y_max_proj)
                 ax.tick_params(labelsize=11, labelcolor='black')
@@ -905,6 +927,44 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
+    def add_marker(self, ax=None, lon=None, lat=None, marker="o", color="red", size=20, **kwargs):
+        """
+        Add a marker to the existing plot (e.g., a mesh plot).
+
+        Parameters:
+        - ax: matplotlib axis object. If None, raise an error because this method must follow plot_mesh().
+        - lon: Longitude of the marker.
+        - lat: Latitude of the marker.
+        - marker: Marker style (default: "o").
+        - color: Marker color (default: "red").
+        - size: Marker size (default: 100).
+        - **kwargs: Additional arguments passed to scatter.
+
+        Returns:
+        - ax: The axis object with the added marker.
+        """
+        # Check if ax is provided
+        if ax is None:
+            raise ValueError("An axis object (ax) must be provided. Use plot_mesh() first.")
+
+        # Determine the transform based on the axis projection
+        if isinstance(ax.projection, (ccrs.PlateCarree, ccrs.Mercator, ccrs.LambertConformal)):
+            transform = ccrs.PlateCarree()  # Transform coordinates to lat/lon (default)
+        else:
+            raise ValueError(
+                f"The provided axis does not use a supported projection. "
+                f"Supported projections: [ccrs.PlateCarree, ccrs.Mercator, ccrs.LambertConformal]. "
+                f"Got: {type(ax.projection)}."
+            )
+
+        # Check if longitude and latitude are provided
+        if lon is None or lat is None:
+            raise ValueError("Both longitude (lon) and latitude (lat) must be specified.")
+
+        # Plot the marker
+        ax.scatter(lon, lat, transform=ccrs.PlateCarree(), marker=marker, color=color, s=size, **kwargs)
+
+        return ax
 
 
 # Example usage

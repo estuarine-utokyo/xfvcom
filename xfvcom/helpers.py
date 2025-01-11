@@ -1,5 +1,16 @@
 import matplotlib.pyplot as plt
 from math import ceil
+import os
+import imageio.v2 as imageio
+from multiprocessing import Pool
+
+def generate_frame(args):
+    time, siglay, plotter, output_dir = args
+    save_path = os.path.join(output_dir, f"frame_{time}.png")
+    da = plotter.ds['temp'].isel(time=time, siglay=siglay)
+    plotter.plot_2d(da=da, save_path=save_path)
+    return save_path
+
 class PlotHelperMixin:
     """
     A mixin class to provide helper methods for batch plotting and other common operations.
@@ -102,3 +113,41 @@ class PlotHelperMixin:
             plt.close(fig)
 
         print(f"Saved {num_batches} figures as '{save_prefix}_batch_#.png'.")
+
+    # Create a GIF animation using FvcomPlotter.plot_2d method
+    def generate_frames(self, variable, siglay, output_dir, plotter, **kwargs):
+        """
+        Generate frames for a GIF animation.
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        time_indices = range(plotter.ds.sizes["time"])  # 全timeステップ
+
+        # マルチプロセスでフレームを生成
+        with Pool() as pool:
+            frames = pool.map(
+                generate_frame, [(time, siglay, plotter, output_dir) for time in time_indices]
+            )
+
+        return frames
+
+    def create_gif(self, frames, output_gif, fps=10, cleanup=True):
+        """
+        Create a GIF animation from a list of frames.
+
+        Parameters:
+        - frames: List of file paths to the frames.
+        - output_gif: Output file path for the GIF.
+        - fps: Frames per second for the GIF.
+        - cleanup: If True, delete the frame files after creating the GIF.
+
+        Returns:
+        - None
+        """
+        with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
+            for frame in frames:
+                image = imageio.imread(frame)
+                writer.append_data(image)
+
+        if cleanup:
+            for frame in frames:
+                os.remove(frame)
