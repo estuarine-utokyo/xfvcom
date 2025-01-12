@@ -742,7 +742,7 @@ class FvcomPlotter(PlotHelperMixin):
 
     def plot_2d(self, da=None, with_mesh=False, vmin=None, vmax=None, levels=20, ax=None, save_path=None, 
                   use_latlon=True, projection=ccrs.Mercator(), plot_grid=False,
-                  add_tiles=False, tile_provider=None, verbose=False, **kwargs):
+                  add_tiles=False, tile_provider=None, verbose=False, post_process_func=None, **kwargs):
         """
         Plot the triangular mesh of the FVCOM grid.
 
@@ -758,6 +758,7 @@ class FvcomPlotter(PlotHelperMixin):
         - projection: Cartopy projection for geographic plotting. Default is PlateCarree.
         - add_tiles: If True, add a tile map (for lat/lon plotting only).
         - tile_provider: Tile provider for the background.
+        - post_process_func: Function to apply custom plots or decorations to the Axes.
         - **kwargs: Additional arguments for customization.
         
         Note:
@@ -937,6 +938,9 @@ class FvcomPlotter(PlotHelperMixin):
                 ax.set_xlim(x_min_proj, x_max_proj)
                 ax.set_ylim(y_min_proj, y_max_proj)
                 ax.tick_params(labelsize=11, labelcolor='black')
+
+        if post_process_func:
+            post_process_func(ax)
 
         # Save the plot if requested
         if save_path:
