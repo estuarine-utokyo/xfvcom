@@ -160,6 +160,8 @@ cython_debug/
 #.idea/
 
 # Local
-/examples/*.png
+*.png
+*.gif
 /examples/*.nc
 /examples/*.html
+/examples/html
