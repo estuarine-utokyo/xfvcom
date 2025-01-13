@@ -36,6 +36,7 @@ Follow these steps to install the package in development mode:
      ```bash
      conda install numpy xarray matplotlib pyproj scikit-learn
      conda install jupyterlab pandas hvplot
+     conda install imageio moviepy
      ```
    - **Using pip**:
      ```bash
@@ -86,12 +87,12 @@ time_series_plot = plotter.plot_timeseries(
 )
 ```
 
-#### Generate 2D GIF Animation
+#### Generate 2D GIF/MP4 Animation
 ```python
-from xfvcom.plot_utils import create_gif_anim_2d_plot
+from xfvcom.plot_utils import create_anim_2d_plot
 
-# Generate a GIF animation
-create_gif_anim_2d_plot(
+# Generate a GIF/MP4 animation
+create_anim_2d_plot(
     plotter=plotter,
     var_name="salinity",
     siglay=0,
@@ -113,6 +114,7 @@ This package depends on the following libraries:
 - `pyproj`
 - `scikit-learn`
 - `imageio`
+- `moviepy`
 
 To install the required dependencies, run:
 ```bash
@@ -148,6 +150,6 @@ This project is licensed under the [MIT License](LICENSE).
 ## File Relationships
 
 - `xfvcom.py`: Core module for loading, analyzing, and plotting FVCOM data.
-- `helpers.py`: Provides helper functions for GIF generation, frame creation, and batch plotting.
+- `helpers.py`: Provides helper functions for GIF/MP4 generation, frame creation, and batch plotting.
 - `helpers_utils.py`: Utility functions for cleaning and unpacking keyword arguments.
-- `plot_utils.py`: Focuses on creating 2D plot animations (GIFs) by integrating `helpers.py` and `xfvcom.py`.
+- `plot_utils.py`: Focuses on creating 2D plot animations (GIF/MP4) by integrating `helpers.py` and `xfvcom.py`.

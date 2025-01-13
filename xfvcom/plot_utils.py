@@ -1,15 +1,19 @@
 import pandas as pd
-from .helpers import FrameGenerator, create_gif
+from .helpers import FrameGenerator, create_gif, convert_gif_to_mp4
 
-def create_gif_anim_2d_plot(plotter, var_name, siglay=None, fps=10, post_process_func=None, plot_kwargs=None):
+def create_anim_2d_plot(plotter, var_name, siglay=None, fps=10, generate_gif=True, generate_mp4=False,
+                            cleanup=True, post_process_func=None, plot_kwargs=None):
     """
-    Generate a 2D plot animation as a GIF.
+    Generate a 2D plot animation as a GIF/MP4.
 
     Parameters:
     - plotter: FvcomPlotter instance used for plotting.
     - var_name: Name of the variable to plot.
     - siglay: Index of the vertical layer (optional).
     - fps: Frames per second for the GIF animation.
+    - generate_gif: If True, generate a GIF animation.
+    - generate_mp4: If True, generate an MP4 animation.
+    - cleanup: If True, delete the frame files after creating the animation.
     - post_process_func: Function to apply custom styling to the plot (optional).
     - plot_kwargs: Additional plotting arguments passed to the plotter.
 
@@ -37,8 +41,18 @@ def create_gif_anim_2d_plot(plotter, var_name, siglay=None, fps=10, post_process
     frames = FrameGenerator.generate_frames(data_array=da, output_dir=output_dir, plotter=plotter, base_name=base_name,
         post_process_func=post_process_func, **plot_kwargs)
     
+    anim_base_name = f"{base_name[:-len_suffix]}"
+    if not generate_gif and not generate_mp4:
+        print("No animation created.")
+        return
     # Create GIF animation
-    output_gif = f"{base_name[:-len_suffix]}.gif"
-    #plotter.create_gif(frames, output_gif, fps=fps)
+    if generate_gif:
+        output_gif = f"{anim_base_name}.gif"
+        create_gif(frames, output_gif, fps=fps, cleanup=cleanup)
+    # Create MP4 animation
+    if generate_mp4:
+        output_mp4 = f"{anim_base_name}.mp4"
+        #create_mp4(frames, output_mp4, fps=fps, cleanup=cleanup) # does not work
+        convert_gif_to_mp4(output_gif, output_mp4)
+    return anim_base_name
 
-    create_gif(frames, output_gif, fps=fps)

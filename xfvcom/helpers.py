@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from math import ceil
 import os
 import imageio.v2 as imageio
+from moviepy.editor import ImageSequenceClip
 from multiprocessing import Pool
 from .helpers_utils import clean_kwargs, unpack_plot_kwargs
 import inspect
@@ -36,6 +37,59 @@ def create_gif(frames, output_gif=None, fps=10, cleanup=True):
             os.remove(frame)
 
     print(f"Saved the GIF animation as '{output_gif}'.")
+
+def create_mp4(frames, output_mp4=None, fps=10, cleanup=True):
+    """
+    Create an MP4 animation from a list of frames.
+    Currently this function does not work as expected. Use convert_gif_to_mp4 instead.
+
+    Parameters:
+    - frames: List of file paths to the frames (e.g., PNG files).
+    - output_mp4: Output file path for the MP4. Defaults to "output.mp4".
+    - fps: Frames per second for the animation.
+    - cleanup: If True, delete the frame files after creating the MP4.
+
+    Returns:
+    - None
+    """
+    if output_mp4 is None:
+        output_mp4 = "output.mp4"  # Default MP4 file name
+
+    # Generate MP4 using moviepy
+    clip = ImageSequenceClip(frames, fps=fps)
+    clip.write_videofile(output_mp4, codec="libx264", fps=fps, pix_fmt="yuv420p")
+
+    if cleanup:
+        for frame in frames:
+            os.remove(frame)
+
+    #print(f"Saved the MP4 animation as '{output_mp4}'.")
+
+import subprocess
+
+def convert_gif_to_mp4(input_gif, output_mp4):
+    """
+    Convert a GIF animation to an MP4 video using ffmpeg.
+
+    Parameters:
+    - input_gif: Path to the input GIF file.
+    - output_mp4: Path to the output MP4 file.
+
+    Returns:
+    - None
+    """
+    command = [
+        "ffmpeg",
+        "-y",                      # Skip overwrite confirmation
+        "-i", input_gif,           # Input GIF file
+        "-movflags", "+faststart", # Enable fast start for streaming
+        "-pix_fmt", "yuv420p",     # Pixel format for compatibility
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",  # Ensure even dimensions
+        output_mp4
+    ]
+    # subprocess.run(command, check=True)
+    subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print(f"Converted from {input_gif} to {output_mp4}.")
 
 
 class FrameGenerator:
