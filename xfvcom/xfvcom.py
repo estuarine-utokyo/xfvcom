@@ -940,7 +940,7 @@ class FvcomPlotter(PlotHelperMixin):
                 ax.tick_params(labelsize=11, labelcolor='black')
 
         if post_process_func:
-            post_process_func(ax)
+            post_process_func(ax, **kwargs)
 
         # Save the plot if requested
         if save_path:
