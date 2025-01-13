@@ -162,6 +162,7 @@ cython_debug/
 # Local
 *.png
 *.gif
+*.mp4
 /examples/*.nc
 /examples/*.html
 /examples/html
