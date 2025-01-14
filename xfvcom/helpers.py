@@ -93,65 +93,6 @@ def convert_gif_to_mp4(input_gif, output_mp4):
 
 import cartopy.crs as ccrs
 
-def parse_coordinate(coord):
-    """
-    Convert a coordinate in degrees:minutes:seconds or degrees:minutes format to a float (decimal degrees).
-    
-    Parameters:
-    - coord (str or float): Coordinate as a string in degrees:minutes:seconds (e.g., "139:30:25")
-      or degrees:minutes (e.g., "139:30"), or a float.
-
-    Returns:
-    - float: Coordinate in decimal degrees.
-    """
-    if isinstance(coord, (int, float)):
-        return float(coord)
-    
-    parts = coord.split(":")
-    if len(parts) == 3:  # degrees:minutes:seconds format
-        degrees, minutes, seconds = map(float, parts)
-        return degrees + minutes / 60 + seconds / 3600
-    elif len(parts) == 2:  # degrees:minutes format
-        degrees, minutes = map(float, parts)
-        return degrees + minutes / 60
-    else:
-        raise ValueError(f"Invalid coordinate format: {coord}")
-
-def apply_xlim_ylim(ax, xlim, ylim, is_cartesian=False, projection=None):
-    """
-    Apply xlim and ylim to a Matplotlib axis, supporting both Cartesian and geographic (lon/lat) coordinates.
-    
-    Parameters:
-    - ax (matplotlib.axes._subplots.AxesSubplot): Matplotlib axis object.
-    - xlim (tuple): Range for the x-axis, in longitude/Cartesian x as (min, max).
-    - ylim (tuple): Range for the y-axis, in latitude/Cartesian y as (min, max).
-    - is_cartesian (bool): If True, the input is Cartesian coordinates and no CRS transformation is applied.
-    - projection (cartopy.crs.Projection, optional): Target projection CRS for geographic data. Defaults to PlateCarree.
-    
-    Returns:
-    - None
-    """
-    if is_cartesian:
-        # If Cartesian, use the limits directly
-        x_min, x_max = xlim
-        y_min, y_max = ylim
-    else:
-        # Default source CRS for geographic data
-        src_crs = ccrs.PlateCarree()
-        projection = projection or src_crs
-
-        # Parse coordinates into decimal degrees
-        x_min, x_max = map(parse_coordinate, xlim)
-        y_min, y_max = map(parse_coordinate, ylim)
-
-        # Transform to the target projection
-        x_min, y_min = projection.transform_point(x_min, y_min, src_crs)
-        x_max, y_max = projection.transform_point(x_max, y_max, src_crs)
-
-    # Apply limits to the axis
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(y_min, y_max)
-
 
 class FrameGenerator:
     @staticmethod

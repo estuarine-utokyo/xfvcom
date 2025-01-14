@@ -15,6 +15,9 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 #from cartopy.io.img_tiles import StadiaMapsTiles
 #from cartopy.io.img_tiles import Stamen
+import cartopy.io.img_tiles as cimgt
+from cartopy.io.img_tiles import GoogleTiles
+
 from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
 import inspect
 from .helpers import PlotHelperMixin
@@ -768,9 +771,10 @@ class FvcomPlotter(PlotHelperMixin):
         Mercator is not lon/lat coords, so transform=ccrs.PlateCarree() is necessary.
         
         """
-               
+
+        self.use_latlon = use_latlon       
         # Extract coordinates
-        if use_latlon:
+        if self.use_latlon:
             x = self.ds["lon"].values
             y = self.ds["lat"].values
         else:
@@ -818,12 +822,20 @@ class FvcomPlotter(PlotHelperMixin):
         # Set up axis
         if ax is None:
             figsize = kwargs.get("figsize", self.cfg.figsize)
-            if use_latlon:
+            if self.use_latlon:
                 fig, ax = plt.subplots(figsize=figsize, subplot_kw={'projection': projection})
             else:
                 fig, ax = plt.subplots(figsize=figsize)  # No projection for Cartesian
         else:
             fig = ax.figure
+        
+        # Add map tiles if requested
+        if add_tiles and self.use_latlon:
+            #tile_provider = cimgt.OSM()
+            #tile_provider = cimgt.Stamen('terrain')
+            tile_provider = GoogleTiles(style="satellite")
+            ax.add_image(tile_provider, 10)
+            #ax.add_image(tile_provider, 8)  # Zoom level 8 is suitable for regional plots
 
         # Argument treatment to avoid conflicts with **kwargs
         with_mesh = kwargs.pop('with_mesh', with_mesh)  # Remove with_mesh from kwargs
@@ -870,7 +882,7 @@ class FvcomPlotter(PlotHelperMixin):
                 norm = BoundaryNorm(levels, ncolors=256, clip=False)
 
         # Handle Cartesian coordinates
-        if not use_latlon:
+        if not self.use_latlon:
             title = kwargs.pop("title", "FVCOM Mesh (Cartesian)")
             if da is not None:
                 cf = ax.tricontourf(triang, values, levels=levels, cmap=cmap, norm=norm, extend='both', **tricontourf_kwargs)
@@ -926,7 +938,7 @@ class FvcomPlotter(PlotHelperMixin):
                 gl.xlabel_style = {'size': 11}
                 gl.ylabel_style = {'size': 11}
             else:
-                gl = ax.gridlines(draw_labels=False, crs=ccrs.PlateCarree(), linestyle=linestyle, lw=lw)
+                gl = ax.gridlines(draw_labels=False, crs=ccrs.PlateCarree(), linestyle=linestyle, lw=0)
                 lon_ticks = gl.xlocator.tick_values(xmin, xmax)
                 lat_ticks = gl.ylocator.tick_values(ymin, ymax)
                 ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())
@@ -950,42 +962,40 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def add_marker(self, ax=None, lon=None, lat=None, marker="o", color="red", size=20, **kwargs):
+    def add_marker(self, ax=None, x=None, y=None, marker="o", color="red", size=20, **kwargs):
         """
-        Add a marker to the existing plot (e.g., a mesh plot).
+        Add a marker to the existing plot (e.g., a mesh plot). Must be used with plot_2d.
 
         Parameters:
-        - ax: matplotlib axis object. If None, raise an error because this method must follow plot_mesh().
-        - lon: Longitude of the marker.
-        - lat: Latitude of the marker.
+        - ax: matplotlib axis object. If None, raise an error because this method must follow plot_2d().
+        - x: X coordinate (Cartesian) or longitude (geographic) of the marker.
+        - y: Y coordinate (Cartesian) or latitude (geographic) of the marker.
         - marker: Marker style (default: "o").
         - color: Marker color (default: "red").
-        - size: Marker size (default: 100).
+        - size: Marker size (default: 20).
         - **kwargs: Additional arguments passed to scatter.
 
         Returns:
         - ax: The axis object with the added marker.
         """
-        # Check if ax is provided
+        # Ensure ax is provided
         if ax is None:
-            raise ValueError("An axis object (ax) must be provided. Use plot_mesh() first.")
+            raise ValueError("An axis object (ax) must be provided. Use plot_2d() first.")
 
-        # Determine the transform based on the axis projection
-        if isinstance(ax.projection, (ccrs.PlateCarree, ccrs.Mercator, ccrs.LambertConformal)):
-            transform = ccrs.PlateCarree()  # Transform coordinates to lat/lon (default)
+        # Ensure use_latlon is determined by plot_2d
+        if not hasattr(self, "use_latlon"):
+            raise AttributeError("The 'use_latlon' attribute must be set by plot_2d().")
+
+        # Ensure x and y are provided
+        if x is None or y is None:
+            raise ValueError("Both x and y must be specified.")
+
+        if self.use_latlon:
+            # Use PlateCarree as the CRS for geographic coordinates
+            ax.scatter(x, y, transform=ccrs.PlateCarree(), marker=marker, color=color, s=size, **kwargs)
         else:
-            raise ValueError(
-                f"The provided axis does not use a supported projection. "
-                f"Supported projections: [ccrs.PlateCarree, ccrs.Mercator, ccrs.LambertConformal]. "
-                f"Got: {type(ax.projection)}."
-            )
-
-        # Check if longitude and latitude are provided
-        if lon is None or lat is None:
-            raise ValueError("Both longitude (lon) and latitude (lat) must be specified.")
-
-        # Plot the marker
-        ax.scatter(lon, lat, transform=ccrs.PlateCarree(), marker=marker, color=color, s=size, **kwargs)
+            # Cartesian coordinates do not require a transform
+            ax.scatter(x, y, marker=marker, color=color, s=size, **kwargs)
 
         return ax
 
