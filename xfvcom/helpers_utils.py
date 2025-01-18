@@ -71,6 +71,7 @@ def apply_xlim_ylim(ax, xlim, ylim, is_cartesian=False):
         # Cartesian coordinates: use xlim and ylim directly
         x_min, x_max = xlim
         y_min, y_max = ylim
+        #if ax is not None:
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(y_min, y_max)
     else:
@@ -78,7 +79,10 @@ def apply_xlim_ylim(ax, xlim, ylim, is_cartesian=False):
         src_crs = ccrs.PlateCarree()
         x_min, x_max = map(parse_coordinate, xlim)
         y_min, y_max = map(parse_coordinate, ylim)
+        #if ax is not None:
         ax.set_extent([x_min, x_max, y_min, y_max], crs=src_crs)
+        xlim=(x_min, x_max)
+        ylim=(y_min, y_max)
 
     print(f"Set extent: x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}")
-
+    #return xlim, ylim

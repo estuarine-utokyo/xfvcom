@@ -745,7 +745,8 @@ class FvcomPlotter(PlotHelperMixin):
 
     def plot_2d(self, da=None, with_mesh=False, vmin=None, vmax=None, levels=20, ax=None, save_path=None, 
                   use_latlon=True, projection=ccrs.Mercator(), plot_grid=False,
-                  add_tiles=False, tile_provider=None, verbose=False, post_process_func=None, **kwargs):
+                  add_tiles=False, tile_provider=None, verbose=False, post_process_func=None,
+                  xlim=None, ylim=None, **kwargs):
         """
         Plot the triangular mesh of the FVCOM grid.
 
@@ -791,8 +792,14 @@ class FvcomPlotter(PlotHelperMixin):
         nv = self.ds["nv"].values.T - 1  # Convert to 0-based indexing
 
         # Output ranges and connectivity
-        xmin, xmax = x.min(), x.max()
-        ymin, ymax = y.min(), y.max()
+        if xlim is None:
+            xmin, xmax = x.min(), x.max()
+        else:
+            xmin, xmax = xlim
+        if ylim is None:
+            ymin, ymax = y.min(), y.max()
+        else:
+            ymin, ymax = ylim
         if verbose:
             print(f"x range: {xmin} to {xmax}")
             print(f"y range: {ymin} to {ymax}")
