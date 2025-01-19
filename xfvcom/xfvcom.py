@@ -825,7 +825,7 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             with_mesh=True
         # Extract triangle connectivity
-        #nv = self.ds["nv"].values.T - 1  # Convert to 0-based indexing
+        nv = self.ds["nv"].values.T - 1  # Convert to 0-based indexing
 
         # Output ranges and connectivity
         if xlim is None:
@@ -855,7 +855,7 @@ class FvcomPlotter(PlotHelperMixin):
 
         # Create Triangulation
         try:
-            triang = tri.Triangulation(x, y, triangles=self.ds.nv_ucw)
+            triang = tri.Triangulation(x, y, triangles=nv)
             if verbose:
                 print(f"Number of triangles: {len(triang.triangles)}")
         except ValueError as e:
