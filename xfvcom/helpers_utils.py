@@ -1,5 +1,9 @@
 import inspect
 import cartopy.crs as ccrs
+import numpy as np
+import xarray as xr
+from sklearn.metrics import mean_squared_error, r2_score
+from scipy.stats import pearsonr
 
 def clean_kwargs(func, kwargs):
     """
@@ -86,3 +90,96 @@ def apply_xlim_ylim(ax, xlim, ylim, is_cartesian=False):
 
     print(f"Set extent: x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}")
     #return xlim, ylim
+
+def evaluate_model_scores(sim_list, obs_list):
+    """
+    Evaluate model performance metrics including R², Pearson r, RMSE, and bias.
+    Normalize Combined Score to 0-1, where 1 indicates perfect match and 0 indicates poor performance.
+
+    Parameters:
+    - sim_list: List of simulation DataArray (or numpy arrays).
+    - obs_list: List of observation DataArray (or numpy arrays).
+
+    Returns:
+    - scores: A dictionary containing individual scores for each layer and a combined score.
+
+    Usage:
+    ```
+    from .helpers_utils import evaluate_model_scores, generate_test_data
+    sim_list, obs_list = generate_test_data()
+    ```
+    """
+    def to_numpy(data):
+        if isinstance(data, xr.DataArray):
+            return data.values
+        elif isinstance(data, np.ndarray):
+            return data
+        else:
+            raise ValueError("Input data must be xarray.DataArray or numpy.ndarray")
+
+    individual_scores = []
+    for sim, obs in zip(sim_list, obs_list):
+        sim = to_numpy(sim)
+        obs = to_numpy(obs)
+
+        # Ensure matching shapes and remove NaNs
+        mask = ~np.isnan(sim) & ~np.isnan(obs)
+        sim, obs = sim[mask], obs[mask]
+
+        if len(sim) == 0 or len(obs) == 0:
+            raise ValueError("Simulation and observation data contain no valid values after removing NaNs.\n"
+                             "Maybe observed data corresponding to the siglay depths does not exist \n"
+                             "because the total depth of observed is less than that of simulated.")
+
+        # Calculate metrics
+        r2 = r2_score(obs, sim)
+        r, _ = pearsonr(obs, sim)
+        rmse = np.sqrt(mean_squared_error(obs, sim))
+        bias = np.mean(sim - obs)
+
+        individual_scores.append({"R²": r2, "r": r.item(), "RMSE": rmse.item(), "Bias": bias.item()})
+
+    # Normalize scores for Combined Score calculation
+    normalized_scores = []
+    for score in individual_scores:
+        normalized_r2 = max(0, score["R²"])  # Clamp R² to [0, 1]
+        normalized_r = (score["r"] + 1) / 2  # Convert r from [-1, 1] to [0, 1]
+        normalized_rmse = 1 / (1 + score["RMSE"])  # Smaller RMSE is better, normalize to (0, 1]
+        normalized_bias = 1 / (1 + abs(score["Bias"]))  # Smaller bias is better, normalize to (0, 1]
+        
+        normalized_scores.append({
+            "R²": normalized_r2,
+            "r": normalized_r,
+            "RMSE": normalized_rmse,
+            "Bias": normalized_bias
+        })
+
+    # Combine scores into a single score using weights
+    weights = {"R²": 0.4, "r": 0.4, "RMSE": 0.1, "Bias": 0.1}
+    combined_score = sum(
+        weights["R²"] * score["R²"] +
+        weights["r"] * score["r"] +
+        weights["RMSE"] * score["RMSE"] +
+        weights["Bias"] * score["Bias"]
+        for score in normalized_scores
+    ) / len(normalized_scores)
+
+    return {"individual_scores": individual_scores, "combined_score": combined_score}
+
+
+# Test Data
+def generate_test_data():
+    """
+    Generate an ideal test data (perfect) for evaluate_model_scores().
+    """
+
+    time = np.arange("2023-01-01", "2023-01-11", dtype="datetime64[h]").astype("datetime64[ns]")  # Ensure nanosecond precision
+    sim_list = [
+        xr.DataArray(np.sin(np.linspace(0, 10, len(time))) + np.random.normal(0, 1, len(time)), dims="time", coords={"time": time}),
+        xr.DataArray(np.cos(np.linspace(0, 10, len(time))) + np.random.normal(0, 1, len(time)), dims="time", coords={"time": time}),
+    ]
+    obs_list = [
+        xr.DataArray(np.sin(np.linspace(0, 10, len(time))), dims="time", coords={"time": time}),
+        xr.DataArray(np.cos(np.linspace(0, 10, len(time))), dims="time", coords={"time": time}),
+    ]
+    return sim_list, obs_list
