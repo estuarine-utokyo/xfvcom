@@ -235,18 +235,40 @@ class FvcomAnalyzer:
     def nearest_neighbor(self, lon, lat, node=True, distances=False):
         """
         Find the nearest node or element to the specified coordinates.
+
+        Parameters:
+        - lon: Longitude of the target point.
+        - lat: Latitude of the target point.
+        - node: If True, search among nodes. If False, search among elements.
+        - distances: If True, return both distance and index of the nearest neighbor.
+
+        Returns:
+        - Index of the nearest neighbor (and optionally the distance).
         """
-        A = self._lonlat_to_xy(lon, lat, inverse=True)
+        # Convert geographic (lon, lat) to UTM (x, y)
+        target_coords = np.array(self._lonlat_to_xy(lon, lat, inverse=False)).reshape(1, -1)
+        
+        # Get search points in UTM (x, y)
         if node:
             points = np.column_stack((self.ds.x.values, self.ds.y.values))
         else:
             points = np.column_stack((self.ds.xc.values, self.ds.yc.values))
-
+        
+        # Ensure there are no NaN values in the search points
+        valid_mask = ~np.isnan(points).any(axis=1)
+        points = points[valid_mask]
+        
+        # Perform nearest-neighbor search
         nn = NearestNeighbors(n_neighbors=1, metric="euclidean")
         nn.fit(points)
+        distances_array, indices_array = nn.kneighbors(target_coords)
+        
+        # Map the result back to the original indices
+        nearest_index = np.where(valid_mask)[0][indices_array[0, 0]]
+        
         if distances:
-            return nn.kneighbors([A])
-        return nn.kneighbors([A])[1].item()
+            return distances_array[0, 0], nearest_index
+        return nearest_index
 
     def _lonlat_to_xy(self, lon, lat, inverse=False):
         """
