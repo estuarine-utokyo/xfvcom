@@ -3,6 +3,7 @@
 import os
 import numpy as np
 import xarray as xr
+import pandas as pd
 import pyproj
 from sklearn.neighbors import NearestNeighbors
 import matplotlib.pyplot as plt
@@ -26,7 +27,7 @@ class FvcomDataLoader:
     """
     Responsible for loading FVCOM output NetCDF files into an xarray.Dataset.
     """
-    def __init__(self, base_path=None, ncfile=None, utm2geo=True, zone=54, north=True,
+    def __init__(self, base_path=None, ncfile=None, obcfile_path=None, utm2geo=True, zone=54, north=True,
                  inverse=False, time_tolerance=None, **kwargs):
         """
         Initialize the FvcomDataLoader instance.
@@ -34,6 +35,7 @@ class FvcomDataLoader:
         Parameters:
         - base_path: Directory path where the NetCDF file is located.
         - ncfile: Name of the NetCDF file to load.
+        - obcfile_path: Path to the open boundary node file.
         - utm2geo: Convert UTM coordinates to geographic (lon, lat).
         - zone: UTM zone number.
         - north: True if the UTM zone is in the northern hemisphere.
@@ -62,19 +64,32 @@ class FvcomDataLoader:
         if all(var in self.ds for var in ['zeta', 'siglay', 'h']):
             self._add_depth_variables()
         if 'nv' in self.ds:
-            self._setup_nv_ucw()
+            #self.ds['nv_zero'] = xr.DataArray(self.ds['nv'].values.T - 1)
+            #self.ds['nv_zero'].attrs['long_name'] = 'nodes surrounding element in zero-based for matplotlib'
+            self._setup_nv_ccw()
+        # Load FVCOM open boundary node if provided
+        if obcfile_path:
+            if os.path.isfile(obcfile_path):
+                df = pd.read_csv(obcfile_path, header=None, skiprows=1, delim_whitespace=True)
+                print(df.iloc[:,1].values - 1)
+                self.ds['node_bc'] = xr.DataArray(df.iloc[:,1].values - 1, dims=("obc_node"))
+                self.ds['node_bc'].attrs['long_name'] = 'open boundary nodes'
+                #print(self.ds.node_bc.values)
 
-    def _setup_nv_ucw(self):
+    def _setup_nv_ccw(self):
         """
-        Set up the unti-clockwise nv_ucw.
+        Set up the counterclockwise nv_ccw.
         """
+        self.ds['nv_zero'] = xr.DataArray(self.ds['nv'].values.T - 1)
+        self.ds['nv_zero'].attrs['long_name'] = 'nodes surrounding element in zero-based for matplotlib'
         # Extract triangle connectivity
-        nv_ucw = self.ds["nv"].values.T - 1
+        #nv_ccw = self.ds["nv"].values.T - 1
+        nv_ccw = self.ds['nv_zero'].values
         # Reverse node order for counter-clockwise triangles that matplotlib expects.
-        nv_ucw = nv_ucw[:, ::-1]
-        print(nv_ucw.shape)
-        self.ds['nv_ucw'] = xr.DataArray(nv_ucw, dims=("nele", "three"))
-        self.ds['nv_ucw'].attrs['long_name'] = 'nodes surrounding element in unti-clockwise direction for matplotlib'
+        nv_ccw = nv_ccw[:, ::-1]
+        # print(nv_ccw.shape)
+        self.ds['nv_ccw'] = xr.DataArray(nv_ccw, dims=("nele", "three"))
+        self.ds['nv_ccw'].attrs['long_name'] = 'nodes surrounding element in unti-clockwise direction for matplotlib'
 
     def slice_by_time(self, start, end, copy=False, reset_time=False):
         """
@@ -330,6 +345,13 @@ class FvcomPlotter(PlotHelperMixin):
     Creates plots from FVCOM datasets.
     """
     def __init__(self, dataset, plot_config):
+        """
+        Initialize the FvcomPlotter instance.
+
+        Parameters:
+        - dataset: An xarray.Dataset object containing FVCOM model output or input.
+        - plot_config: An instance of FvcomPlotConfig with plot configuration settings.
+        """
         self.ds = dataset
         self.cfg = plot_config
 
@@ -779,16 +801,18 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def plot_2d(self, da=None, with_mesh=False, vmin=None, vmax=None, levels=20, ax=None, save_path=None, 
-                  use_latlon=True, projection=ccrs.Mercator(), plot_grid=False,
-                  add_tiles=False, tile_provider=None, verbose=False, post_process_func=None,
-                  xlim=None, ylim=None, **kwargs):
+    def plot_2d(self, da=None, with_mesh=False, coastlines=False, obclines=False,  vmin=None, vmax=None, levels=20,
+                ax=None, save_path=None, use_latlon=True, projection=ccrs.Mercator(), plot_grid=False,
+                add_tiles=False, tile_provider=None, verbose=False, post_process_func=None,
+                xlim=None, ylim=None, **kwargs):
         """
         Plot the triangular mesh of the FVCOM grid.
 
         Parameters:
         - da: DataArray to plot. Default is None (wireframe).
         - with_mesh: If True, plot the mesh lines. Default is True.
+        - coastlines: If True, plot coastlines. Default is False.
+        - obclines: If True, plot open boundary lines. Default is False.
         - vmin: Minimum value for color scaling.
         - vmax: Maximum value for color scaling.
         - levels: Number of contour levels or a list of levels.
@@ -810,6 +834,7 @@ class FvcomPlotter(PlotHelperMixin):
         """
 
         self.use_latlon = use_latlon       
+        transform = ccrs.PlateCarree() if self.use_latlon else None
         # Extract coordinates
         if self.use_latlon:
             x = self.ds["lon"].values
@@ -825,8 +850,8 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             with_mesh=True
         # Extract triangle connectivity
-        nv = self.ds["nv"].values.T - 1  # Convert to 0-based indexing
-
+        #nv = self.ds["nv"].values.T - 1  # Convert to 0-based indexing
+        nv = self.ds["nv_zero"]
         # Output ranges and connectivity
         if xlim is None:
             xmin, xmax = x.min(), x.max()
@@ -839,16 +864,16 @@ class FvcomPlotter(PlotHelperMixin):
         if verbose:
             print(f"x range: {xmin} to {xmax}")
             print(f"y range: {ymin} to {ymax}")
-            print(f"nv_ucw shape: {self.ds.nv_ucw.shape}, nv_ucw min: {self.ds.nv_ucw.min()}, nv_ucw max: {self.ds.nv_ucw.max()}")
+            print(f"nv_ccw shape: {self.ds.nv_ccw.shape}, nv_ccw min: {self.ds.nv_ccw.min()}, nv_ccw max: {self.ds.nv_ccw.max()}")
 
-        # Validate nv_ucw and coordinates
+        # Validate nv_ccw and coordinates
         if verbose:
             if np.isnan(x).any() or np.isnan(y).any():
                 raise ValueError("NaN values found in node coordinates.")
             if np.isinf(x).any() or np.isinf(y).any():
                 raise ValueError("Infinite values found in node coordinates.")
-            if (self.ds.nv_ucw < 0).any() or (self.ds.nv_ucw >= len(x)).any():
-                raise ValueError("Invalid indices in nv_ucw. Check if nv_ucw points to valid nodes.")
+            if (self.ds.nv_ccw < 0).any() or (self.ds.nv_ccw >= len(x)).any():
+                raise ValueError("Invalid indices in nv_ccw. Check if nv_ccw points to valid nodes.")
 
         # Reverse node order for counter-clockwise triangles that matplotlib expects.
         #nv = nv[:, ::-1]
@@ -993,6 +1018,23 @@ class FvcomPlotter(PlotHelperMixin):
                 ax.set_xlim(x_min_proj, x_max_proj)
                 ax.set_ylim(y_min_proj, y_max_proj)
                 ax.tick_params(labelsize=11, labelcolor='black')
+
+        if coastlines:
+            print("Plotting coastlines...")
+            nv = self.ds.nv_ccw.values
+            nbe = np.array([[nv[n, j], nv[n, (j+2)%3]] for n in range(len(triang.neighbors))
+                           for j in range(3) if triang.neighbors[n,j] == -1])
+            for m in range(len(nbe)):
+                ax.plot(x[nbe[m,:]], y[nbe[m,:]], color='gray', linewidth=1, transform=transform)
+
+        if obclines:
+            # Plot open boundary lines
+            print("Plotting open boundary lines...")
+            if "node_bc" not in self.ds:
+                raise ValueError("Dataset does not contain 'node_bc' variable for open boundary lines."
+                                 " obcfile must be read in FvcomDataLoader.")    
+            node_bc = self.ds.node_bc.values
+            ax.plot(x[node_bc[:]], y[node_bc[:]], color='b', linewidth=1, transform=transform)
 
         if post_process_func:
             post_process_func(ax, **kwargs)
