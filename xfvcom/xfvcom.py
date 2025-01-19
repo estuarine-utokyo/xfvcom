@@ -61,6 +61,20 @@ class FvcomDataLoader:
                 self._convert_utm_to_geo()
         if all(var in self.ds for var in ['zeta', 'siglay', 'h']):
             self._add_depth_variables()
+        if 'nv' in self.ds:
+            self._setup_nv_ucw()
+
+    def _setup_nv_ucw(self):
+        """
+        Set up the unti-clockwise nv_ucw.
+        """
+        # Extract triangle connectivity
+        nv_ucw = self.ds["nv"].values.T - 1
+        # Reverse node order for counter-clockwise triangles that matplotlib expects.
+        nv_ucw = nv_ucw[:, ::-1]
+        print(nv_ucw.shape)
+        self.ds['nv_ucw'] = xr.DataArray(nv_ucw, dims=("nele", "three"))
+        self.ds['nv_ucw'].attrs['long_name'] = 'nodes surrounding element in unti-clockwise direction for matplotlib'
 
     def slice_by_time(self, start, end, copy=False, reset_time=False):
         """
@@ -811,7 +825,7 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             with_mesh=True
         # Extract triangle connectivity
-        nv = self.ds["nv"].values.T - 1  # Convert to 0-based indexing
+        #nv = self.ds["nv"].values.T - 1  # Convert to 0-based indexing
 
         # Output ranges and connectivity
         if xlim is None:
@@ -825,23 +839,23 @@ class FvcomPlotter(PlotHelperMixin):
         if verbose:
             print(f"x range: {xmin} to {xmax}")
             print(f"y range: {ymin} to {ymax}")
-            print(f"nv shape: {nv.shape}, nv min: {nv.min()}, nv max: {nv.max()}")
+            print(f"nv_ucw shape: {self.ds.nv_ucw.shape}, nv_ucw min: {self.ds.nv_ucw.min()}, nv_ucw max: {self.ds.nv_ucw.max()}")
 
-        # Validate nv and coordinates
+        # Validate nv_ucw and coordinates
         if verbose:
             if np.isnan(x).any() or np.isnan(y).any():
                 raise ValueError("NaN values found in node coordinates.")
             if np.isinf(x).any() or np.isinf(y).any():
                 raise ValueError("Infinite values found in node coordinates.")
-            if (nv < 0).any() or (nv >= len(x)).any():
-                raise ValueError("Invalid indices in nv. Check if nv points to valid nodes.")
+            if (self.ds.nv_ucw < 0).any() or (self.ds.nv_ucw >= len(x)).any():
+                raise ValueError("Invalid indices in nv_ucw. Check if nv_ucw points to valid nodes.")
 
-        # Reverse node order for counter-clockwise triangles
-        nv_ccw = nv[:, ::-1]
+        # Reverse node order for counter-clockwise triangles that matplotlib expects.
+        #nv = nv[:, ::-1]
 
         # Create Triangulation
         try:
-            triang = tri.Triangulation(x, y, triangles=nv_ccw)
+            triang = tri.Triangulation(x, y, triangles=self.ds.nv_ucw)
             if verbose:
                 print(f"Number of triangles: {len(triang.triangles)}")
         except ValueError as e:
