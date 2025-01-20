@@ -28,7 +28,7 @@ class FvcomDataLoader:
     Responsible for loading FVCOM output NetCDF files into an xarray.Dataset.
     """
     def __init__(self, base_path=None, ncfile=None, obcfile_path=None, utm2geo=True, zone=54, north=True,
-                 inverse=False, time_tolerance=None, **kwargs):
+                 inverse=False, time_tolerance=None, verbose=False, **kwargs):
         """
         Initialize the FvcomDataLoader instance.
         
@@ -70,9 +70,12 @@ class FvcomDataLoader:
         # Load FVCOM open boundary node if provided
         if obcfile_path:
             if os.path.isfile(obcfile_path):
+                print(f"Loading open boundary nodes from {obcfile_path}")
                 df = pd.read_csv(obcfile_path, header=None, skiprows=1, delim_whitespace=True)
-                print(df.iloc[:,1].values - 1)
-                self.ds['node_bc'] = xr.DataArray(df.iloc[:,1].values - 1, dims=("obc_node"))
+                node_bc = df.iloc[:,1].values - 1
+                if verbose:
+                    print(f"{node_bc}")
+                self.ds['node_bc'] = xr.DataArray(node_bc, dims=("obc_node"))
                 self.ds['node_bc'].attrs['long_name'] = 'open boundary nodes'
                 #print(self.ds.node_bc.values)
 
@@ -979,7 +982,7 @@ class FvcomPlotter(PlotHelperMixin):
             #    transform=ccrs.PlateCarree(),  # 緯度経度座標系での指定
             #    zorder=0  # 他のプロットの下に描画
             #    ))
-            title = kwargs.pop("title", "FVCOM Mesh (Lat/Lon)")
+            title = kwargs.pop("title", "")
             if da is not None:
                 cf = ax.tricontourf(triang, values, levels=levels, cmap=cmap, norm=norm, extend='both',
                                     transform=ccrs.PlateCarree(), **tricontourf_kwargs)

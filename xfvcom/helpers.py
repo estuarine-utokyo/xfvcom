@@ -116,7 +116,7 @@ class FrameGenerator:
         return save_path
 
     @staticmethod
-    def plot_data(data_array, time, plotter, save_path, post_process_func=None, plot_kwargs=None):
+    def plot_data(data_array, time=None, plotter=None, save_path=None, post_process_func=None, plot_kwargs=None):
         """
         Generate a single frame with the given parameters.
 
@@ -128,16 +128,19 @@ class FrameGenerator:
         - post_process_func: Function to apply custom processing to the plot.
         - plot_kwargs: Additional arguments for the plot.
         """
-        # 時間ステップごとのデータを選択
-        da = data_array.isel(time=time)
+        # Extract the data_array for the given time index if specified.
+        if time is not None:
+            da = data_array.isel(time=time)
+        else:
+            da = data_array
 
-        # プロット関数の呼び出し
+        # Call the plotter's plot_2d method with the given arguments.
         def wrapped_post_process_func(ax):
             if post_process_func:
-                # post_process_func の引数を調べる
+                # This function is used to dynamically pass the required arguments if specified.
                 func_args = inspect.signature(post_process_func).parameters
 
-                # 必要な引数を動的に渡す
+                # Dynamically pass the required arguments (da, time).
                 kwargs = {"ax": ax}
                 if "da" in func_args:
                     kwargs["da"] = da
