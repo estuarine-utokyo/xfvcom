@@ -70,13 +70,14 @@ class FvcomDataLoader:
         # Load FVCOM open boundary node if provided
         if obcfile_path:
             if os.path.isfile(obcfile_path):
-                print(f"Loading open boundary nodes from {obcfile_path}")
+                #print(f"Loading open boundary nodes from {obcfile_path}")
                 df = pd.read_csv(obcfile_path, header=None, skiprows=1, delim_whitespace=True)
                 node_bc = df.iloc[:,1].values - 1
                 if verbose:
                     print(f"{node_bc}")
                 self.ds['node_bc'] = xr.DataArray(node_bc, dims=("obc_node"))
                 self.ds['node_bc'].attrs['long_name'] = 'open boundary nodes'
+                print(f"Open boundary nodes loaded successfully from {obcfile_path}")
                 #print(self.ds.node_bc.values)
 
     def _setup_nv_ccw(self):
@@ -149,6 +150,7 @@ class FvcomDataLoader:
         try:
             ds = xr.open_dataset(self.ncfilepath, engine=self.engine, chunks=self.chunks, decode_times=self.decode_times)
             ds = ds.drop_vars('Itime2') if 'Itime2' in ds.variables else ds
+            print(f"Dataset loaded successfully from {self.ncfilepath}")
             return xr.decode_cf(ds)
         except FileNotFoundError:
             raise FileNotFoundError(f"File not found: {self.ncfilepath}")
@@ -804,10 +806,11 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def plot_2d(self, da=None, with_mesh=False, coastlines=False, obclines=False,  vmin=None, vmax=None, levels=20,
-                ax=None, save_path=None, use_latlon=True, projection=ccrs.Mercator(), plot_grid=False,
-                add_tiles=False, tile_provider=None, verbose=False, post_process_func=None,
-                xlim=None, ylim=None, **kwargs):
+    def plot_2d(self, da=None, with_mesh=False, coastlines=False, obclines=False,
+                vmin=None, vmax=None, levels=20, ax=None, save_path=None,
+                use_latlon=True, projection=ccrs.Mercator(), plot_grid=False,
+                add_tiles=False, tile_provider=GoogleTiles(style="satellite"), tile_zoom=12,
+                verbose=False, post_process_func=None, xlim=None, ylim=None, **kwargs):
         """
         Plot the triangular mesh of the FVCOM grid.
 
@@ -825,6 +828,7 @@ class FvcomPlotter(PlotHelperMixin):
         - projection: Cartopy projection for geographic plotting. Default is PlateCarree.
         - add_tiles: If True, add a tile map (for lat/lon plotting only).
         - tile_provider: Tile provider for the background.
+        - tile_zoom (int): Zoom level for the tile map.
         - post_process_func: Function to apply custom plots or decorations to the Axes.
         - **kwargs: Additional arguments for customization.
         
@@ -904,8 +908,8 @@ class FvcomPlotter(PlotHelperMixin):
         if add_tiles and self.use_latlon:
             #tile_provider = cimgt.OSM()
             #tile_provider = cimgt.Stamen('terrain')
-            tile_provider = GoogleTiles(style="satellite")
-            ax.add_image(tile_provider, 10)
+            #tile_provider = GoogleTiles(style="satellite")
+            ax.add_image(tile_provider, tile_zoom)
             #ax.add_image(tile_provider, 8)  # Zoom level 8 is suitable for regional plots
 
         # Argument treatment to avoid conflicts with **kwargs
@@ -915,6 +919,8 @@ class FvcomPlotter(PlotHelperMixin):
         #if not with_mesh:
         #    lw = 0
         color = kwargs.pop('color', "#36454F")  # Line color for mesh plot
+        coastline_color = kwargs.pop('coastline_color', 'gray')  # coastline color
+        obcline_color = kwargs.pop('obcline_color', "blue")  # Open boundary line color
         linestyle = kwargs.pop('linestyle', '--')  # Line style for lat/lon gridlines
         #linewidth = kwargs.pop('linewidth', 0.5)  # Line width for lat/lon gridlines
         
@@ -1028,7 +1034,9 @@ class FvcomPlotter(PlotHelperMixin):
             nbe = np.array([[nv[n, j], nv[n, (j+2)%3]] for n in range(len(triang.neighbors))
                            for j in range(3) if triang.neighbors[n,j] == -1])
             for m in range(len(nbe)):
-                ax.plot(x[nbe[m,:]], y[nbe[m,:]], color='gray', linewidth=1, transform=transform)
+                #ax.plot(x[nbe[m,:]], y[nbe[m,:]], color='gray', linewidth=1, transform=transform)
+                ax.plot(x[nbe[m,:]], y[nbe[m,:]], color=coastline_color, linewidth=1, transform=transform)
+
 
         if obclines:
             # Plot open boundary lines
@@ -1037,10 +1045,34 @@ class FvcomPlotter(PlotHelperMixin):
                 raise ValueError("Dataset does not contain 'node_bc' variable for open boundary lines."
                                  " obcfile must be read in FvcomDataLoader.")    
             node_bc = self.ds.node_bc.values
-            ax.plot(x[node_bc[:]], y[node_bc[:]], color='b', linewidth=1, transform=transform)
+            ax.plot(x[node_bc[:]], y[node_bc[:]], color=obcline_color, linewidth=1, transform=transform)
 
         if post_process_func:
-            post_process_func(ax, **kwargs)
+            # post_process_func の引数を解析
+            func_signature = inspect.signature(post_process_func)
+            valid_args = func_signature.parameters.keys()
+
+            # 有効な引数に対応する値を取得または生成
+            dynamic_kwargs = {}
+            for arg in valid_args:
+                if arg == "ax":
+                    dynamic_kwargs[arg] = ax
+                elif arg == "da":
+                    dynamic_kwargs[arg] = da
+                elif arg == "time":
+                    dynamic_kwargs[arg] = time
+                elif arg in locals():  # ローカルスコープで値を取得
+                    dynamic_kwargs[arg] = locals()[arg]
+                elif arg in globals():  # グローバルスコープで値を取得
+                    dynamic_kwargs[arg] = globals()[arg]
+                else:
+                    print(f"Warning: Unable to resolve argument '{arg}'.")
+
+            # post_process_funcを呼び出し
+            post_process_func(**dynamic_kwargs)
+
+        #if post_process_func:
+        #    post_process_func(ax, **kwargs)
 
         # Save the plot if requested
         if save_path:
@@ -1078,12 +1110,8 @@ class FvcomPlotter(PlotHelperMixin):
         if x is None or y is None:
             raise ValueError("Both x and y must be specified.")
 
-        if self.use_latlon:
-            # Use PlateCarree as the CRS for geographic coordinates
-            ax.scatter(x, y, transform=ccrs.PlateCarree(), marker=marker, color=color, s=size, **kwargs)
-        else:
-            # Cartesian coordinates do not require a transform
-            ax.scatter(x, y, marker=marker, color=color, s=size, **kwargs)
+        transform = ccrs.PlateCarree() if self.use_latlon else None
+        ax.scatter(x, y, transform=transform, marker=marker, color=color, s=size, **kwargs)
 
         return ax
 
