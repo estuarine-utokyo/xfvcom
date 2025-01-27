@@ -60,7 +60,7 @@ def dynamic_custom_plot(ax, da, time):
 
 # You may slice by the time index range, e.g., `time=slice(0,10)`.
 # The whole range is `time=slice(0, None)`.
-time = slice(0, None)
+time = slice(0, 1200)
 # Check the time slice is within the valid range.
 time_size = fvcom.ds.sizes['time']
 print(f"Time dimension size: {time_size}")
@@ -83,8 +83,8 @@ plot_kwargs={"verbose": False, "vmin": 20, "vmax": 34, "levels": 29, "cmap": "je
 #plot_kwargs={}
 
 # Invoke xfvcom.plot_utils.create_gif_anim_2d_plot
-create_anim_2d_plot(plotter, var_name, siglay=siglay, fps=10, generate_gif=False, generate_mp4=False,
-                        post_process_func=dynamic_custom_plot, plot_kwargs=plot_kwargs)
+create_anim_2d_plot(plotter, var_name, siglay=siglay, fps=10, generate_gif=True, generate_mp4=False,
+                        batch_size=500, cleanup=False, post_process_func=dynamic_custom_plot, plot_kwargs=plot_kwargs)
 
 
 
