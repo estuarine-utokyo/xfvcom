@@ -909,7 +909,11 @@ class FvcomPlotter(PlotHelperMixin):
             #tile_provider = cimgt.OSM()
             #tile_provider = cimgt.Stamen('terrain')
             #tile_provider = GoogleTiles(style="satellite")
-            ax.add_image(tile_provider, tile_zoom)
+            if tile_provider is None:
+                raise ValueError("Tile provider is not set. Please provide a valid tile provider, \
+                                 e.g., GoogleTiles(style='satellite')")
+            else:
+                ax.add_image(tile_provider, tile_zoom)
             #ax.add_image(tile_provider, 8)  # Zoom level 8 is suitable for regional plots
 
         # Argument treatment to avoid conflicts with **kwargs

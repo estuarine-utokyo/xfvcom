@@ -43,7 +43,7 @@ def create_anim_2d_plot(plotter, var_name, siglay=None, fps=10, generate_gif=Tru
     
     anim_base_name = f"{base_name[:-len_suffix]}"
     if not generate_gif and not generate_mp4:
-        print("No animation created.")
+        print(f"Frames have been generated and saved as PNG files. No animation created.")
         return
     # Create GIF animation
     if generate_gif:

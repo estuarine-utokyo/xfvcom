@@ -33,69 +33,19 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 # ### Prepare FvcomDataLoader instance of `fvcom` using FVCOM output netcdf.
 # Dataset is `fvcom.ds`.
-
-# In[ ]:
-
-
 # Loading FVCOM output netcdf
 base_path = "~/Github/TB-FVCOM/goto2023/output"
+base_path =  "/home/pj24001722/ku40003295/Ersem_TokyoBay/output_5times/"
 # List of netcdf files convenient to switch to another netcdf by specifying its index
 ncfiles = ["TokyoBay18_r16_crossed_0001.nc"]
+ncfiles = ["tb_0001.nc"]
 index_ncfile = 0
 # Create an instance of FvcomDataLoader where fvcom.ds is a Dataset
 fvcom = FvcomDataLoader(base_path=base_path, ncfile=ncfiles[index_ncfile], time_tolerance=5)
-
-
-# ### Create GIF animation with static customizing.
-# - 2-D horizontal plot with static customization by updating `ax`, which does not change with time.
-# - Prepare `add_custom_plot` for customizing or `post_process_func=None` without customizing.  
-
-# In[ ]:
-
-
-def static_custom_plot(ax):
-    """
-    Customizing plot by updating ax
-
-    Parameters:
-    - ax: matplotlib axis
-    """
-
-    # Further customization can be added.
-    ax.set_title("Title with Custom Plot")
-
-'''
-# Loading FVCOM output netcdf
-base_path = "~/Github/TB-FVCOM/goto2023/output"
-# List of netcdf files convenient to switch to another netcdf by specifying its index
-ncfiles = ["TokyoBay18_r16_crossed_0001.nc"]
-index_ncfile = 0
-# Create an instance of FvcomDataLoader where fvcom.ds is a Dataset
-fvcom = FvcomDataLoader(base_path=base_path, ncfile=ncfiles[index_ncfile], time_tolerance=5)
-'''
-# Create an instance of FvcomPlotter
-dataset = fvcom.ds.isel(time=slice(0, 20)) # You may slice by the time index range. The whole range is `time=slice(0, None)`.
-plotter = FvcomPlotter(dataset, FvcomPlotConfig(figsize=(6, 8)))
-# Specify var_name and siglay if any
-var_name = "salinity"
-siglay = 0
-# Set plot_kwargs for `ax.tricontourf(**kwargs)`.
-plot_kwargs={"verbose": False, "vmin": 10, "vmax": 20, "levels": [9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 15, 16, 17, 18, 19, 20]}
-plot_kwargs={"verbose": False, "vmin": 28, "vmax": 34, "levels": 20, "cmap": "jet"}
-#plot_kwargs={"verbose": False, "vmin": 28, "vmax": 34, "levels": 20, "cmap": "jet", "with_mesh": True}
-#plot_kwargs={}
-
-# Invoke xfvcom.plot_utils.create_gif_anim_2d_plot
-create_gif_anim_2d_plot(plotter, var_name, siglay=siglay, fps=10, post_process_func=static_custom_plot, plot_kwargs=plot_kwargs)
-
 
 # ### Create GIF animation with dynamic customizing.
 # - 2-D horizontal plot with dynamic customizing by updating `ax`, which changes with time.
 # - Prepare `dynamic_custom_plot` for dynamic customizing.  
-
-# In[ ]:
-
-
 def dynamic_custom_plot(ax, da, time):
     """
     Plot the corresponding datetime at each frame
@@ -108,22 +58,33 @@ def dynamic_custom_plot(ax, da, time):
     datetime = pd.Timestamp(da.time.item()).strftime('%Y-%m-%d %H:%M:%S')
     ax.set_title(f"Time: {datetime}")
 
-dataset = fvcom.ds.isel(time=slice(0, 10)) # You may slice by the time index range. The whole range is `time=slice(0, None)`.
+# You may slice by the time index range, e.g., `time=slice(0,10)`.
+# The whole range is `time=slice(0, None)`.
+time = slice(0, None)
+# Check the time slice is within the valid range.
+time_size = fvcom.ds.sizes['time']
+print(f"Time dimension size: {time_size}")
+start_index = time.start if time.start is not None else 0
+end_index = time.stop if time.stop is not None else time_size
+if start_index < 0 or end_index > time_size:
+    raise IndexError(f"Time slice is out of bounds. Valid range is [0, {time_size}), "
+                     f"but got slice({start_index}, {end_index}).")
+
+dataset = fvcom.ds.isel(time=time)
 plotter = FvcomPlotter(dataset, FvcomPlotConfig(figsize=(6, 8)))
+
 # Specify var_name and siglay if any
 var_name = "salinity"
 siglay = 0
 # Set plot_kwargs for `ax.tricontourf(**kwargs)`
 plot_kwargs={"verbose": False, "vmin": 10, "vmax": 20, "levels": [9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 15, 16, 17, 18, 19, 20]}
-plot_kwargs={"verbose": False, "vmin": 28, "vmax": 34, "levels": 20, "cmap": "jet"}
+plot_kwargs={"verbose": False, "vmin": 20, "vmax": 34, "levels": 29, "cmap": "jet"}
 #plot_kwargs={"verbose": False, "vmin": 28, "vmax": 34, "levels": 20, "cmap": "jet", "with_mesh": True}
 #plot_kwargs={}
 
 # Invoke xfvcom.plot_utils.create_gif_anim_2d_plot
-create_gif_anim_2d_plot(plotter, var_name, siglay=siglay, fps=10, post_process_func=dynamic_custom_plot, plot_kwargs=plot_kwargs)
-
-
-# In[ ]:
+create_gif_anim_2d_plot(plotter, var_name, siglay=siglay, fps=10, generate_gif=False, generate_mp4=False,
+                        post_process_func=dynamic_custom_plot, plot_kwargs=plot_kwargs)
 
 
 

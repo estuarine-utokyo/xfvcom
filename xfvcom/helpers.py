@@ -7,6 +7,10 @@ from moviepy.editor import ImageSequenceClip
 from multiprocessing import Pool
 from .helpers_utils import clean_kwargs, unpack_plot_kwargs
 import inspect
+import subprocess
+import cartopy.crs as ccrs
+from tqdm import tqdm
+
 
 def create_gif(frames, output_gif=None, fps=10, cleanup=True):
     """
@@ -65,8 +69,6 @@ def create_mp4(frames, output_mp4=None, fps=10, cleanup=True):
 
     #print(f"Saved the MP4 animation as '{output_mp4}'.")
 
-import subprocess
-
 def convert_gif_to_mp4(input_gif, output_mp4):
     """
     Convert a GIF animation to an MP4 video using ffmpeg.
@@ -91,7 +93,141 @@ def convert_gif_to_mp4(input_gif, output_mp4):
     subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     print(f"Converted from {input_gif} to {output_mp4}.")
 
-import cartopy.crs as ccrs
+
+def create_gif_from_frames(frames_dir, output_gif, fps=10, prefix=None, batch_size=500, cleanup=False):
+    """
+    Create a GIF animation from PNG frames in batches to handle memory constraints.
+
+    Parameters:
+    - frames_dir: Directory containing PNG frames.
+    - output_gif: Path to save the GIF animation.
+    - fps: Frames per second for the GIF.
+    - prefix: Filter files that start with this prefix (e.g., 'salinity').
+    - batch_size: Number of frames to process in each batch.
+    - cleanup: If True, delete PNG frames after creating the GIF.
+
+    Returns:
+    - None
+    """
+    frames = sorted([
+        os.path.join(frames_dir, f) for f in os.listdir(frames_dir)
+        if f.endswith('.png') and (prefix is None or f.startswith(prefix))
+    ])
+    #frames = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir) if f.endswith('.png')])
+    temp_gifs = []  # Temporary GIFs for each batch
+
+    total_batches = (len(frames) + batch_size - 1) // batch_size  # 総バッチ数を計算
+
+    for i, batch_start in enumerate(range(0, len(frames), batch_size), start=1):
+        batch_frames = frames[batch_start:batch_start+batch_size]
+        temp_gif = f"{output_gif}_batch_{i}.gif"
+        temp_gifs.append(temp_gif)
+
+        with imageio.get_writer(temp_gif, mode="I", fps=fps) as writer:
+            for frame in tqdm(batch_frames, desc=f"Batch {i}/{total_batches}", unit="frame"):
+                writer.append_data(imageio.imread(frame))
+    print("Temporary GIFs created successfully.")
+    
+    # Combine temporary GIFs into the final GIF
+    #with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
+    #    for temp_gif in temp_gifs:
+    #        gif_reader = imageio.get_reader(temp_gif)
+    #        for frame in gif_reader:
+    #            writer.append_data(frame)
+    #        gif_reader.close()
+    #        if cleanup:
+    #            os.remove(temp_gif)
+    
+    # Combine temporary GIFs into the final GIF
+    # Robust version of the above code
+    with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
+        for temp_gif in tqdm(temp_gifs, desc="Combining Batches", unit="batch"):
+            with imageio.get_reader(temp_gif) as reader:
+                for frame in reader:
+                    writer.append_data(frame)
+
+    if cleanup:
+        for frame in frames:
+            os.remove(frame)
+
+    print(f"GIF Animation created successfully at: {output_gif}")
+
+
+def create_gif_from_frames_bak2(frames_dir, output_gif, fps=10, batch_size=500, cleanup=False):
+    """
+    Create a GIF animation from PNG frames in batches to handle memory constraints.
+
+    Parameters:
+    - frames_dir: Directory containing PNG frames.
+    - output_gif: Path to save the GIF animation.
+    - fps: Frames per second for the GIF.
+    - batch_size: Number of frames to process in each batch.
+    - cleanup: If True, delete PNG frames after creating the GIF.
+
+    Returns:
+    - None
+    """
+    frames = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir) if f.endswith('.png')])
+    temp_gifs = []  # Temporary GIFs for each batch
+
+    for i in tqdm(range(0, len(frames), batch_size), desc="Processing Batches", unit="batch"):
+        batch_frames = frames[i:i+batch_size]
+        temp_gif = f"{output_gif}_batch_{i//batch_size}.gif"
+        temp_gifs.append(temp_gif)
+
+        with imageio.get_writer(temp_gif, mode="I", fps=fps) as writer:
+            for frame in tqdm(batch_frames, desc=f"Batch {i//batch_size+1}/{len(temp_gifs)}", unit="frame"):
+                writer.append_data(imageio.imread(frame))
+
+    # Combine temporary GIFs into the final GIF
+    with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
+        for temp_gif in temp_gifs:
+            gif_reader = imageio.get_reader(temp_gif)
+            for frame in gif_reader:
+                writer.append_data(frame)
+            gif_reader.close()
+            if cleanup:
+                os.remove(temp_gif)
+
+    if cleanup:
+        for frame in frames:
+            os.remove(frame)
+
+    print(f"GIF created successfully at: {output_gif}")
+
+
+def create_gif_from_frames_bak(frames_dir, output_gif, fps=10, cleanup=False):
+    """
+    Create a GIF animation from PNG frames.
+
+    Parameters:
+    - frames_dir: Directory containing PNG frames.
+    - output_gif: Path to save the GIF animation.
+    - fps: Frames per second for the GIF.
+    - cleanup: If True, delete PNG frames after creating the GIF.
+
+    Returns:
+    - None
+    """
+    frames = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir) if f.endswith('.png')])
+    #with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
+    #    for frame in frames:
+    #        writer.append_data(imageio.imread(frame))
+    
+    with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
+        for frame in tqdm(frames, desc="Creating GIF Animation", unit="frame"):
+            writer.append_data(imageio.imread(frame))  # フレームをGIFに追加
+    
+    #if cleanup:
+    #    for frame in frames:
+    #        os.remove(frame)
+
+    if cleanup:
+        for frame in tqdm(frames, desc="Cleaning up", unit="frame"):
+            os.remove(frame)
+
+
+    print(f"GIF Animation created at: {output_gif}")
 
 
 class FrameGenerator:
