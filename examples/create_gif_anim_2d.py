@@ -24,7 +24,7 @@
 
 from xfvcom import FvcomDataLoader, FvcomPlotConfig, FvcomPlotter
 from xfvcom.helpers import FrameGenerator
-from xfvcom.plot_utils import create_gif_anim_2d_plot
+from xfvcom.plot_utils import create_anim_2d_plot
 import pandas as pd
 from functools import partial
 import warnings
@@ -83,7 +83,7 @@ plot_kwargs={"verbose": False, "vmin": 20, "vmax": 34, "levels": 29, "cmap": "je
 #plot_kwargs={}
 
 # Invoke xfvcom.plot_utils.create_gif_anim_2d_plot
-create_gif_anim_2d_plot(plotter, var_name, siglay=siglay, fps=10, generate_gif=False, generate_mp4=False,
+create_anim_2d_plot(plotter, var_name, siglay=siglay, fps=10, generate_gif=False, generate_mp4=False,
                         post_process_func=dynamic_custom_plot, plot_kwargs=plot_kwargs)
 
 

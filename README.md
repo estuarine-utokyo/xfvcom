@@ -36,7 +36,7 @@ Follow these steps to install the package in development mode:
      ```bash
      conda install numpy xarray matplotlib pyproj scikit-learn
      conda install jupyterlab pandas hvplot
-     conda install imageio moviepy
+     conda install imageio moviepy tqdm
      ```
    - **Using pip**:
      ```bash
