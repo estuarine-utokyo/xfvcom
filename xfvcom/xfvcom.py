@@ -67,6 +67,16 @@ class FvcomDataLoader:
             #self.ds['nv_zero'] = xr.DataArray(self.ds['nv'].values.T - 1)
             #self.ds['nv_zero'].attrs['long_name'] = 'nodes surrounding element in zero-based for matplotlib'
             self._setup_nv_ccw()
+        
+        # ERSEM-FABM O2 concentration conversion to mg/L
+        if "O2_o" in self.ds.data_vars:
+            # Keep the attributes before conversion, or the attributes will be lost.
+            attrs = self.ds["O2_o"].attrs.copy()
+            self.ds["O2_o"] = self.ds["O2_o"] * 0.032
+            # Restore the attributes after conversion.
+            attrs["units"] = "mg/L"
+            self.ds["O2_o"].attrs = attrs
+        
         # Load FVCOM open boundary node if provided
         if obcfile_path:
             if os.path.isfile(obcfile_path):

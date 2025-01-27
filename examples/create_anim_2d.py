@@ -71,7 +71,8 @@ if start_index < 0 or end_index > time_size:
                      f"but got slice({start_index}, {end_index}).")
 
 dataset = fvcom.ds.isel(time=time)
-plotter = FvcomPlotter(dataset, FvcomPlotConfig(figsize=(6, 8)))
+cfg = FvcomPlotConfig(figsize=(6, 8), dpi=150)
+plotter = FvcomPlotter(dataset, cfg)
 
 # Specify var_name and siglay if any
 var_name = "salinity"
@@ -79,6 +80,21 @@ siglay = 0
 # Set plot_kwargs for `ax.tricontourf(**kwargs)`
 plot_kwargs={"verbose": False, "vmin": 10, "vmax": 20, "levels": [9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 15, 16, 17, 18, 19, 20]}
 plot_kwargs={"verbose": False, "vmin": 20, "vmax": 34, "levels": 29, "cmap": "jet"}
+plot_kwargs_dict = {
+    "salinity": {"vmin": 20, "vmax": 34, "levels": 29, "cmap": "jet"},
+    "temperature": {"vmin": 10, "vmax": 30, "levels": 21, "cmap": "jet"},
+    "O2_o": {"vmin": 0, "vmax": 15, "levels": 16, "cmap": "jet"},
+    "N1_p": {"vmin": 0, "vmax": 6, "levels": 19, "cmap": "jet"},
+    "N3_n": {"vmin": 0, "vmax": 80, "levels": 21, "cmap": "jet"},
+    "N4_n": {"vmin": 0, "vmax": 40, "levels": 21, "cmap": "jet"},
+    "N5_s": {"vmin": 0, "vmax": 80, "levels": 21, "cmap": "jet"},
+    "P1_Chl": {"vmin": 0, "vmax": 80, "levels": 21, "cmap": "jet"},
+    "P2_Chl": {"vmin": 0, "vmax": 10, "levels": 21, "cmap": "jet"},
+    "P3_Chl": {"vmin": 0, "vmax": 10, "levels": 21, "cmap": "jet"},
+    "P4_Chl": {"vmin": 0, "vmax": 10, "levels": 21, "cmap": "jet"},
+}
+plot_kwargs = plot_kwargs_dict[var_name] if var_name in plot_kwargs_dict else {"cmap": "jet"}
+
 #plot_kwargs={"verbose": False, "vmin": 28, "vmax": 34, "levels": 20, "cmap": "jet", "with_mesh": True}
 #plot_kwargs={}
 
