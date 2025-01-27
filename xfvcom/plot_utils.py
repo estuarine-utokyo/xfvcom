@@ -2,7 +2,7 @@ import pandas as pd
 from .helpers import FrameGenerator, create_gif, convert_gif_to_mp4
 
 def create_anim_2d_plot(plotter, var_name, siglay=None, fps=10, generate_gif=True, generate_mp4=False,
-                            cleanup=True, post_process_func=None, plot_kwargs=None):
+                        batch_size=500, cleanup=False, post_process_func=None, plot_kwargs=None):
     """
     Generate a 2D plot animation as a GIF/MP4.
 
@@ -48,7 +48,8 @@ def create_anim_2d_plot(plotter, var_name, siglay=None, fps=10, generate_gif=Tru
     # Create GIF animation
     if generate_gif:
         output_gif = f"{anim_base_name}.gif"
-        create_gif(frames, output_gif, fps=fps, cleanup=cleanup)
+        #create_gif(frames, output_gif, fps=fps, cleanup=cleanup)
+        create_gif(frames, output_gif=output_gif, fps=fps, batch_size=batch_size, cleanup=cleanup)
     # Create MP4 animation
     if generate_mp4:
         output_mp4 = f"{anim_base_name}.mp4"
