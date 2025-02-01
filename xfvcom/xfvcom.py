@@ -27,7 +27,9 @@ class FvcomDataLoader:
     """
     Responsible for loading FVCOM output NetCDF files into an xarray.Dataset.
     """
-    def __init__(self, base_path=None, ncfile=None, obcfile_path=None, utm2geo=True, zone=54, north=True,
+    def __init__(self, base_path=None, ncfile=None, obcfile_path=None,
+                 engine="netcdf4", chunks=None,
+                 utm2geo=True, zone=54, north=True,
                  inverse=False, time_tolerance=None, verbose=False, **kwargs):
         """
         Initialize the FvcomDataLoader instance.
@@ -36,6 +38,8 @@ class FvcomDataLoader:
         - base_path: Directory path where the NetCDF file is located.
         - ncfile: Name of the NetCDF file to load.
         - obcfile_path: Path to the open boundary node file.
+        - engine: {"netcdf4", "scipy", "pydap", "h5netcdf", "zarr", None}, installed backend.
+        - chunks: Chunk size for dask array. Default is "auto".  
         - utm2geo: Convert UTM coordinates to geographic (lon, lat).
         - zone: UTM zone number.
         - north: True if the UTM zone is in the northern hemisphere.
@@ -46,8 +50,8 @@ class FvcomDataLoader:
         base_path = os.path.expanduser(base_path) if base_path else None
         base_path = self._add_trailing_slash(base_path) if base_path else None
         self.ncfilepath = f"{base_path}{ncfile}" if base_path else ncfile
-        self.engine = kwargs.get("engine", "netcdf4")
-        self.chunks = kwargs.get("chunks", None)
+        self.engine = engine
+        self.chunks = chunks
         self.decode_times = kwargs.get("decode_times", False)
         self.utm2geo = utm2geo
         self.zone = zone
@@ -68,13 +72,14 @@ class FvcomDataLoader:
             #self.ds['nv_zero'].attrs['long_name'] = 'nodes surrounding element in zero-based for matplotlib'
             self._setup_nv_ccw()
         
-        # ERSEM-FABM O2 concentration conversion to mg/L
+        # ERSEM O2 concentration conversion to mg/L
         if "O2_o" in self.ds.data_vars:
             # Keep the attributes before conversion, or the attributes will be lost.
             attrs = self.ds["O2_o"].attrs.copy()
             self.ds["O2_o"] = self.ds["O2_o"] * 0.032
             # Restore the attributes after conversion.
             attrs["units"] = "mg/L"
+            attrs["long_name"] = r"O$_2$"
             self.ds["O2_o"].attrs = attrs
         
         # Load FVCOM open boundary node if provided
@@ -97,7 +102,7 @@ class FvcomDataLoader:
         self.ds['nv_zero'] = xr.DataArray(self.ds['nv'].values.T - 1)
         self.ds['nv_zero'].attrs['long_name'] = 'nodes surrounding element in zero-based for matplotlib'
         # Extract triangle connectivity
-        #nv_ccw = self.ds["nv"].values.T - 1
+        nv_ccw = self.ds["nv"].values.T - 1
         nv_ccw = self.ds['nv_zero'].values
         # Reverse node order for counter-clockwise triangles that matplotlib expects.
         nv_ccw = nv_ccw[:, ::-1]
@@ -948,8 +953,12 @@ class FvcomPlotter(PlotHelperMixin):
             auto_levels = True
             if vmin is not None or vmax is not None:
                 auto_levels = False
-            vmin = vmin or kwargs.pop("vmin", values.min())
-            vmax = vmax or kwargs.pop("vmax", values.max())
+            vmin = vmin or kwargs.pop("vmin", values.min().item())
+            vmax = vmax or kwargs.pop("vmax", values.max().item())
+            if np.all(values == values[0]):  
+                vmax += 1e-6  # Sligtly increase vmax to avoid errors
+            if vmin > vmax:
+                raise ValueError(f"Invalid range: vmin ({vmin}) must be less than vmax ({vmax}).")
 
             if verbose:
                 print(f"Color range: {vmin} to {vmax}")

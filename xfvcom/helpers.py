@@ -4,15 +4,49 @@ from math import ceil
 import os
 import imageio.v2 as imageio
 from moviepy.editor import ImageSequenceClip
+import multiprocessing
 from multiprocessing import Pool
 from .helpers_utils import clean_kwargs, unpack_plot_kwargs
 import inspect
 import subprocess
 import cartopy.crs as ccrs
 from tqdm import tqdm
+#import dask
+#from dask.delayed import delayed
 
-def create_gif(frames, output_gif=None, fps=10, batch_size=500, cleanup=False):
+def create_gif(frames, output_gif=None, fps=10, cleanup=False):
     """
+    Create a GIF animation from a list of frames using memory-efficient processing.
+
+    Parameters:
+    - frames: List of file paths to the frames.
+    - output_gif: Output file path for the GIF. Defaults to "output.gif".
+    - fps: Frames per second for the GIF.
+    - cleanup: If True, delete the frame files after creating the GIF.
+
+    Returns:
+    - None
+    """
+    if output_gif is None:
+        output_gif = "Animation.gif"
+    output_gif = os.path.expanduser(output_gif)
+
+    # GIF作成の逐次処理（バッチなし）
+    with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
+        for frame in tqdm(frames, desc="Creating GIF", unit="frame"):
+            writer.append_data(imageio.imread(frame))
+
+    # フレーム削除処理
+    if cleanup:
+        for frame in tqdm(frames, desc="Cleaning up frames", unit="frame"):
+            os.remove(frame)
+
+    print(f"GIF animation saved at: {output_gif}")
+
+
+def create_gif_with_batch(frames, output_gif=None, fps=10, batch_size=500, cleanup=False):
+    """
+    Obsolete: This may not be superior to create_gif.
     Create a GIF animation from a list of frames with memory-efficient batch processing.
 
     Parameters:
@@ -58,38 +92,6 @@ def create_gif(frames, output_gif=None, fps=10, batch_size=500, cleanup=False):
             os.remove(frame)
 
     print(f"GIF animation saved at: {output_gif}")
-
-
-
-def create_gif_bak(frames, output_gif=None, fps=10, cleanup=True):
-    """
-    Create a GIF animation from a list of frames.
-
-    Parameters:
-    - frames: List of file paths to the frames.
-    - output_gif: Output file path for the GIF. - output_gif: Output file path for the GIF. 
-        If None, defaults to "output.gif". `~/` will be expanded to the user's home directory.
-    - fps: Frames per second for the GIF.
-    - cleanup: If True, delete the frame files after creating the GIF.
-
-    Returns:
-    - None
-    """
-
-    if output_gif is None:
-        output_gif = "output.gif"  # Default GIF file name
-    output_gif = os.path.expanduser(output_gif)
-    
-    with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
-        for frame in frames:
-            image = imageio.imread(frame)
-            writer.append_data(image)
-
-    if cleanup:
-        for frame in frames:
-            os.remove(frame)
-
-    print(f"Saved the GIF animation as '{output_gif}'.")
 
 def create_mp4(frames, output_mp4=None, fps=10, cleanup=True):
     """
@@ -202,7 +204,6 @@ def create_gif_from_frames(frames_dir, output_gif, fps=10, prefix=None, batch_si
     print(f"GIF Animation created successfully at: {output_gif}")
 
 
-
 class FrameGenerator:
     @staticmethod
     def generate_frame(args):
@@ -261,7 +262,7 @@ class FrameGenerator:
         return plotter.plot_2d(da=da, save_path=save_path, post_process_func=wrapped_post_process_func, **plot_kwargs)
     
     @classmethod
-    def generate_frames(cls, data_array, output_dir, plotter, base_name="frame", post_process_func=None, **plot_kwargs):
+    def generate_frames(cls, data_array, output_dir, plotter, processes, base_name="frame", post_process_func=None, **plot_kwargs):
         """
         Generate frames using multiprocessing with the class's generate_frame method.
         """
@@ -269,12 +270,27 @@ class FrameGenerator:
         os.makedirs(output_dir, exist_ok=True)
 
         time_indices = range(data_array.sizes["time"])
-        args_list = [
-            (cls, time, data_array, plotter, output_dir, base_name, post_process_func, plot_kwargs) for time in time_indices
-        ]
+        args_list = [(cls, time, data_array, plotter, output_dir, base_name, post_process_func, plot_kwargs) for time in time_indices]
+
+        # Check the number of available processes
+        max_procs = multiprocessing.cpu_count()
+        # スパコンのジョブ環境で設定されたプロセス数を取得（なければNone）
+        job_procs = os.environ.get("SLURM_CPUS_PER_TASK") or os.environ.get("PBS_NP") or os.environ.get("LSB_DJOB_NUMPROC")
+
+        # 取得した環境変数を整数に変換（環境変数が None の場合はデフォルトを max_procs に）
+        if job_procs:
+            job_procs = int(job_procs)
+        else:
+            job_procs = max_procs  # 環境変数がない場合は最大コア数を仮の値とする
+
+        print(f"Total available cores: {job_procs}")
+        
+        # 指定した processes をチェック
+        if processes > job_procs:
+            raise ValueError(f"Error: The specified processes ({processes}) exceed the available job processes ({job_procs}).")
 
         # Use the class's generate_frame method
-        with Pool() as pool:
+        with Pool(processes=processes) as pool:
             frames = pool.map(cls.generate_frame, args_list)
 
         return frames
