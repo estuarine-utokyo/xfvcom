@@ -2,6 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from math import ceil
 import os
+import numpy as np
 import imageio.v2 as imageio
 from moviepy.editor import ImageSequenceClip
 import multiprocessing
@@ -226,7 +227,73 @@ class FrameGenerator:
         return save_path
 
     @staticmethod
+    def generate_frame_batch(args):
+        """
+        各プロセスが `time_slices` に含まれる複数の time ステップを一括処理
+        """
+        cls, time_slice, data_array, plotter, output_dir, base_name, post_process_func, plot_kwargs = args
+
+        # Unpack and clean plot_kwargs
+        #print("Original plot_kwargs:", plot_kwargs)
+        plot_kwargs = unpack_plot_kwargs(plot_kwargs)
+        #print("Unpacked plot_kwargs:", plot_kwargs)
+        plot_kwargs = clean_kwargs(plotter.plot_2d, plot_kwargs)
+        #print("Cleaned plot_kwargs:", plot_kwargs)
+        #save_path = os.path.join(output_dir, f"{base_name}_{time}.png")
+
+        # 各プロセス専用フォルダを作成（ディスク I/O 競争を防止）
+        rank = multiprocessing.current_process()._identity[0]  # プロセスID
+        proc_output_dir = os.path.join(output_dir, f"proc_{rank}")
+        os.makedirs(proc_output_dir, exist_ok=True)
+        
+        # メモリ上に確保（I/O オーバーヘッド削減）
+        da = data_array.isel(time=time_slice).load()
+
+        frames = []
+        for i, time in enumerate(time_slice):
+            save_path = os.path.join(proc_output_dir, f"{base_name}_{time}.png")
+            # デバッグ用の出力
+            print(f"Processing time={time}, ds.dims={da.dims}")
+            frame_data = da.isel(time=i) if 'time' in da.dims else da
+            cls.plot_data(frame_data, time, plotter, save_path, post_process_func, plot_kwargs)
+            frames.append(save_path)
+
+        return frames
+
+    @staticmethod
     def plot_data(data_array, time=None, plotter=None, save_path=None, post_process_func=None, plot_kwargs=None):
+        """
+        Generate a single frame with the given parameters.
+
+        Parameters:
+        - data_array: DataArray to plot.
+        - time: Time index to select from the DataArray.
+        - plotter: FvcomPlotter instance used for plotting.
+        - save_path: Path to save the generated frame.
+        - post_process_func: Function to apply custom processing to the plot.
+        - plot_kwargs: Additional arguments for the plot.
+        """
+        da = data_array
+
+        # Call the plotter's plot_2d method with the given arguments.
+        def wrapped_post_process_func(ax):
+            if post_process_func:
+                # This function is used to dynamically pass the required arguments if specified.
+                func_args = inspect.signature(post_process_func).parameters
+
+                # Dynamically pass the required arguments (da, time).
+                kwargs = {"ax": ax}
+                if "da" in func_args:
+                    kwargs["da"] = da
+                if "time" in func_args:
+                    kwargs["time"] = time
+                
+                post_process_func(**kwargs)
+        
+        return plotter.plot_2d(da=da, save_path=save_path, post_process_func=wrapped_post_process_func, **plot_kwargs)
+
+    @staticmethod
+    def plot_data_org(data_array, time=None, plotter=None, save_path=None, post_process_func=None, plot_kwargs=None):
         """
         Generate a single frame with the given parameters.
 
@@ -262,7 +329,7 @@ class FrameGenerator:
         return plotter.plot_2d(da=da, save_path=save_path, post_process_func=wrapped_post_process_func, **plot_kwargs)
     
     @classmethod
-    def generate_frames(cls, data_array, output_dir, plotter, processes, base_name="frame", post_process_func=None, **plot_kwargs):
+    def generate_frames_org(cls, data_array, output_dir, plotter, processes, base_name="frame", post_process_func=None, **plot_kwargs):
         """
         Generate frames using multiprocessing with the class's generate_frame method.
         """
@@ -292,6 +359,47 @@ class FrameGenerator:
         # Use the class's generate_frame method
         with Pool(processes=processes) as pool:
             frames = pool.map(cls.generate_frame, args_list)
+
+        return frames
+
+    @classmethod
+    def generate_frames(cls, data_array, output_dir, plotter, processes, base_name="frame", post_process_func=None, **plot_kwargs):
+        """
+        Generate frames using multiprocessing with the class's generate_frame method.
+        """
+        output_dir = os.path.expanduser(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+
+        #time_indices = range(data_array.sizes["time"])
+        #args_list = [(cls, time, data_array, plotter, output_dir, base_name, post_process_func, plot_kwargs) for time in time_indices]
+
+        # Check the number of available processes
+        max_procs = multiprocessing.cpu_count()
+        # スパコンのジョブ環境で設定されたプロセス数を取得（なければNone）
+        job_procs = os.environ.get("SLURM_CPUS_PER_TASK") or os.environ.get("PBS_NP") or os.environ.get("LSB_DJOB_NUMPROC")
+
+        # 取得した環境変数を整数に変換（環境変数が None の場合はデフォルトを max_procs に）
+        if job_procs:
+            job_procs = int(job_procs)
+        else:
+            job_procs = max_procs  # 環境変数がない場合は最大コア数を仮の値とする
+
+        print(f"Total available cores: {job_procs}")
+        
+        # 指定した processes をチェック
+        if processes > job_procs:
+            raise ValueError(f"Error: The specified processes ({processes}) exceed the available job processes ({job_procs}).")
+
+        time_size = data_array.sizes["time"]
+        time_slices = np.array_split(range(time_size), processes)
+        args_list = [(cls, time_slice, data_array, plotter, output_dir, base_name, post_process_func, plot_kwargs) for time_slice in time_slices]
+
+        # Use the class's generate_frame method
+        #with Pool(processes=processes) as pool:
+        #    frames = pool.map(cls.generate_frame, args_list)
+
+        with Pool(processes=processes) as pool:
+            frames = pool.map(cls.generate_frame_batch, args_list)
 
         return frames
 

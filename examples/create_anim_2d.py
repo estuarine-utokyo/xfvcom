@@ -21,7 +21,7 @@ ncfiles = ["tb_0001.nc"]
 index_ncfile = 0
 
 # Specify the number of processes
-nprocs = 16
+nprocs = 20
 # Create an instance of FvcomDataLoader where fvcom.ds is a Dataset
 # 1. メタデータのみを読み込んで time のサイズを取得
 ncfile_path = f"{base_path}/{ncfiles[index_ncfile]}"
@@ -44,15 +44,26 @@ def custome_plot(ax, da, time):
     ax.set_title(f"Time: {datetime}")
 
 def anim(nprocs=16, var_name=None, siglay=0, plot_kwargs=None, plotter=None):
-    # Invoke xfvcom.plot_utils.create_gif_anim_2d_plot
-    create_anim_2d_plot(plotter, nprocs, var_name, siglay=siglay, fps=10, generate_gif=True, generate_mp4=False,
-                        cleanup=True, post_process_func=custome_plot, plot_kwargs=plot_kwargs)
+    """
+    Generate animation frames using multiprocessing and create a GIF animation.
+
+    Parameters:
+    - nprocs: Number of processes.
+    - var_name: Variable name to plot.
+    - siglay: Sigma layer index.
+    - plot_kwargs: Dictionary of plot settings.
+    - plotter: FvcomPlotter instance.
+    """
+    create_anim_2d_plot(plotter=plotter, processes=nprocs, var_name=var_name, siglay=siglay, fps=10,
+                        generate_gif=True, generate_mp4=False, cleanup=True,
+                        post_process_func=custome_plot, plot_kwargs=plot_kwargs)
+
 
 var_names = ["salinity", "temp", "O2_o", "N1_p", "N3_n", "N4_n", "N5_s", "P1_Chl", "P2_Chl", "P3_Chl", "P4_Chl"]
 var_names = ["O2_o"]
 siglays =[1]
 
-# You may slice by the time index range, e.g., `time=slice(0,10)`, `time=slice(0, None)` for the whole range.
+# Slice by the time index range, e.g., `time=slice(0,100)`, `time=slice(0, None)` for the whole range.
 time = slice(0, None)
 #time_index = pd.DatetimeIndex(fvcom.ds['time'].values)
 # 毎月15日の12:00を条件にフィルタリング
