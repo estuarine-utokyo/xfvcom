@@ -273,7 +273,11 @@ class FrameGenerator:
         - post_process_func: Function to apply custom processing to the plot.
         - plot_kwargs: Additional arguments for the plot.
         """
-        da = data_array
+        
+        if 'time' in data_array.dims:
+            da = data_array.isel(time=time)
+        else:
+            da = data_array
 
         # Call the plotter's plot_2d method with the given arguments.
         def wrapped_post_process_func(ax):
