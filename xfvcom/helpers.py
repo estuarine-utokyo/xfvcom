@@ -274,7 +274,7 @@ class FrameGenerator:
         - plot_kwargs: Additional arguments for the plot.
         """
         
-        if 'time' in data_array.dims:
+        if data_array is not None and 'time' in data_array.dims:
             da = data_array.isel(time=time)
         else:
             da = data_array
