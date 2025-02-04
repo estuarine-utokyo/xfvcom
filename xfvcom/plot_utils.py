@@ -41,7 +41,8 @@ def create_anim_2d_plot(plotter, processes, var_name, siglay=None, fps=10, gener
     len_suffix = len(suffix)
     # Convert subscripts $_x$ -> x
     long_name = re.sub(r"\$_(\d+)\$", r"\1", da.long_name)
-    base_name = f"{long_name}_{start_date}-{end_date}{suffix}"
+    # base_name = f"{long_name}_{start_date}-{end_date}{suffix}"
+    base_name = f"{var_name}_{start_date}-{end_date}{suffix}"
     
     # Generate movie frames using helper methods in helpers.py
     output_dir = f"frames_{var_name}"

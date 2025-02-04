@@ -12,8 +12,8 @@ import inspect
 import subprocess
 import cartopy.crs as ccrs
 from tqdm import tqdm
-#import dask
-#from dask.delayed import delayed
+# import dask
+# from dask.delayed import delayed
 
 def create_gif(frames, output_gif=None, fps=10, cleanup=False):
     """
@@ -148,6 +148,7 @@ def convert_gif_to_mp4(input_gif, output_mp4):
 
 def create_gif_from_frames(frames_dir, output_gif, fps=10, prefix=None, batch_size=500, cleanup=False):
     """
+    Revised this method
     Create a GIF animation from PNG frames in batches to handle memory constraints.
 
     Parameters:

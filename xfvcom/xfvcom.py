@@ -27,7 +27,8 @@ class FvcomDataLoader:
     """
     Responsible for loading FVCOM output NetCDF files into an xarray.Dataset.
     """
-    def __init__(self, base_path=None, ncfile=None, obcfile_path=None,
+    # def __init__(self, base_path=None, ncfile=None, obcfile_path=None,
+    def __init__(self, ncfile_path=None, obcfile_path=None,
                  engine="netcdf4", chunks=None,
                  utm2geo=True, zone=54, north=True,
                  inverse=False, time_tolerance=None, verbose=False, **kwargs):
@@ -35,8 +36,9 @@ class FvcomDataLoader:
         Initialize the FvcomDataLoader instance.
         
         Parameters:
-        - base_path: Directory path where the NetCDF file is located.
-        - ncfile: Name of the NetCDF file to load.
+        #- base_path: Directory path where the NetCDF file is located.
+        #- ncfile: Name of the NetCDF file to load.
+        - ncfile_path: Netcdf file path
         - obcfile_path: Path to the open boundary node file.
         - engine: {"netcdf4", "scipy", "pydap", "h5netcdf", "zarr", None}, installed backend.
         - chunks: Chunk size for dask array. Default is "auto".  
@@ -47,9 +49,10 @@ class FvcomDataLoader:
         - time_tolerence: Tolerence in minutes in integer to snap time to the nearest hour.
         - **kwargs: Additional keyword arguments for xarray.open_dataset.
         """
-        base_path = os.path.expanduser(base_path) if base_path else None
-        base_path = self._add_trailing_slash(base_path) if base_path else None
-        self.ncfilepath = f"{base_path}{ncfile}" if base_path else ncfile
+        # base_path = os.path.expanduser(base_path) if base_path else None
+        # base_path = self._add_trailing_slash(base_path) if base_path else None
+        # self.ncfilepath = f"{base_path}{ncfile}" if base_path else ncfile
+        self.ncfile_path = ncfile_path
         self.engine = engine
         self.chunks = chunks
         self.decode_times = kwargs.get("decode_times", False)
@@ -163,12 +166,12 @@ class FvcomDataLoader:
 
     def _load_dataset(self):
         try:
-            ds = xr.open_dataset(self.ncfilepath, engine=self.engine, chunks=self.chunks, decode_times=self.decode_times)
+            ds = xr.open_dataset(self.ncfile_path, engine=self.engine, chunks=self.chunks, decode_times=self.decode_times)
             ds = ds.drop_vars('Itime2') if 'Itime2' in ds.variables else ds
-            print(f"Dataset loaded successfully from {self.ncfilepath}")
+            print(f"Dataset loaded successfully from {self.ncfile_path}")
             return xr.decode_cf(ds)
         except FileNotFoundError:
-            raise FileNotFoundError(f"File not found: {self.ncfilepath}")
+            raise FileNotFoundError(f"File not found: {self.ncfile_path}")
 
     def _convert_utm_to_geo(self):
         """Convert UTM coordinates (x, y) and (xc, yc) to geographic (lon, lat)."""
