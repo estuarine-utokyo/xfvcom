@@ -11,7 +11,10 @@ from datetime import datetime
 from matplotlib.dates import DateFormatter
 import matplotlib.cm as cm
 from matplotlib.colors import Normalize, BoundaryNorm
+import matplotlib.colors as mcolors
 import matplotlib.tri as tri
+from matplotlib.gridspec import GridSpec
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 #from cartopy.io.img_tiles import StadiaMapsTiles
@@ -335,17 +338,41 @@ class FvcomPlotConfig:
     """
     Stores plot configuration settings.
     """
-    def __init__(self, figsize=(8,2), width=800, height=200, dpi=300, fontsize=None,  **kwargs):
+    def __init__(self, figsize=(8,2), width=800, height=200, dpi=100, 
+                 cbar_size="1%", cbar_pad=0.1, cmap="jet", levels=21,
+                 title_fontsize=14, label_fontsize=12, tick_fontsize=11, fontsize=None, **kwargs):
+        """
+        Initialize the FvcomPlotConfig instance.
+        Parameters:
+        - figsize: Figure size in inches (width, height).
+        - width: Width of the plot in pixels.
+        - height: Height of the plot in pixels.
+        - dpi: Dots per inch for the plot.
+        - cbar_size: Size of the colorbar.
+        - cbar_pad: Padding between the colorbar and the plot.
+        - cmap: Colormap to use for the plot.
+        - levels: Number of levels for the colormap.
+        - fontsize: Font size settings for various plot elements.
+        - **kwargs: Additional keyword arguments for customization.
+        """
         self.figsize = figsize
         self.width = width
         self.height = height
+        self.dpi = dpi
+        self.cbar_size = cbar_size
+        self.cbar_pad = cbar_pad
+        self.cmap = cmap
+        self.levels = levels
+        self.title_fontsize = title_fontsize
+        self.label_fontsize = label_fontsize
+        self.tick_fontsize = tick_fontsize
+        # Default font sizes for various plot elements
         default_fontsize = {
             'xticks': 11, 'yticks': 11, 'xlabel': 12, 'ylabel': 12, 'title': 14,
             'legend': 12, 'annotation': 12, 'colorbar': 11, 'tick_params': 11,
             'text': 12, 'legend_title': 12, 'cbar_title': 14, 'cbar_label': 14
         }
         self.fontsize = {**default_fontsize, **(fontsize or {})}
-        self.dpi = dpi
         self.plot_color = kwargs.get("plot_color", "red")
         self.date_format = kwargs.get('date_format', '%Y-%m-%d')
         # Arrow configuration with defaults provided dynamically
@@ -690,9 +717,19 @@ class FvcomPlotter(PlotHelperMixin):
         - index: Index of the `node` or `nele` to plot (default: None).
         - start: Start time for the plot (datetime or string).
         - end: End time for the plot (datetime or string).
+        - depth: If True, plot depth instead of vertical coordinate.
+        - rolling_window: Size of the rolling window for moving average (optional).
         - ax: matplotlib axis object. If None, a new axis will be created.
+        - ylim: Y-axis limits (optional).
+        - levels: Number of contour levels or specific levels (optional).
+        - vmin: Minimum value for color scale (optional).
+        - vmax: Maximum value for color scale (optional).
+        - cmap: Color map for the plot (optional).
         - save_path: Path to save the plot as an image (optional).
-        - **kwargs: Additional arguments for customization (e.g., levels, cmap).
+        - method: Plotting method ('contourf' or 'pcolormesh').
+        - add_contour: If True, add contour lines on top of the filled contour.
+        - label_contours: If True, label contour lines.
+        - **kwargs: Additional arguments for customization (e.g., levels).
         """
         if var_name not in self.ds:
             print(f"Error: The variable '{var_name}' is not found in the dataset.")
@@ -1140,6 +1177,91 @@ class FvcomPlotter(PlotHelperMixin):
         ax.scatter(x, y, transform=transform, marker=marker, color=color, s=size, **kwargs)
 
         return ax
+
+    def ts_contourf(self, da, x='time', y='siglay', xlim=None, ylim=None, clim=None, xlabel='Time', ylabel='Sigma layer',
+                   rolling=False, window=24*30+1, min_periods=None, ax=None, title=None,
+                   contourf_kwargs={}, colorbar_kwargs={}):
+        """
+        Plot a contour map of vertical time-series data.
+
+        Parameters:
+        ----------
+        da (DataArray): DataArray for specified var_name with the dimension of (time, sigma).
+        xlim (tuple): Tuple of start and end times (e.g., ('2010-01-01', '2022-12-31')).
+        ylim (tuple): Vertical range for the y-axis (e.g., (0, 1)).
+        clim (tuple): Value range for the contour plot (e.g., (8, 30)).
+        x (str): Name of the x-axis coordinate. Default is 'time'.
+        y (str): Name of the y-axis coordinate. Default is 'siglay'.
+        xlabel (str): Label for the x-axis. Default is 'Time'.
+        ylabel (str): Label for the y-axis. Default is 'Depth (m)'.
+        rolling (bool): Whether to apply a rolling mean. Default is False.
+        window (int): Rolling window size in hours. Default is 24*30+1 (monthly mean).
+        min_periods (int): Minimum number of data points required in the rolling window.
+                        If None, defaults to window // 2 + 1.
+        ax (matplotlib.axes.Axes): An existing axis to plot on. If None, a new axis will be created.
+        title (str): Title for the plot. If None, it is derived from metadata.
+
+        Returns:
+        ----------
+        tuple: (fig, ax, cbar)
+        """
+        #da = self.dataset[var_name]
+        var_name = da.name
+
+        # Apply rolling mean if specified
+        if rolling:
+            if min_periods is None:
+                min_periods = window // 2 + 1
+            da = da.rolling(time=window, center=True, min_periods=min_periods).mean()
+
+        # Extract metadata for labels
+        long_name = da.attrs.get('long_name', var_name)
+        units = da.attrs.get('units', '')
+        cbar_label = f"{long_name} ({units})"
+        title = title or f"{long_name}"
+
+        # Create figure and axis if not provided
+        if ax is None:
+            fig = plt.figure(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
+            gs = GridSpec(1, 1, left=0.1, right=0.9, top=0.9, bottom=0.1)
+            ax = fig.add_subplot(gs[0])
+        else:
+            fig = ax.figure
+
+        # Plot the contour map
+        contourf_kwargs.setdefault('extend', 'both')
+        levels = contourf_kwargs.pop("levels", self.cfg.levels)
+        cmap = contourf_kwargs.pop("cmap", self.cfg.cmap)
+    
+        if clim is None:
+            clim = (da.min().item(), da.max().item())
+        vmin = contourf_kwargs.pop("vmin", clim[0])
+        vmax = contourf_kwargs.pop("vmax", clim[1])
+        plot = da.plot.contourf(
+            x=x, y=y, ylim=ylim, levels=levels, cmap=cmap,
+            vmin=vmin, vmax=vmax, ax=ax, add_colorbar=False, **contourf_kwargs
+        )
+        if xlim is None:
+            xlim = (da[x].min().item(), da[x].max().item())
+        if ylim is None:
+            ylim = (da[y].min().item(), da[y].max().item())
+        # Set axis limits
+        ax.set_xlim(pd.Timestamp(xlim[0]), pd.Timestamp(xlim[1]))
+        ax.set_title(title, fontsize=self.cfg.title_fontsize)
+        ax.set_ylabel(ylabel, fontsize=self.cfg.label_fontsize)
+        ax.set_xlabel(xlabel, fontsize=self.cfg.label_fontsize)
+        ax.tick_params(axis='x', labelsize=self.cfg.tick_fontsize)
+        ax.tick_params(axis='y', labelsize=self.cfg.tick_fontsize)
+        ax.invert_yaxis()
+
+        # Add colorbar
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size=self.cfg.cbar_size, pad=self.cfg.cbar_pad)
+        cbar = fig.colorbar(plot, cax=cax, extend='both', **colorbar_kwargs)
+        cbar.set_label(cbar_label, fontsize=self.cfg.label_fontsize)
+
+        return fig, ax, cbar
+
 
 
 # Example usage

@@ -511,3 +511,53 @@ class PlotHelperMixin:
             plt.close(fig)
 
         print(f"Saved {num_batches} figures as '{save_prefix}_batch_#.png'.")
+
+# Other helper functions can be added here as needed.
+
+def get_index_by_value(array, value):
+    """
+    Get the index of a value in a list or numpy array.
+    This function works for both lists and numpy arrays.
+
+    Parameters:
+        array (list or numpy.ndarray): The list or numpy array to search.
+        value (int or float): The value to find in the array.
+
+    Returns:
+        int: The index of the value in the array.
+
+    Raises:
+        ValueError: If the value is not found in the array.
+        TypeError: If the provided array type is not supported.
+    
+    Example:
+        >>> lst = [10, 20, 30, 40]
+        >>> get_index_by_value(lst, 30)
+        2
+
+        >>> arr = np.array([10, 20, 30, 40])
+        >>> get_index_by_value(arr, 30)
+        2
+        >>> get_index_by_value(lst, 50)
+        ValueError: 50 does not exist in the list.
+        >>> get_index_by_value(arr, 50)
+        ValueError: 50 does not exist in the numpy array.
+    """
+    # If the array is a list, attempt to find the index using the list.index() method.
+    if isinstance(array, list):
+        try:
+            return array.index(value)
+        except ValueError:
+            raise ValueError(f"{value} does not exist in the list.")
+    
+    # If the array is a numpy array, use np.where to find the index.
+    elif isinstance(array, np.ndarray):
+        index_array = np.where(array == value)[0]
+        if index_array.size > 0:
+            return int(index_array[0])
+        else:
+            raise ValueError(f"{value} does not exist in the numpy array.")
+    
+    # If the array is neither a list nor a numpy array, raise a TypeError.
+    else:
+        raise TypeError(f"Unsupported type: {type(array)}. Expected list or numpy array.")
