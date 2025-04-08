@@ -1178,9 +1178,8 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def ts_contourf(self, da, x='time', y='siglay', xlim=None, ylim=None, clim=None, xlabel='Time', ylabel='Sigma layer',
-                   rolling=False, window=24*30+1, min_periods=None, ax=None, title=None,
-                   contourf_kwargs={}, colorbar_kwargs={}):
+    def ts_contourf(self, da, x='time', y='siglay', xlim=None, ylim=None, clim=None, xlabel='Time', ylabel='Sigma layer', title=None,
+                   rolling=False, window=24*30+1, min_periods=None, ax=None, contourf_kwargs={}, colorbar_kwargs={}):
         """
         Plot a contour map of vertical time-series data.
 
@@ -1194,18 +1193,18 @@ class FvcomPlotter(PlotHelperMixin):
         y (str): Name of the y-axis coordinate. Default is 'siglay'.
         xlabel (str): Label for the x-axis. Default is 'Time'.
         ylabel (str): Label for the y-axis. Default is 'Depth (m)'.
+        title (str): Title for the plot. Default is None.
         rolling (bool): Whether to apply a rolling mean. Default is False.
         window (int): Rolling window size in hours. Default is 24*30+1 (monthly mean).
         min_periods (int): Minimum number of data points required in the rolling window.
                         If None, defaults to window // 2 + 1.
         ax (matplotlib.axes.Axes): An existing axis to plot on. If None, a new axis will be created.
-        title (str): Title for the plot. If None, it is derived from metadata.
 
         Returns:
         ----------
         tuple: (fig, ax, cbar)
         """
-        #da = self.dataset[var_name]
+
         var_name = da.name
 
         # Apply rolling mean if specified
@@ -1237,6 +1236,7 @@ class FvcomPlotter(PlotHelperMixin):
             clim = (da.min().item(), da.max().item())
         vmin = contourf_kwargs.pop("vmin", clim[0])
         vmax = contourf_kwargs.pop("vmax", clim[1])
+
         plot = da.plot.contourf(
             x=x, y=y, ylim=ylim, levels=levels, cmap=cmap,
             vmin=vmin, vmax=vmax, ax=ax, add_colorbar=False, **contourf_kwargs
@@ -1255,10 +1255,11 @@ class FvcomPlotter(PlotHelperMixin):
         ax.invert_yaxis()
 
         # Add colorbar
+        cbar_label = colorbar_kwargs.pop("label", cbar_label)
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size=self.cfg.cbar_size, pad=self.cfg.cbar_pad)
-        cbar = fig.colorbar(plot, cax=cax, extend='both', **colorbar_kwargs)
-        cbar.set_label(cbar_label, fontsize=self.cfg.label_fontsize)
+        cbar = fig.colorbar(plot, cax=cax, extend='both', label=cbar_label, **colorbar_kwargs)
+        cbar.ax.yaxis.label.set_size(self.cfg.label_fontsize)
 
         return fig, ax, cbar
 
