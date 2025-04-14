@@ -1178,19 +1178,18 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def ts_contourf(self, da, x='time', y='siglay', xlim=None, ylim=None, clim=None, xlabel='Time', ylabel='Sigma layer', title=None,
-                   rolling=False, window=24*30+1, min_periods=None, ax=None, contourf_kwargs={}, colorbar_kwargs={}):
+    def ts_contourf(self, da, x='time', y='siglay', xlim=None, ylim=None, xlabel='Time', ylabel='Sigma layer', title=None,
+                   rolling=False, window=24*30+1, min_periods=None, ax=None, contourf_kwargs={}, colorbar_kwargs={}, **kwargs):
         """
-        Plot a contour map of vertical time-series data.
+        Plot a contour map of vertical time-series DataArray.
 
         Parameters:
         ----------
         da (DataArray): DataArray for specified var_name with the dimension of (time, sigma).
-        xlim (tuple): Tuple of start and end times (e.g., ('2010-01-01', '2022-12-31')).
-        ylim (tuple): Vertical range for the y-axis (e.g., (0, 1)).
-        clim (tuple): Value range for the contour plot (e.g., (8, 30)).
         x (str): Name of the x-axis coordinate. Default is 'time'.
         y (str): Name of the y-axis coordinate. Default is 'siglay'.
+        xlim (tuple): Tuple of start and end times (e.g., ('2010-01-01', '2022-12-31')).
+        ylim (tuple): Vertical range for the y-axis (e.g., (0, 1)).
         xlabel (str): Label for the x-axis. Default is 'Time'.
         ylabel (str): Label for the y-axis. Default is 'Depth (m)'.
         title (str): Title for the plot. Default is None.
@@ -1199,13 +1198,14 @@ class FvcomPlotter(PlotHelperMixin):
         min_periods (int): Minimum number of data points required in the rolling window.
                         If None, defaults to window // 2 + 1.
         ax (matplotlib.axes.Axes): An existing axis to plot on. If None, a new axis will be created.
+        contourf_kwargs (dict): Additional arguments for contourf.
+        colorbar_kwargs (dict): Additional arguments for colorbar.
+        **kwargs: Additional arguments for contourf. Not supporting additional kwargs for colorbar.
 
         Returns:
         ----------
         tuple: (fig, ax, cbar)
         """
-
-        var_name = da.name
 
         # Apply rolling mean if specified
         if rolling:
@@ -1214,6 +1214,7 @@ class FvcomPlotter(PlotHelperMixin):
             da = da.rolling(time=window, center=True, min_periods=min_periods).mean()
 
         # Extract metadata for labels
+        var_name = da.name
         long_name = da.attrs.get('long_name', var_name)
         units = da.attrs.get('units', '')
         cbar_label = f"{long_name} ({units})"
@@ -1227,20 +1228,34 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             fig = ax.figure
 
-        # Plot the contour map
-        contourf_kwargs.setdefault('extend', 'both')
-        levels = contourf_kwargs.pop("levels", self.cfg.levels)
-        cmap = contourf_kwargs.pop("cmap", self.cfg.cmap)
-    
-        if clim is None:
-            clim = (da.min().item(), da.max().item())
-        vmin = contourf_kwargs.pop("vmin", clim[0])
-        vmax = contourf_kwargs.pop("vmax", clim[1])
+        # Merge kwargs with contourf_kwargs.
+        merged_contourf_kwargs = {**contourf_kwargs, **kwargs}
 
+        levels = merged_contourf_kwargs.pop("levels", self.cfg.levels)
+        cmap = merged_contourf_kwargs.pop("cmap", self.cfg.cmap)
+        vmin = merged_contourf_kwargs.pop("vmin", da.min().item())
+        vmax = merged_contourf_kwargs.pop("vmax", da.max().item())
+        
+        if "extend" in merged_contourf_kwargs:
+            extend = merged_contourf_kwargs.pop("extend")
+        else:
+            data_min = da.min().item()
+            data_max = da.max().item()
+            # Determine extend based on vmin and vmax
+            if vmin <= data_min and vmax >= data_max:
+                extend = 'neither'
+            elif vmin <= data_min and vmax < data_max:
+                extend = 'min'
+            elif vmin > data_min and vmax >= data_max:
+                extend = 'max'
+            else:
+                extend = 'both'
+
+        # Plot the contour map
         plot = da.plot.contourf(
             x=x, y=y, ylim=ylim, levels=levels, cmap=cmap,
-            vmin=vmin, vmax=vmax, ax=ax, add_colorbar=False, **contourf_kwargs
-        )
+            vmin=vmin, vmax=vmax, extend=extend, ax=ax, add_colorbar=False,
+            **merged_contourf_kwargs)
         if xlim is None:
             xlim = (da[x].min().item(), da[x].max().item())
         if ylim is None:
