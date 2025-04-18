@@ -1278,6 +1278,133 @@ class FvcomPlotter(PlotHelperMixin):
 
         return fig, ax, cbar
 
+    def ts_plot(self, da: xr.DataArray, index: int = None, k: int = None, ax=None,
+                xlabel: str = None, ylabel: str = None, title: str = None,
+                color: str = None, linestyle: str = None, date_format: str = None,
+                start=None, end=None, rolling_window=None, log=False, **kwargs):
+        """
+        1-D time series plot
+
+        Parameters:
+        ----------
+        da : xr.DataArray
+            DataArray with a 'time' dimension.
+        index : int, optional
+            Index for spatial dimension (node/nele). Not needed for pure time series.
+        k : int, optional
+            Layer index for vertical dimension (siglay/siglev). Not needed for 2D or 1D series.
+        ax : matplotlib.axes.Axes, optional
+            Existing axis. Creates new one if None.
+        xlabel : str, optional
+            X-axis label. Default: 'Time'.
+        ylabel : str, optional
+            Y-axis label. Default: da.long_name or da.name.
+        title : str, optional
+            Plot title. Default: '<ylabel> Time Series'.
+        color : str, optional
+            Line color. Default: self.cfg.plot_color.
+        linestyle : str, optional
+            Line style. Default: '-'.
+        date_format : str, optional
+            Date formatter. Default: self.cfg.date_format.
+        start : str, optional
+            Start time for the plot. Default: None.
+        end : str, optional
+            End time for the plot. Default: None.
+        rolling_window : int, optional
+            Size of the rolling window for moving average. Default: None.
+        log : bool, optional
+            If True, use logarithmic scale. Default: False.
+        **kwargs : dict
+            Extra keyword args for ax.plot().
+        """
+        # 1. Determine data structure and select appropriate slice
+        dims = da.dims
+
+        # If vertical series (time, siglay/siglev, node/nele)
+        if 'time' in dims and ('siglay' in dims or 'siglev' in dims):
+            layer_dim = 'siglay' if 'siglay' in dims else 'siglev'
+            # Identify spatial dimension ('node' or 'nele')
+            space_dims = [d for d in dims if d not in ('time', layer_dim)]
+            if len(space_dims) != 1:
+                raise ValueError(f"Unexpected dims for vertical time series: {dims}")
+            spatial_dim = space_dims[0]
+            if index is None or k is None:
+                raise ValueError(f"Both index and k are required for dims {dims}")
+            data = da.isel({spatial_dim: index, layer_dim: k})
+
+        # If 2D series (time, node) or (time, nele)
+        elif 'time' in dims and ('node' in dims or 'nele' in dims):
+            spatial_dim = 'node' if 'node' in dims else 'nele'
+            if index is None:
+                raise ValueError(f"Index is required for dims {dims}")
+            data = da.isel({spatial_dim: index})
+
+        # If pure 1D series (time,)
+        elif dims == ('time',):
+            data = da
+
+        else:
+            raise ValueError(f"Unsupported DataArray dims: {dims}")
+
+        # Apply rolling mean if specified
+        if rolling_window:
+            data = data.rolling(time=rolling_window, center=True).mean()
+
+        # Retrieve data attributes for labels
+        long_name = data.attrs.get("long_name", data.name)
+        units = data.attrs.get("units", "")
+
+        # Time range filtering
+        start_sel = np.datetime64(start) if start is not None else None
+        end_sel   = np.datetime64(end)   if end   is not None else None
+        data = data.sel(time=slice(start_sel, end_sel))
+        time = data["time"]
+
+        if log: # Check if log scale is requested
+            if data.min() <= 0:
+                print("Warning: Logarithmic scale cannot be used with non-positive values.")
+                print("Switching to linear scale.")
+                log = False
+
+        # 2. Prepare figure and axis
+        if ax is None:
+            fig, ax = plt.subplots(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
+        else:
+            fig = ax.figure
+
+        # 3. Set defaults
+        if xlabel is None:
+            xlabel = "Time"
+        if ylabel is None:
+            ylabel = f"{long_name} ({units})" if long_name else data.name
+        if title is None:
+            rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""  
+            if k is not None:
+                title = f"Time Series of {data.name} ({spatial_dim}={index}, {layer_dim}={k}){rolling_text}"
+            else:
+                title = f"Time Series of {data.name} ({spatial_dim}={index}){rolling_text}"
+        color      = color      or self.cfg.plot_color
+        linestyle  = linestyle  or "-"
+        date_format = date_format or self.cfg.date_format
+
+        # 4. Plot the data
+        times = data["time"].values
+        values = data.values
+        ax.plot(times, values, color=color, linestyle=linestyle, **kwargs)
+        if log: # Set log scale if specified
+            ax.set_yscale('log')
+
+        # 5. Format axes
+
+        ax.set_title(title, fontsize=self.cfg.fontsize['title'])
+        ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize['xlabel'])
+        ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize['ylabel'])
+        ax.xaxis.set_major_formatter(DateFormatter(date_format))
+        fig.autofmt_xdate()
+        #ax.grid(True)
+
+        return fig, ax
 
 
 # Example usage
