@@ -1277,10 +1277,9 @@ class FvcomPlotter(PlotHelperMixin):
                 extend = 'both'
 
         # Plot the contour map
-        plot = da.plot.contourf(
-            x=x, y=y, ylim=ylim, levels=levels, cmap=cmap,
-            vmin=vmin, vmax=vmax, extend=extend, ax=ax, add_colorbar=False,
-            **merged_contourf_kwargs)
+        plot = da.plot.contourf(x=x, y=y, ylim=ylim, levels=levels, cmap=cmap,
+                                vmin=vmin, vmax=vmax, extend=extend, ax=ax,
+                                add_colorbar=False, **merged_contourf_kwargs)
 
         #if xlim is None:
         #    xlim = (da[x].min().item(), da[x].max().item())
