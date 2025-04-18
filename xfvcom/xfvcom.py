@@ -1281,7 +1281,8 @@ class FvcomPlotter(PlotHelperMixin):
     def ts_plot(self, da: xr.DataArray, index: int = None, k: int = None, ax=None,
                 xlabel: str = None, ylabel: str = None, title: str = None,
                 color: str = None, linestyle: str = None, date_format: str = None,
-                start=None, end=None, rolling_window=None, log=False, **kwargs):
+                xlim: tuple = None, ylim: tuple = None,
+                rolling_window=None, log=False, **kwargs):
         """
         1-D time series plot
 
@@ -1307,10 +1308,10 @@ class FvcomPlotter(PlotHelperMixin):
             Line style. Default: '-'.
         date_format : str, optional
             Date formatter. Default: self.cfg.date_format.
-        start : str, optional
-            Start time for the plot. Default: None.
-        end : str, optional
-            End time for the plot. Default: None.
+        xlim : tuple, optional
+            X-axis limits (start, end). Default: None.
+        ylim : tuple, optional
+            Y-axis limits (ymin, ymax). Default: None.
         rolling_window : int, optional
             Size of the rolling window for moving average. Default: None.
         log : bool, optional
@@ -1355,10 +1356,12 @@ class FvcomPlotter(PlotHelperMixin):
         long_name = data.attrs.get("long_name", data.name)
         units = data.attrs.get("units", "")
 
-        # Time range filtering
-        start_sel = np.datetime64(start) if start is not None else None
-        end_sel   = np.datetime64(end)   if end   is not None else None
-        data = data.sel(time=slice(start_sel, end_sel))
+        # Time range filtering via xlim tuple
+        if xlim is not None:
+            # xlim should be like ('2020-01-01','2020-02-01')
+            start_sel = np.datetime64(xlim[0]) if xlim[0] is not None else None
+            end_sel   = np.datetime64(xlim[1]) if xlim[1] is not None else None
+            data = data.sel(time=slice(start_sel, end_sel))
         time = data["time"]
 
         if log: # Check if log scale is requested
@@ -1394,6 +1397,17 @@ class FvcomPlotter(PlotHelperMixin):
         ax.plot(times, values, color=color, linestyle=linestyle, **kwargs)
         if log: # Set log scale if specified
             ax.set_yscale('log')
+
+        # Apply y-axis limits if requested (None → keep current limit)
+        if ylim is not None:
+            ymin, ymax = ylim
+            # get current limits
+            curr_min, curr_max = ax.get_ylim()
+            # replace None with current value
+            new_min = curr_min if ymin is None else ymin
+            new_max = curr_max if ymax is None else ymax
+            # set both limits at once
+            ax.set_ylim(new_min, new_max)
 
         # 5. Format axes
 
