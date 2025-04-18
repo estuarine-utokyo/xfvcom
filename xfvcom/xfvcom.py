@@ -1179,7 +1179,8 @@ class FvcomPlotter(PlotHelperMixin):
         return ax
 
     def ts_contourf(self, da, x='time', y='siglay', xlim=None, ylim=None, xlabel='Time', ylabel='Sigma layer', title=None,
-                   rolling=False, window=24*30+1, min_periods=None, ax=None, contourf_kwargs={}, colorbar_kwargs={}, **kwargs):
+                   rolling=False, window=24*30+1, min_periods=None, ax=None, date_format=None,
+                   contourf_kwargs={}, colorbar_kwargs={}, **kwargs):
         """
         Plot a contour map of vertical time-series DataArray.
 
@@ -1198,6 +1199,7 @@ class FvcomPlotter(PlotHelperMixin):
         min_periods (int): Minimum number of data points required in the rolling window.
                         If None, defaults to window // 2 + 1.
         ax (matplotlib.axes.Axes): An existing axis to plot on. If None, a new axis will be created.
+        date_format (str): Date format for the x-axis. Default is None.
         contourf_kwargs (dict): Additional arguments for contourf.
         colorbar_kwargs (dict): Additional arguments for colorbar.
         **kwargs: Additional arguments for contourf. Not supporting additional kwargs for colorbar.
@@ -1219,6 +1221,7 @@ class FvcomPlotter(PlotHelperMixin):
         units = da.attrs.get('units', '')
         cbar_label = f"{long_name} ({units})"
         title = title or f"{long_name}"
+        date_format = date_format or self.cfg.date_format
 
         # Create figure and axis if not provided
         if ax is None:
@@ -1256,18 +1259,19 @@ class FvcomPlotter(PlotHelperMixin):
             x=x, y=y, ylim=ylim, levels=levels, cmap=cmap,
             vmin=vmin, vmax=vmax, extend=extend, ax=ax, add_colorbar=False,
             **merged_contourf_kwargs)
+
         if xlim is None:
             xlim = (da[x].min().item(), da[x].max().item())
         if ylim is None:
             ylim = (da[y].min().item(), da[y].max().item())
-        # Set axis limits
         ax.set_xlim(pd.Timestamp(xlim[0]), pd.Timestamp(xlim[1]))
-        ax.set_title(title, fontsize=self.cfg.title_fontsize)
-        ax.set_ylabel(ylabel, fontsize=self.cfg.label_fontsize)
-        ax.set_xlabel(xlabel, fontsize=self.cfg.label_fontsize)
-        ax.tick_params(axis='x', labelsize=self.cfg.tick_fontsize)
-        ax.tick_params(axis='y', labelsize=self.cfg.tick_fontsize)
-        ax.invert_yaxis()
+        ax.set_title(title, fontsize=self.cfg.fontsize['title'])
+        ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize['xlabel'])
+        ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize['ylabel'])
+        ax.xaxis.set_major_formatter(DateFormatter(date_format))
+        fig.autofmt_xdate()
+
+        # ax.invert_yaxis()
 
         # Add colorbar
         cbar_label = colorbar_kwargs.pop("label", cbar_label)
