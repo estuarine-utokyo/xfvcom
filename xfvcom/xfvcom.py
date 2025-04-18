@@ -1178,8 +1178,9 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def ts_contourf(self, da, x='time', y='siglay', xlim=None, ylim=None, xlabel='Time', ylabel='Sigma layer', title=None,
-                   rolling=False, window=24*30+1, min_periods=None, ax=None, date_format=None,
+    def ts_contourf(self, da, index: int, x='time', y='siglay', xlim=None, ylim=None,
+                    xlabel='Time', ylabel='Sigma layer', title=None,
+                   rolling_window=False, window=24*30+1, min_periods=None, ax=None, date_format=None,
                    contourf_kwargs={}, colorbar_kwargs={}, **kwargs):
         """
         Plot a contour map of vertical time-series DataArray.
@@ -1187,6 +1188,7 @@ class FvcomPlotter(PlotHelperMixin):
         Parameters:
         ----------
         da (DataArray): DataArray for specified var_name with the dimension of (time, sigma).
+        index (int): Index of the node or element to plot.
         x (str): Name of the x-axis coordinate. Default is 'time'.
         y (str): Name of the y-axis coordinate. Default is 'siglay'.
         xlim (tuple): Tuple of start and end times (e.g., ('2010-01-01', '2022-12-31')).
@@ -1194,7 +1196,7 @@ class FvcomPlotter(PlotHelperMixin):
         xlabel (str): Label for the x-axis. Default is 'Time'.
         ylabel (str): Label for the y-axis. Default is 'Depth (m)'.
         title (str): Title for the plot. Default is None.
-        rolling (bool): Whether to apply a rolling mean. Default is False.
+        rolling_window (bool): Whether to apply a rolling mean. Default is False.
         window (int): Rolling window size in hours. Default is 24*30+1 (monthly mean).
         min_periods (int): Minimum number of data points required in the rolling window.
                         If None, defaults to window // 2 + 1.
@@ -1209,19 +1211,39 @@ class FvcomPlotter(PlotHelperMixin):
         tuple: (fig, ax, cbar)
         """
 
+        if 'node' in da.dims:
+            da = da.isel(node=index)
+            spatial_dim = 'node'
+        elif 'nele' in da.dims:
+            da = da.isel(nele=index)
+            spatial_dim = 'nele'
+        else:
+            raise ValueError("ts_contourf: DataArray must have either 'node' or 'nele' dimension")
+        
         # Apply rolling mean if specified
-        if rolling:
+        if rolling_window:
             if min_periods is None:
                 min_periods = window // 2 + 1
             da = da.rolling(time=window, center=True, min_periods=min_periods).mean()
 
         # Extract metadata for labels
-        var_name = da.name
-        long_name = da.attrs.get('long_name', var_name)
+        long_name = da.attrs.get('long_name', da.name)
         units = da.attrs.get('units', '')
         cbar_label = f"{long_name} ({units})"
-        title = title or f"{long_name}"
+        #title = title or f"{long_name}"
+        if title is None:
+            rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""  
+            title = f"Time Series of {long_name} ({spatial_dim}={index}){rolling_text}"
+
         date_format = date_format or self.cfg.date_format
+
+        # Time range filtering via xlim tuple
+        if xlim is not None:
+            # xlim should be like ('2020-01-01','2020-02-01')
+            start_sel = np.datetime64(xlim[0]) if xlim[0] is not None else None
+            end_sel   = np.datetime64(xlim[1]) if xlim[1] is not None else None
+            da = da.sel(time=slice(start_sel, end_sel))
+        #time = data["time"]
 
         # Create figure and axis if not provided
         if ax is None:
@@ -1260,11 +1282,11 @@ class FvcomPlotter(PlotHelperMixin):
             vmin=vmin, vmax=vmax, extend=extend, ax=ax, add_colorbar=False,
             **merged_contourf_kwargs)
 
-        if xlim is None:
-            xlim = (da[x].min().item(), da[x].max().item())
+        #if xlim is None:
+        #    xlim = (da[x].min().item(), da[x].max().item())
         if ylim is None:
             ylim = (da[y].min().item(), da[y].max().item())
-        ax.set_xlim(pd.Timestamp(xlim[0]), pd.Timestamp(xlim[1]))
+        #ax.set_xlim(pd.Timestamp(xlim[0]), pd.Timestamp(xlim[1]))
         ax.set_title(title, fontsize=self.cfg.fontsize['title'])
         ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize['xlabel'])
         ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize['ylabel'])
