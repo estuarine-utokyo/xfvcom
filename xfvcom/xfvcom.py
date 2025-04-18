@@ -1228,9 +1228,8 @@ class FvcomPlotter(PlotHelperMixin):
 
         # Extract metadata for labels
         long_name = da.attrs.get('long_name', da.name)
-        units = da.attrs.get('units', '')
+        units = da.attrs.get('units', '-')
         cbar_label = f"{long_name} ({units})"
-        #title = title or f"{long_name}"
         if title is None:
             rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""  
             title = f"Time Series of {long_name} ({spatial_dim}={index}){rolling_text}"
