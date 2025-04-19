@@ -1178,17 +1178,18 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def ts_contourf(self, da, index: int, x='time', y='siglay', xlim=None, ylim=None,
-                    xlabel='Time', ylabel='Sigma layer', title=None,
+    def ts_contourf(self, da, index: int =None, x='time', y='siglay', xlim=None, ylim=None,
+                    xlabel='Time', ylabel='Sigma', title=None,
                    rolling_window=False, window=24*30+1, min_periods=None, ax=None, date_format=None,
                    contourf_kwargs={}, colorbar_kwargs={}, **kwargs):
         """
         Plot a contour map of vertical time-series DataArray.
+        contourf_kwargs and **kwargs are combined to flexibly pass any contourf parameters; colorbar_kwargs is for colorbar settings.
 
         Parameters:
         ----------
-        da (DataArray): DataArray for specified var_name with the dimension of (time, sigma).
-        index (int): Index of the node or element to plot.
+        da (DataArray): DataArray for specified var_name with the dimension of (time, siglay/siglev [, node/nele]).
+        index (int): Index of the node or element to plot (optional).
         x (str): Name of the x-axis coordinate. Default is 'time'.
         y (str): Name of the y-axis coordinate. Default is 'siglay'.
         xlim (tuple): Tuple of start and end times (e.g., ('2010-01-01', '2022-12-31')).
@@ -1211,14 +1212,17 @@ class FvcomPlotter(PlotHelperMixin):
         tuple: (fig, ax, cbar)
         """
 
-        if 'node' in da.dims:
+        if 'node' in da.dims and index is not None:
             da = da.isel(node=index)
             spatial_dim = 'node'
-        elif 'nele' in da.dims:
+        elif 'nele' in da.dims and index is not None:
             da = da.isel(nele=index)
             spatial_dim = 'nele'
+        elif index is None:
+            da = da
+            spatial_dim = None
         else:
-            raise ValueError("ts_contourf: DataArray must have either 'node' or 'nele' dimension")
+            raise ValueError("ts_contourf: DataArray must have either 'node' or 'nele' dimension with 'index' or 'index=None'")
         
         # Apply rolling mean if specified
         if rolling_window:
@@ -1232,7 +1236,10 @@ class FvcomPlotter(PlotHelperMixin):
         cbar_label = f"{long_name} ({units})"
         if title is None:
             rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""  
-            title = f"Time Series of {long_name} ({spatial_dim}={index}){rolling_text}"
+            if spatial_dim is not None:
+                title = f"Time Series of {long_name} ({spatial_dim}={index}){rolling_text}"
+            else:
+                title = f"Time Series of {long_name}{rolling_text}"
 
         date_format = date_format or self.cfg.date_format
 
@@ -1302,7 +1309,7 @@ class FvcomPlotter(PlotHelperMixin):
 
         return fig, ax, cbar
 
-    def ts_plot(self, da: xr.DataArray, index: int = None, k: int = None, ax=None,
+    def ts_plot(self, da: xr.DataArray, index: int = None, k: int = None, ax = None,
                 xlabel: str = None, ylabel: str = None, title: str = None,
                 color: str = None, linestyle: str = None, date_format: str = None,
                 xlim: tuple = None, ylim: tuple = None,
