@@ -1366,8 +1366,10 @@ class FvcomPlotter(PlotHelperMixin):
         color     = color or self.cfg.plot_color
         linestyle = linestyle or "-"
         ax.plot(times, values, color=color, linestyle=linestyle, **kwargs)
-        if log:
-            ax.set_yscale("log")
+        #if log:
+        #    ax.set_yscale("log")
+        # Apply log scale via helper (handles warnings for non-positive data)
+        self._apply_log_scale(ax, data, log)
 
         # 7) Y‑axis limits
         if ylim is not None:
@@ -1534,6 +1536,24 @@ class FvcomPlotter(PlotHelperMixin):
                 title = f"Time Series of {long_name}{roll_txt}"
 
         return xlabel, ylabel, title
+
+    def _apply_log_scale(self, ax: plt.Axes, data: xr.DataArray, log_flag: bool) -> None:
+        """
+        Apply logarithmic scale to y-axis if requested and data is all positive.
+        Otherwise, issue a warning and leave axis unchanged.
+        """
+        if not log_flag:
+            return
+
+        # Check for positive data before switching to log scale
+        if data.min().item() > 0:
+            ax.set_yscale("log")
+        else:
+            # Warn user that log scale is invalid for non-positive values
+            import warnings
+            warnings.warn(
+                "Log scale requested but data contains non-positive values; using linear scale instead."
+            )
 
 
 # Example usage
