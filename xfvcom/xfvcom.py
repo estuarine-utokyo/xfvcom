@@ -1180,9 +1180,9 @@ class FvcomPlotter(PlotHelperMixin):
 
     def ts_contourf(self, da: xr.DataArray, index: int = None, x='time', y='siglay', xlim=None, ylim=None,
                     xlabel='Time', ylabel='Sigma', title=None,
-                    rolling_window=False, window=24*30+1, min_periods=None, ax=None, date_format=None,
+                    rolling_window=None, min_periods=None, ax=None, date_format=None,
                     contourf_kwargs: dict = None, colorbar_kwargs: dict = None, **kwargs
-                   ) -> tuple[plt.Figure, plt.Axes, plt.colorbar]: 
+                   ) -> tuple[plt.Figure, plt.Axes, matplotlib.colorbar.Colorbar]: 
         """
         Plot a contour map of vertical time-series DataArray.
         contourf_kwargs and **kwargs are combined to flexibly pass any contourf parameters; colorbar_kwargs is for colorbar settings.
@@ -1198,8 +1198,8 @@ class FvcomPlotter(PlotHelperMixin):
         xlabel (str): Label for the x-axis. Default is 'Time'.
         ylabel (str): Label for the y-axis. Default is 'Depth (m)'.
         title (str): Title for the plot. Default is None.
-        rolling_window (bool): Whether to apply a rolling mean. Default is False.
-        window (int): Rolling window size in hours. Default is 24*30+1 (monthly mean).
+        rolling_window (int): Size of the rolling window for moving average in hours (Default: None).
+            24*30+1 (monthly mean)
         min_periods (int): Minimum number of data points required in the rolling window.
                         If None, defaults to window // 2 + 1.
         ax (matplotlib.axes.Axes): An existing axis to plot on. If None, a new axis will be created.
@@ -1214,24 +1214,21 @@ class FvcomPlotter(PlotHelperMixin):
         """
         contourf_kwargs = contourf_kwargs or {}
         colorbar_kwargs = colorbar_kwargs or {}
-        
-        if 'node' in da.dims and index is not None:
-            da = da.isel(node=index)
-            spatial_dim = 'node'
-        elif 'nele' in da.dims and index is not None:
-            da = da.isel(nele=index)
-            spatial_dim = 'nele'
-        elif index is None:
-            da = da
-            spatial_dim = None
-        else:
-            raise ValueError("ts_contourf: DataArray must have either 'node' or 'nele' dimension with 'index' or 'index=None'")
-        
+
+        # Automatically detect the spatial dimension ('node' or 'nele') and apply the given index
+        spatial_dim = next((d for d in ('node', 'nele') if d in da.dims), None)
+        if spatial_dim:
+            if index is None:
+                raise ValueError(f"Index must be provided for '{spatial_dim}' dimension")
+            da = da.isel({spatial_dim: index})
+        elif index is not None:
+            raise ValueError(f"No 'node' or 'nele' dimension found in DataArray dims {da.dims}")
+
         # Apply rolling mean if specified
         if rolling_window:
             if min_periods is None:
-                min_periods = window // 2 + 1
-            da = da.rolling(time=window, center=True, min_periods=min_periods).mean()
+                min_periods = rolling_window // 2 + 1
+            da = da.rolling(time=rolling_window, center=True, min_periods=min_periods).mean()
 
         # Extract metadata for labels
         long_name = da.attrs.get('long_name', da.name)
@@ -1262,28 +1259,9 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             fig = ax.figure
 
-        # Merge kwargs with contourf_kwargs.
-        merged_contourf_kwargs = {**contourf_kwargs, **kwargs}
-
-        levels = merged_contourf_kwargs.pop("levels", self.cfg.levels)
-        cmap = merged_contourf_kwargs.pop("cmap", self.cfg.cmap)
-        vmin = merged_contourf_kwargs.pop("vmin", da.min().item())
-        vmax = merged_contourf_kwargs.pop("vmax", da.max().item())
-        
-        if "extend" in merged_contourf_kwargs:
-            extend = merged_contourf_kwargs.pop("extend")
-        else:
-            data_min = da.min().item()
-            data_max = da.max().item()
-            # Determine extend based on vmin and vmax
-            if vmin <= data_min and vmax >= data_max:
-                extend = 'neither'
-            elif vmin <= data_min and vmax < data_max:
-                extend = 'min'
-            elif vmin > data_min and vmax >= data_max:
-                extend = 'max'
-            else:
-                extend = 'both'
+        # Merge kwargs with contourf_kwargs
+        merged_contourf_kwargs, levels, cmap, vmin, vmax, extend = \
+            self._prepare_contourf_args(da, contourf_kwargs, kwargs)
 
         # Plot the contour map
         plot = da.plot.contourf(x=x, y=y, ylim=ylim, levels=levels, cmap=cmap,
@@ -1305,10 +1283,7 @@ class FvcomPlotter(PlotHelperMixin):
 
         # Add colorbar
         cbar_label = colorbar_kwargs.pop("label", cbar_label)
-        divider = make_axes_locatable(ax)
-        cax = divider.append_axes("right", size=self.cfg.cbar_size, pad=self.cfg.cbar_pad)
-        cbar = fig.colorbar(plot, cax=cax, extend='both', label=cbar_label, **colorbar_kwargs)
-        cbar.ax.yaxis.label.set_size(self.cfg.label_fontsize)
+        cbar = self._make_colorbar(ax, plot, cbar_label, colorbar_kwargs)
 
         return fig, ax, cbar
 
@@ -1454,6 +1429,48 @@ class FvcomPlotter(PlotHelperMixin):
 
         return fig, ax
 
+    def _prepare_contourf_args(self, da, contourf_kwargs, extra_kwargs):
+        """
+        contourf_kwargs と extra_kwargs をマージし、
+        levels, cmap, vmin, vmax, extend を抽出して返す。
+
+        Returns:
+            merged_kwargs, levels, cmap, vmin, vmax, extend
+        """
+        contourf_kwargs = contourf_kwargs or {}
+        merged = {**contourf_kwargs, **extra_kwargs}
+
+        levels = merged.pop("levels", self.cfg.levels)
+        cmap   = merged.pop("cmap",   self.cfg.cmap)
+        vmin   = merged.pop("vmin",   da.min().item())
+        vmax   = merged.pop("vmax",   da.max().item())
+
+        if "extend" in merged:
+            extend = merged.pop("extend")
+        else:
+            data_min, data_max = da.min().item(), da.max().item()
+            if   vmin <= data_min and vmax >= data_max: extend = "neither"
+            elif vmin <= data_min:                        extend = "min"
+            elif vmax >= data_max:                        extend = "max"
+            else:                                         extend = "both"
+
+        return merged, levels, cmap, vmin, vmax, extend
+
+    def _make_colorbar(self, ax, mappable, label, colorbar_kwargs):
+        """
+        Create and attach a colorbar to `ax` for the given mappable (QuadContourSet).
+        """
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right",
+                                  size=self.cfg.cbar_size,
+                                  pad=self.cfg.cbar_pad)
+        cbar = ax.figure.colorbar(mappable,
+                                  cax=cax,
+                                  extend='both',
+                                  label=label,
+                                  **(colorbar_kwargs or {}))
+        cbar.ax.yaxis.label.set_size(self.cfg.label_fontsize)
+        return cbar
 
 # Example usage
 if __name__ == "__main__":
