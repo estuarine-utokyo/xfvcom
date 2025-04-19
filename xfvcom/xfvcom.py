@@ -708,7 +708,121 @@ class FvcomPlotter(PlotHelperMixin):
         
         return ax
 
-    def plot_timeseries_2d(self, var_name, index=None, start=None, end=None, depth=False, rolling_window=None, ax=None, 
+    def plot_timeseries_2d(self, var_name: str, index: int = None, 
+                        xlim: tuple = None, ylim: tuple = None,
+                        xlabel: str = "Time", ylabel: str = "Depth (m)", title: str = None,
+                        rolling_window: int = None, ax=None, cmap=None, label=None, **kwargs) -> tuple[plt.Figure, plt.Axes, Colorbar]:
+        """
+        Plot a 2D time-series contour (time vs depth) for the specified variable.
+        This method is specialized for z-coordinate (depth) data and does not support sigma coordinates.
+        Parameters:
+        - var_name (str): Name of the variable to plot (must have time and vertical dims).
+        - index (int): Index of the node/nele for spatial dimension (required if data has 'node' or 'nele' dim).
+        - xlim (tuple): (start_time, end_time) for the x-axis time range.
+        - ylim (tuple): Depth range for the y-axis (e.g., (0, 100)) in meters.
+        - xlabel, ylabel (str): Axis labels for time and depth.
+        - title (str): Plot title. If None, a default title is generated.
+        - rolling_window (int): Window size (in time steps) for centered rolling mean smoothing.
+        - ax (matplotlib.axes.Axes): Axis to plot on. If None, a new figure and axis are created.
+        - cmap: Colormap for the contour. Uses default from config if None.
+        - label (str): Label for the colorbar (overrides variable long_name/units if provided).
+        - **kwargs: Additional contourf keyword arguments (levels, etc.).
+        Returns:
+        - (fig, ax, cbar): Figure, Axes, and Colorbar objects for the plot.
+        """
+        # 1. Retrieve the DataArray and ensure variable exists
+        if var_name not in self.ds:
+            raise ValueError(f"Variable '{var_name}' not found in dataset.")
+        da = self.ds[var_name]
+
+        # 2. Handle spatial dimension (node/nele) – require index if present
+        spatial_dim = next((d for d in ("node", "nele") if d in da.dims), None)
+        if spatial_dim:
+            if index is None:
+                raise ValueError(f"Index must be provided for spatial dimension '{spatial_dim}'.")
+            da = da.isel({spatial_dim: index})
+        elif index is not None:
+            raise ValueError(f"No spatial dimension in '{var_name}', but index was provided.")
+
+        # 3. Verify vertical (sigma) dimension is present (required for depth plot)
+        vertical_dim = "siglay" if "siglay" in da.dims else ("siglev" if "siglev" in da.dims else None)
+        if vertical_dim is None:
+            raise ValueError(f"Variable '{var_name}' has no sigma layer dimension ('siglay' or 'siglev'), cannot plot depth profile.")
+
+        # 4. Apply rolling mean on time axis if specified
+        da = self._apply_rolling(da, rolling_window)  # uses centered rolling mean&#8203;:contentReference[oaicite:0]{index=0}
+
+        # 5. Filter data by time range (xlim) if provided
+        da = self._apply_time_filter(da, xlim)        # uses start/end from xlim to slice time&#8203;:contentReference[oaicite:1]{index=1}
+
+        # 6. Prepare depth (z) values for the selected location and times
+        #    We assume the dataset contains 'z' (depth) with same dims (time, vertical, spatial)
+        if spatial_dim:
+            z_da = self.ds["z"].isel({spatial_dim: index})
+        else:
+            z_da = self.ds["z"]
+        z_da = self._apply_time_filter(z_da, xlim)
+        # Align dimensions ordering for consistent (time, vertical) shape
+        z_da = z_da.transpose("time", vertical_dim)
+        da   = da.transpose("time", vertical_dim)
+        # Assign depth values as a 2D coordinate for the DataArray (for plotting)
+        da.coords["Depth"] = (("time", vertical_dim), z_da.values)
+        
+        # 7. Create figure and axis if not provided
+        if ax is None:
+            fig = plt.figure(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
+            ax = fig.add_subplot(1, 1, 1)
+        else:
+            fig = ax.figure
+
+        # 8. Determine contourf parameters (levels, cmap, etc.), merging **kwargs 
+        #    and using defaults from config when not specified
+        if cmap is not None:
+            kwargs["cmap"] = cmap
+        merged_cf_kwargs, levels, cmap_used, vmin, vmax, extend = \
+            self._prepare_contourf_args(da, None, kwargs)  # unify contour args&#8203;:contentReference[oaicite:2]{index=2}
+
+        # 9. Plot the filled contour using time vs depth
+        contour = da.plot.contourf(x="time", y="Depth", levels=levels, cmap=cmap_used,
+                                vmin=vmin, vmax=vmax, extend=extend, ax=ax,
+                                add_colorbar=False, **merged_cf_kwargs)
+
+        # Optionally add contour lines on top (if desired, similar to original add_contour logic)
+        # Example:
+        # if kwargs.get("add_contour"):
+        #     cs = ax.contour(da["time"].values, da.coords["Depth"].values, da.values,
+        #                     levels=levels, colors="k", linewidths=0.5)
+        #     if kwargs.get("label_contours"):
+        #         ax.clabel(cs, inline=True, fontsize=8)
+
+        # 10. Invert y-axis so that depth=0 is at the top (surface)
+        ax.invert_yaxis()
+
+        # 11. Set axis labels, title, and format the time axis
+        # Construct default title if none provided
+        if title is None:
+            long_name = da.attrs.get("long_name", var_name)
+            rolling_text = f" with {rolling_window}-step Rolling Mean" if rolling_window else ""
+            title = (f"Time Series of {long_name}" +
+                    (f" ({spatial_dim}={index})" if spatial_dim else "") +
+                    f"{rolling_text}")
+        self._format_time_axis(ax, title, xlabel, ylabel, self.cfg.date_format)  # apply labels and date format&#8203;:contentReference[oaicite:3]{index=3}
+
+        # Apply depth limits if provided
+        if ylim is not None:
+            ax.set_ylim(ylim)
+
+        # 12. Create and attach colorbar
+        # Determine colorbar label from variable metadata or provided `label`
+        long_name = da.attrs.get("long_name", var_name)
+        units = da.attrs.get("units", "")
+        cbar_label = label if label is not None else (f"{long_name} ({units})" if units else long_name)
+        cbar = self._make_colorbar(ax, contour, cbar_label, {})  # create colorbar with label&#8203;:contentReference[oaicite:4]{index=4}
+
+        return fig, ax, cbar
+
+
+    def plot_timeseries_2d2(self, var_name, index=None, start=None, end=None, depth=False, rolling_window=None, ax=None, 
                                    ylim=None, levels=20, vmin=None, vmax=None, cmap=None, save_path=None, method='contourf',
                                    add_contour=False, label_contours=False, **kwargs):
         """
@@ -1402,10 +1516,17 @@ class FvcomPlotter(PlotHelperMixin):
         contourf_kwargs = contourf_kwargs or {}
         merged = {**contourf_kwargs, **extra_kwargs}
 
-        levels = merged.pop("levels", self.cfg.levels)
-        cmap   = merged.pop("cmap",   self.cfg.cmap)
-        vmin   = merged.pop("vmin",   da.min().item())
-        vmax   = merged.pop("vmax",   da.max().item())
+        #levels = merged.pop("levels", self.cfg.levels)
+        #cmap   = merged.pop("cmap",   self.cfg.cmap)
+        #vmin   = merged.pop("vmin",   da.min().item())
+        #vmax   = merged.pop("vmax",   da.max().item())
+        levels   = merged.pop("levels", self.cfg.levels)
+        cmap     = merged.pop("cmap",   self.cfg.cmap)
+        raw_vmin = merged.pop("vmin",   None)
+        raw_vmax = merged.pop("vmax",   None)
+        # When vmin and vmax are not provided, use the data min/max
+        vmin = raw_vmin if (raw_vmin is not None) else da.min().item()
+        vmax = raw_vmax if (raw_vmax is not None) else da.max().item()
 
         if "extend" in merged:
             extend = merged.pop("extend")
