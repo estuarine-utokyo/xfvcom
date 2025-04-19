@@ -7,6 +7,7 @@ import pandas as pd
 import pyproj
 from sklearn.neighbors import NearestNeighbors
 import matplotlib.pyplot as plt
+from matplotlib.colorbar import Colorbar
 from datetime import datetime
 from matplotlib.dates import DateFormatter
 import matplotlib.cm as cm
@@ -1182,7 +1183,7 @@ class FvcomPlotter(PlotHelperMixin):
                     xlabel='Time', ylabel='Sigma', title=None,
                     rolling_window=None, min_periods=None, ax=None, date_format=None,
                     contourf_kwargs: dict = None, colorbar_kwargs: dict = None, **kwargs
-                   ) -> tuple[plt.Figure, plt.Axes, plt.colorbar]: 
+                   ) -> tuple[plt.Figure, plt.Axes, Colorbar]: 
         """
         Plot a contour map of vertical time-series DataArray.
         contourf_kwargs and **kwargs are combined to flexibly pass any contourf parameters; colorbar_kwargs is for colorbar settings.
@@ -1275,7 +1276,7 @@ class FvcomPlotter(PlotHelperMixin):
         cb_copy      = dict(colorbar_kwargs or {})
         label_to_use = cb_copy.pop("label", cbar_label)
         cbar         = self._make_colorbar(ax, plot, label_to_use, cb_copy)
-        
+
         return fig, ax, cbar
 
     def ts_plot(self, da: xr.DataArray, index: int = None, k: int = None, ax = None,
