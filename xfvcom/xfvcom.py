@@ -1345,23 +1345,11 @@ class FvcomPlotter(PlotHelperMixin):
         if rolling_window:
             data = data.rolling(time=rolling_window, center=True).mean()
 
-        # 3) Labels and title
-        long_name = data.attrs.get("long_name", data.name)
-        units     = data.attrs.get("units", "")
-        if xlabel is None:
-            xlabel = "Time"
-        if ylabel is None:
-            ylabel = f"{long_name} ({units})" if long_name else data.name
-        if title is None:
-            rt = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
-            if spatial_dim:
-                if layer_dim:
-                    title = f"Time Series of {long_name} ({spatial_dim}={index}, {layer_dim}={k}){rt}"
-                else:
-                    title = f"Time Series of {long_name} ({spatial_dim}={index}){rt}"
-            else:
-                title = f"Time Series of {long_name}{rt}"
-
+        # 3) Prepare labels and title
+        xlabel, ylabel, title = self._prepare_ts_labels(
+            data, spatial_dim, layer_dim,
+            index, k, rolling_window, xlabel, ylabel, title)
+        
         # 4) Time filtering and formatting
         date_format = date_format or self.cfg.date_format
         data        = self._apply_time_filter(data, xlim)
@@ -1504,6 +1492,48 @@ class FvcomPlotter(PlotHelperMixin):
 
         return sliced, spatial_dim, layer_dim
 
+    def _prepare_ts_labels(
+        self,
+        data: xr.DataArray,
+        spatial_dim: str | None,
+        layer_dim: str | None,
+        index: int | None,
+        k: int | None,
+        rolling_window: int | None,
+        xlabel: str | None,
+        ylabel: str | None,
+        title: str | None
+    ) -> tuple[str, str, str]:
+        """
+        Prepare and return xlabel, ylabel, title for ts_plot.
+
+        Returns: (xlabel, ylabel, title)
+        """
+        # Use long_name or variable name for label base
+        long_name = data.attrs.get("long_name", data.name)
+        units     = data.attrs.get("units", "")
+
+        # Set default xlabel only when None
+        if xlabel is None:
+            xlabel = "Time"
+
+        # Set default ylabel only when None
+        if ylabel is None:
+            ylabel = f"{long_name} ({units})"
+
+        # Build title only when None
+        if title is None:
+            # add rolling text if requested
+            roll_txt = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+            if spatial_dim:
+                if layer_dim:
+                    title = f"Time Series of {long_name} ({spatial_dim}={index}, {layer_dim}={k}){roll_txt}"
+                else:
+                    title = f"Time Series of {long_name} ({spatial_dim}={index}){roll_txt}"
+            else:
+                title = f"Time Series of {long_name}{roll_txt}"
+
+        return xlabel, ylabel, title
 
 
 # Example usage
