@@ -1292,14 +1292,14 @@ class FvcomPlotter(PlotHelperMixin):
 
         return fig, ax, cbar
 
-    def ts_plot(self, da: xr.DataArray, index: int = None, k: int = None, ax = None,
+    def ts_plot(self, da: xr.DataArray, index: int = None, k: int = None, ax=None,
                 xlabel: str = None, ylabel: str = None, title: str = None,
                 color: str = None, linestyle: str = None, date_format: str = None,
-                xlim: tuple = None, ylim: tuple = None,
-                rolling_window=None, log=False, **kwargs):
+                xlim: tuple = None, ylim: tuple = None, rolling_window=None, log=False,
+                **kwargs) -> tuple[plt.Figure, plt.Axes]:
         """
-        1-D time series plot
-
+        1-D time series plot.
+        
         Parameters:
         ----------
         da : xr.DataArray
@@ -1332,108 +1332,91 @@ class FvcomPlotter(PlotHelperMixin):
             If True, use logarithmic scale. Default: False.
         **kwargs : dict
             Extra keyword args for ax.plot().
+        
+        Returns:
+        ----------
+        tuple: (fig, ax)
         """
-        # 1. Determine data structure and select appropriate slice
+        # 1) Select appropriate slice based on dims
         dims = da.dims
-
-        # If vertical series (time, siglay/siglev, node/nele)
-        if 'time' in dims and ('siglay' in dims or 'siglev' in dims):
-            layer_dim = 'siglay' if 'siglay' in dims else 'siglev'
-            # Identify spatial dimension ('node' or 'nele')
-            space_dims = [d for d in dims if d not in ('time', layer_dim)]
-            if len(space_dims) != 1:
-                raise ValueError(f"Unexpected dims for vertical time series: {dims}")
-            spatial_dim = space_dims[0]
+        if "time" in dims and ("siglay" in dims or "siglev" in dims):
+            layer_dim  = "siglay" if "siglay" in dims else "siglev"
+            spatial_dim = next(d for d in dims if d not in ("time", layer_dim))
             if index is None or k is None:
                 raise ValueError(f"Both index and k are required for dims {dims}")
             data = da.isel({spatial_dim: index, layer_dim: k})
-
-        # If 2D series (time, node) or (time, nele)
-        elif 'time' in dims and ('node' in dims or 'nele' in dims):
-            spatial_dim = 'node' if 'node' in dims else 'nele'
+        elif "time" in dims and ("node" in dims or "nele" in dims):
+            spatial_dim = "node" if "node" in dims else "nele"
             if index is None:
                 raise ValueError(f"Index is required for dims {dims}")
             data = da.isel({spatial_dim: index})
-
-        # If pure 1D series (time,)
-        elif dims == ('time',):
+        elif dims == ("time",):
             data = da
-
+            spatial_dim = None
+            layer_dim = None
         else:
             raise ValueError(f"Unsupported DataArray dims: {dims}")
 
-        # Apply rolling mean if specified
+        # 2) Rolling mean
         if rolling_window:
             data = data.rolling(time=rolling_window, center=True).mean()
 
-        # Retrieve data attributes for labels
+        # 3) Labels and title
         long_name = data.attrs.get("long_name", data.name)
-        units = data.attrs.get("units", "")
-
-        # Time range filtering via xlim tuple
-        if xlim is not None:
-            # xlim should be like ('2020-01-01','2020-02-01')
-            start_sel = np.datetime64(xlim[0]) if xlim[0] is not None else None
-            end_sel   = np.datetime64(xlim[1]) if xlim[1] is not None else None
-            data = data.sel(time=slice(start_sel, end_sel))
-        time = data["time"]
-
-        if log: # Check if log scale is requested
-            if data.min() <= 0:
-                print("Warning: Logarithmic scale cannot be used with non-positive values.")
-                print("Switching to linear scale.")
-                log = False
-
-        # 2. Prepare figure and axis
-        if ax is None:
-            fig, ax = plt.subplots(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
-        else:
-            fig = ax.figure
-
-        # 3. Set defaults
+        units     = data.attrs.get("units", "")
         if xlabel is None:
             xlabel = "Time"
         if ylabel is None:
             ylabel = f"{long_name} ({units})" if long_name else data.name
         if title is None:
-            rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""  
-            if k is not None:
-                title = f"Time Series of {data.name} ({spatial_dim}={index}, {layer_dim}={k}){rolling_text}"
+            rt = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+            if spatial_dim:
+                if layer_dim:
+                    title = f"Time Series of {long_name} ({spatial_dim}={index}, {layer_dim}={k}){rt}"
+                else:
+                    title = f"Time Series of {long_name} ({spatial_dim}={index}){rt}"
             else:
-                title = f"Time Series of {data.name} ({spatial_dim}={index}){rolling_text}"
-        color      = color      or self.cfg.plot_color
-        linestyle  = linestyle  or "-"
+                title = f"Time Series of {long_name}{rt}"
+
+        # 4) Time filtering and formatting
         date_format = date_format or self.cfg.date_format
+        data        = self._apply_time_filter(data, xlim)
+        times       = data["time"].values
+        values      = data.values
 
-        # 4. Plot the data
-        times = data["time"].values
-        values = data.values
+        # 5) Prepare figure/axis
+        if ax is None:
+            fig, ax = plt.subplots(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
+        else:
+            fig = ax.figure
+
+        # 6) Plot
+        color     = color or self.cfg.plot_color
+        linestyle = linestyle or "-"
         ax.plot(times, values, color=color, linestyle=linestyle, **kwargs)
-        if log: # Set log scale if specified
-            ax.set_yscale('log')
+        if log:
+            ax.set_yscale("log")
 
-        # Apply y-axis limits if requested (None → keep current limit)
+        # 7) Y‑axis limits
         if ylim is not None:
-            ymin, ymax = ylim
-            # get current limits
+            ymin, ymax    = ylim
             curr_min, curr_max = ax.get_ylim()
-            # replace None with current value
-            new_min = curr_min if ymin is None else ymin
-            new_max = curr_max if ymax is None else ymax
-            # set both limits at once
-            ax.set_ylim(new_min, new_max)
+            ymin = curr_min if ymin is None else ymin
+            ymax = curr_max if ymax is None else ymax
+            ax.set_ylim(ymin, ymax)
 
-        # 5. Format axes
-
-        ax.set_title(title, fontsize=self.cfg.fontsize['title'])
-        ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize['xlabel'])
-        ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize['ylabel'])
-        ax.xaxis.set_major_formatter(DateFormatter(date_format))
-        fig.autofmt_xdate()
-        #ax.grid(True)
+        # 8) Final formatting
+        self._format_time_axis(ax, title, xlabel, ylabel, date_format)
 
         return fig, ax
 
+
+    # Helper private functions
+    # --------------------------------
+    # --------------------------------
+    # --------------------------------
+    # --------------------------------
+    # --------------------------------
     def _prepare_contourf_args(self, da, contourf_kwargs, extra_kwargs):
         """
         contourf_kwargs と extra_kwargs をマージし、
