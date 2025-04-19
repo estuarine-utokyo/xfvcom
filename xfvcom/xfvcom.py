@@ -1178,10 +1178,11 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def ts_contourf(self, da, index: int =None, x='time', y='siglay', xlim=None, ylim=None,
+    def ts_contourf(self, da: xr.DataArray, index: int = None, x='time', y='siglay', xlim=None, ylim=None,
                     xlabel='Time', ylabel='Sigma', title=None,
-                   rolling_window=False, window=24*30+1, min_periods=None, ax=None, date_format=None,
-                   contourf_kwargs={}, colorbar_kwargs={}, **kwargs):
+                    rolling_window=False, window=24*30+1, min_periods=None, ax=None, date_format=None,
+                    contourf_kwargs: dict = None, colorbar_kwargs: dict = None, **kwargs
+                   ) -> tuple[plt.Figure, plt.Axes, plt.colorbar]: 
         """
         Plot a contour map of vertical time-series DataArray.
         contourf_kwargs and **kwargs are combined to flexibly pass any contourf parameters; colorbar_kwargs is for colorbar settings.
@@ -1203,15 +1204,17 @@ class FvcomPlotter(PlotHelperMixin):
                         If None, defaults to window // 2 + 1.
         ax (matplotlib.axes.Axes): An existing axis to plot on. If None, a new axis will be created.
         date_format (str): Date format for the x-axis. Default is None.
-        contourf_kwargs (dict): Additional arguments for contourf.
-        colorbar_kwargs (dict): Additional arguments for colorbar.
-        **kwargs: Additional arguments for contourf. Not supporting additional kwargs for colorbar.
+        contourf_kwargs (dict): Arguments for contourf.
+        colorbar_kwargs (dict): Arguments for colorbar.
+        **kwargs: Arguments for contourf. Not supporting additional kwargs for colorbar.
 
         Returns:
         ----------
         tuple: (fig, ax, cbar)
         """
-
+        contourf_kwargs = contourf_kwargs or {}
+        colorbar_kwargs = colorbar_kwargs or {}
+        
         if 'node' in da.dims and index is not None:
             da = da.isel(node=index)
             spatial_dim = 'node'
