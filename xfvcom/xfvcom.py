@@ -708,15 +708,17 @@ class FvcomPlotter(PlotHelperMixin):
         
         return ax
 
-    def ts_contourf_z(self, var_name: str, index: int = None, 
-                        xlim: tuple = None, ylim: tuple = None,
-                        xlabel: str = "Time", ylabel: str = "Depth (m)", title: str = None,
-                        rolling_window: int = None, ax=None, cmap=None, label=None, **kwargs) -> tuple[plt.Figure, plt.Axes, Colorbar]:
+    def ts_contourf_z(self, da: xr.DataArray, index: int = None, 
+                      xlim: tuple = None, ylim: tuple = None,
+                      xlabel: str = "Time", ylabel: str = "Depth (m)", title: str = None,
+                      rolling_window: int = None, ax=None, cmap=None, label=None,
+                      contourf_kwargs: dict = None, colorbar_kwargs: dict = None, **kwargs
+                     ) -> tuple[plt.Figure, plt.Axes, Colorbar]:
         """
         Plot a 2D time-series contour (time vs depth) for the specified variable.
         This method is specialized for z-coordinate (depth) data and does not support sigma coordinates.
         Parameters:
-        - var_name (str): Name of the variable to plot (must have time and vertical dims).
+        - da (xarray.DataArray): The DataArray to plot.
         - index (int): Index of the node/nele for spatial dimension (required if data has 'node' or 'nele' dim).
         - xlim (tuple): (start_time, end_time) for the x-axis time range.
         - ylim (tuple): Depth range for the y-axis (e.g., (0, 100)) in meters.
@@ -731,9 +733,12 @@ class FvcomPlotter(PlotHelperMixin):
         - (fig, ax, cbar): Figure, Axes, and Colorbar objects for the plot.
         """
         # 1. Retrieve the DataArray and ensure variable exists
-        if var_name not in self.ds:
-            raise ValueError(f"Variable '{var_name}' not found in dataset.")
-        da = self.ds[var_name]
+        #if var_name not in self.ds:
+        #    raise ValueError(f"Variable '{var_name}' not found in dataset.")
+        #da = self.ds[var_name]
+        # 1. Verify da has the required dimensions
+        if "time" not in da.dims:
+            raise ValueError(f"DataArray must have 'time' dimension, got {da.dims}")
 
         # 2. Handle spatial dimension (node/nele) – require index if present
         spatial_dim = next((d for d in ("node", "nele") if d in da.dims), None)
@@ -801,7 +806,8 @@ class FvcomPlotter(PlotHelperMixin):
         # 11. Set axis labels, title, and format the time axis
         # Construct default title if none provided
         if title is None:
-            long_name = da.attrs.get("long_name", var_name)
+            #long_name = da.attrs.get("long_name", var_name)
+            long_name = da.attrs.get("long_name", da.name)
             rolling_text = f" with {rolling_window}-step Rolling Mean" if rolling_window else ""
             title = (f"Time Series of {long_name}" +
                     (f" ({spatial_dim}={index})" if spatial_dim else "") +
@@ -814,11 +820,15 @@ class FvcomPlotter(PlotHelperMixin):
 
         # 12. Create and attach colorbar
         # Determine colorbar label from variable metadata or provided `label`
-        long_name = da.attrs.get("long_name", var_name)
+        #long_name = da.attrs.get("long_name", var_name)
+        #units = da.attrs.get("units", "")
+        #cbar_label = label if label is not None else (f"{long_name} ({units})" if units else long_name)
+        #cbar = self._make_colorbar(ax, contour, cbar_label, {})  # create colorbar with label&#8203;:contentReference[oaicite:4]{index=4}
         units = da.attrs.get("units", "")
-        cbar_label = label if label is not None else (f"{long_name} ({units})" if units else long_name)
-        cbar = self._make_colorbar(ax, contour, cbar_label, {})  # create colorbar with label&#8203;:contentReference[oaicite:4]{index=4}
-
+        cbar_label = label if label is not None else (
+            f"{long_name} ({units})" if units else long_name
+        )
+        cbar = self._make_colorbar(ax, contour, cbar_label, colorbar_kwargs or {})
         return fig, ax, cbar
 
 
