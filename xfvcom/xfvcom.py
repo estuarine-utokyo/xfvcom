@@ -1339,12 +1339,11 @@ class FvcomPlotter(PlotHelperMixin):
         tuple: (fig, ax)
         """
         # 1) Slice da based on its dimensions
-        dims = da.dims
+        #dims = da.dims
         data, spatial_dim, layer_dim = self._slice_time_series(da, index, k)
 
-        # 2) Rolling mean
-        if rolling_window:
-            data = data.rolling(time=rolling_window, center=True).mean()
+        # 2) Apply rolling mean before time filtering
+        data = self._apply_rolling(data, rolling_window)
 
         # 3) Prepare labels and title
         xlabel, ylabel, title = self._prepare_ts_labels(
@@ -1557,6 +1556,15 @@ class FvcomPlotter(PlotHelperMixin):
         ax.set_yscale("log", base=10)
         ax.yaxis.set_major_locator(LogLocator(base=10))
         ax.yaxis.set_major_formatter(LogFormatter())
+
+    def _apply_rolling(self, da: xr.DataArray, window: int, min_periods: int | None=None) -> xr.DataArray:
+        """
+        Apply centered rolling mean on time axis with optional min_periods.
+        """
+        if window is None:
+            return da
+        mp = min_periods if min_periods is not None else window//2 + 1
+        return da.rolling(time=window, center=True, min_periods=mp).mean()
 
 
 # Example usage
