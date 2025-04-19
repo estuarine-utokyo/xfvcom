@@ -1182,7 +1182,7 @@ class FvcomPlotter(PlotHelperMixin):
                     xlabel='Time', ylabel='Sigma', title=None,
                     rolling_window=None, min_periods=None, ax=None, date_format=None,
                     contourf_kwargs: dict = None, colorbar_kwargs: dict = None, **kwargs
-                   ) -> tuple[plt.Figure, plt.Axes, matplotlib.colorbar.Colorbar]: 
+                   ) -> tuple[plt.Figure, plt.Axes, plt.colorbar]: 
         """
         Plot a contour map of vertical time-series DataArray.
         contourf_kwargs and **kwargs are combined to flexibly pass any contourf parameters; colorbar_kwargs is for colorbar settings.
@@ -1268,16 +1268,11 @@ class FvcomPlotter(PlotHelperMixin):
                                 vmin=vmin, vmax=vmax, extend=extend, ax=ax,
                                 add_colorbar=False, **merged_contourf_kwargs)
 
-        #if xlim is None:
-        #    xlim = (da[x].min().item(), da[x].max().item())
         if ylim is None:
             ylim = (da[y].min().item(), da[y].max().item())
-        #ax.set_xlim(pd.Timestamp(xlim[0]), pd.Timestamp(xlim[1]))
-        ax.set_title(title, fontsize=self.cfg.fontsize['title'])
-        ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize['xlabel'])
-        ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize['ylabel'])
-        ax.xaxis.set_major_formatter(DateFormatter(date_format))
-        fig.autofmt_xdate()
+        
+        # Set axis formatting
+        self._format_time_axis(ax, title, xlabel, ylabel, date_format)
 
         # ax.invert_yaxis()
 
@@ -1471,6 +1466,17 @@ class FvcomPlotter(PlotHelperMixin):
                                   **(colorbar_kwargs or {}))
         cbar.ax.yaxis.label.set_size(self.cfg.label_fontsize)
         return cbar
+
+    def _format_time_axis(self, ax: plt.Axes, title: str, xlabel: str, ylabel: str,
+                          date_format: str) -> None:
+        """
+        Helper function to format the time axis for time series plots.
+        """
+        ax.set_title(title,      fontsize=self.cfg.fontsize['title'])
+        ax.set_xlabel(xlabel,    fontsize=self.cfg.fontsize['xlabel'])
+        ax.set_ylabel(ylabel,    fontsize=self.cfg.fontsize['ylabel'])
+        ax.xaxis.set_major_formatter(DateFormatter(date_format))
+        ax.figure.autofmt_xdate()
 
 # Example usage
 if __name__ == "__main__":
