@@ -16,6 +16,7 @@ import matplotlib.colors as mcolors
 import matplotlib.tri as tri
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from matplotlib.ticker import LogLocator, LogFormatter
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 #from cartopy.io.img_tiles import StadiaMapsTiles
@@ -1539,21 +1540,23 @@ class FvcomPlotter(PlotHelperMixin):
 
     def _apply_log_scale(self, ax: plt.Axes, data: xr.DataArray, log_flag: bool) -> None:
         """
-        Apply logarithmic scale to y-axis if requested and data is all positive.
-        Otherwise, issue a warning and leave axis unchanged.
+        Apply logarithmic scale to the y-axis if requested, using proper locator and formatter.
         """
         if not log_flag:
             return
 
-        # Check for positive data before switching to log scale
-        if data.min().item() > 0:
-            ax.set_yscale("log")
-        else:
-            # Warn user that log scale is invalid for non-positive values
+        # Only positive values can be plotted on a log scale
+        if data.min().item() <= 0:
             import warnings
             warnings.warn(
-                "Log scale requested but data contains non-positive values; using linear scale instead."
+                "Log scale requested but data contains non-positive values; skipping log scale."
             )
+            return
+
+        # Set y-axis to log scale with base-10 locator/formatter
+        ax.set_yscale("log", base=10)
+        ax.yaxis.set_major_locator(LogLocator(base=10))
+        ax.yaxis.set_major_formatter(LogFormatter())
 
 
 # Example usage
