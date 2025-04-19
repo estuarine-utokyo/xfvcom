@@ -1244,13 +1244,16 @@ class FvcomPlotter(PlotHelperMixin):
         date_format = date_format or self.cfg.date_format
 
         # Time range filtering via xlim tuple
+        '''
         if xlim is not None:
             # xlim should be like ('2020-01-01','2020-02-01')
             start_sel = np.datetime64(xlim[0]) if xlim[0] is not None else None
             end_sel   = np.datetime64(xlim[1]) if xlim[1] is not None else None
             da = da.sel(time=slice(start_sel, end_sel))
         #time = data["time"]
-
+        '''
+        da = self._apply_time_filter(da, xlim)
+        
         # Create figure and axis if not provided
         if ax is None:
             fig = plt.figure(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
@@ -1477,6 +1480,20 @@ class FvcomPlotter(PlotHelperMixin):
         ax.set_ylabel(ylabel,    fontsize=self.cfg.fontsize['ylabel'])
         ax.xaxis.set_major_formatter(DateFormatter(date_format))
         ax.figure.autofmt_xdate()
+    
+    def _apply_time_filter(self, da: xr.DataArray, xlim: tuple | None) -> xr.DataArray:
+        """
+        Apply time filtering to da based on xlim=(start, end).
+        If xlim is None, return da unchanged.
+        """
+        if xlim is None:
+            return da
+
+        start, end = xlim
+        start_sel = np.datetime64(start) if start is not None else None
+        end_sel   = np.datetime64(end)   if end   is not None else None
+        return da.sel(time=slice(start_sel, end_sel))
+
 
 # Example usage
 if __name__ == "__main__":
