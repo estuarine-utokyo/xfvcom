@@ -1519,13 +1519,10 @@ class FvcomPlotter(PlotHelperMixin):
 
         return fig, ax
 
-
-    # Helper private functions
     # --------------------------------
+    # Private helper methods
     # --------------------------------
-    # --------------------------------
-    # --------------------------------
-    # --------------------------------
+    
     def _prepare_contourf_args(self, da, contourf_kwargs, extra_kwargs):
         """
         contourf_kwargs と extra_kwargs をマージし、
