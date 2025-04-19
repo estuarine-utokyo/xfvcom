@@ -1272,9 +1272,10 @@ class FvcomPlotter(PlotHelperMixin):
         # ax.invert_yaxis()
 
         # Add colorbar
-        cbar_label = colorbar_kwargs.pop("label", cbar_label)
-        cbar = self._make_colorbar(ax, plot, cbar_label, colorbar_kwargs)
-
+        cb_copy      = dict(colorbar_kwargs or {})
+        label_to_use = cb_copy.pop("label", cbar_label)
+        cbar         = self._make_colorbar(ax, plot, label_to_use, cb_copy)
+        
         return fig, ax, cbar
 
     def ts_plot(self, da: xr.DataArray, index: int = None, k: int = None, ax = None,
