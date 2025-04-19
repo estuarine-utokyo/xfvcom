@@ -1337,25 +1337,9 @@ class FvcomPlotter(PlotHelperMixin):
         ----------
         tuple: (fig, ax)
         """
-        # 1) Select appropriate slice based on dims
+        # 1) Slice da based on its dimensions
         dims = da.dims
-        if "time" in dims and ("siglay" in dims or "siglev" in dims):
-            layer_dim  = "siglay" if "siglay" in dims else "siglev"
-            spatial_dim = next(d for d in dims if d not in ("time", layer_dim))
-            if index is None or k is None:
-                raise ValueError(f"Both index and k are required for dims {dims}")
-            data = da.isel({spatial_dim: index, layer_dim: k})
-        elif "time" in dims and ("node" in dims or "nele" in dims):
-            spatial_dim = "node" if "node" in dims else "nele"
-            if index is None:
-                raise ValueError(f"Index is required for dims {dims}")
-            data = da.isel({spatial_dim: index})
-        elif dims == ("time",):
-            data = da
-            spatial_dim = None
-            layer_dim = None
-        else:
-            raise ValueError(f"Unsupported DataArray dims: {dims}")
+        data, spatial_dim, layer_dim = self._slice_time_series(da, index, k)
 
         # 2) Rolling mean
         if rolling_window:
@@ -1483,6 +1467,43 @@ class FvcomPlotter(PlotHelperMixin):
         start_sel = np.datetime64(start) if start is not None else None
         end_sel   = np.datetime64(end)   if end   is not None else None
         return da.sel(time=slice(start_sel, end_sel))
+
+    def _slice_time_series(self, da: xr.DataArray, index: int = None,
+                           k: int = None) -> tuple[xr.DataArray, str | None, str | None]:
+        """
+        Slice a DataArray for 1D or vertical time series.
+
+        Returns:
+          sliced DataArray, spatial dimension name, layer dimension name
+        """
+        dims = da.dims
+
+        # 3D time series (time, layer, space)
+        if "time" in dims and ("siglay" in dims or "siglev" in dims):
+            layer_dim   = "siglay" if "siglay" in dims else "siglev"
+            spatial_dim = next(d for d in dims if d not in ("time", layer_dim))
+            if index is None or k is None:
+                raise ValueError(f"Both index and k are required for dims {dims}")
+            sliced = da.isel({spatial_dim: index, layer_dim: k})
+
+        # 2D time series (time, space)
+        elif "time" in dims and ("node" in dims or "nele" in dims):
+            layer_dim   = None
+            spatial_dim = "node" if "node" in dims else "nele"
+            if index is None:
+                raise ValueError(f"Index is required for dims {dims}")
+            sliced = da.isel({spatial_dim: index})
+
+        # Pure 1D time series (time,)
+        elif dims == ("time",):
+            sliced      = da
+            spatial_dim = layer_dim = None
+
+        else:
+            raise ValueError(f"Unsupported DataArray dims: {dims}")
+
+        return sliced, spatial_dim, layer_dim
+
 
 
 # Example usage
