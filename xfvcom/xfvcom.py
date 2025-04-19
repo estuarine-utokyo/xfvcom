@@ -1538,7 +1538,21 @@ class FvcomPlotter(PlotHelperMixin):
     ) -> tuple[plt.Figure, plt.Axes, Colorbar]:
         """
         Plot a vertical section of DataArray `da` along a horizontal transect.
-        Includes debug output for intermediate values.
+
+        Parameters:
+        - da: 2D DataArray (vertical × node) already sliced by time.
+        - lat, lon: Constant latitude or longitude for a straight transect.
+        - line: List of (lon, lat) tuples for arbitrary polyline section.
+        - spacing: Sampling interval along transect (meters).
+        - xlim, ylim: Axis limits.
+        - xlabel, ylabel, title: Labels and title.
+        - cmap: Colormap name or object.
+        - contourf_kwargs: Extra args for contourf().
+        - colorbar_kwargs: Extra args for colorbar().
+        - ax: Matplotlib Axes to plot on.
+
+        Returns:
+        - fig, ax, cbar: Figure, Axes, and Colorbar.
         """
         import numpy as np
         import matplotlib.pyplot as plt
@@ -1546,125 +1560,89 @@ class FvcomPlotter(PlotHelperMixin):
         from scipy.spatial import KDTree
         import pyproj
 
-        # Identify vertical dimension
-        if 'siglay' in da.dims:
-            vert_dim = 'siglay'
-        elif 'siglev' in da.dims:
-            vert_dim = 'siglev'
-        else:
+        # Determine vertical/vertical dimension
+        vert_dim = 'siglay' if 'siglay' in da.dims else ('siglev' if 'siglev' in da.dims else None)
+        if vert_dim is None:
             raise ValueError("DataArray must have 'siglay' or 'siglev' dimension.")
 
-        # Extract depth (z) array at da's time
+        # Extract z (depth) at same time
         z_all = self.ds['z']
-        if 'time' in z_all.dims:
-            if 'time' in da.coords:
-                times = z_all['time'].values
-                tgt = da['time'].values
-                deltas = (times - tgt) / np.timedelta64(1, 's')
-                t_idx = int(np.abs(deltas).argmin())
-            else:
-                t_idx = 0
-            z2d = z_all.isel(time=t_idx).values
+        if 'time' in z_all.dims and 'time' in da.coords:
+            z_slice = z_all.sel(time=da['time'], method='nearest')
+            z2d = z_slice.values
         else:
             z2d = z_all.values
-        print(f"[DEBUG] z2d shape={z2d.shape}, depth range={np.nanmin(z2d):.1f} to {np.nanmax(z2d):.1f} m")
 
-        # Prepare mesh triangulation
+        # Mesh setup
         lon_nodes = self.ds['lon'].values
         lat_nodes = self.ds['lat'].values
         nv0 = self.ds['nv'].values.T - 1
         triang = mtri.Triangulation(lon_nodes, lat_nodes, triangles=nv0)
         trifinder = triang.get_trifinder()
-
-        # KDTree for nearest-node in projected UTM
+        # KDTree for nodes in UTM
         mean_lon, mean_lat = lon_nodes.mean(), lat_nodes.mean()
         zone = int((mean_lon + 180)//6) + 1
         hemi = 'north' if mean_lat >= 0 else 'south'
         proj = pyproj.Proj(f"+proj=utm +zone={zone} +{hemi} +datum=WGS84")
         x_nodes, y_nodes = proj(lon_nodes, lat_nodes)
-        node_tree = KDTree(np.column_stack((x_nodes, y_nodes)))
+        tree = KDTree(np.column_stack((x_nodes, y_nodes)))
 
-        # Build transect points
-        if line is not None:
+        # Build section points
+        if line:
             pts = line
         elif lat is not None:
             pts = [(float(lon_nodes.min()), lat), (float(lon_nodes.max()), lat)]
         elif lon is not None:
             pts = [(lon, float(lat_nodes.min())), (lon, float(lat_nodes.max()))]
         else:
-            raise ValueError("Specify lat, lon, or line for section.")
+            raise ValueError("Specify lat, lon, or line.")
 
-        # Sample along transect
+        # Sample along
         geod = pyproj.Geod(ellps='WGS84')
-        pts_samp = [pts[0]]
+        samp = [pts[0]]
         for p0, p1 in zip(pts[:-1], pts[1:]):
             lon1, lat1 = p0; lon2, lat2 = p1
             az1, az2, dist = geod.inv(lon1, lat1, lon2, lat2)
-            nstep = int(dist // spacing)
-            for i in range(1, nstep+1):
-                lon_i, lat_i, _ = geod.fwd(lon1, lat1, az1, i * spacing)
-                pts_samp.append((lon_i, lat_i))
-            pts_samp.append((lon2, lat2))
-        print(f"[DEBUG] samples: {len(pts_samp)} pts, first={pts_samp[:3]}")
+            steps = int(dist // spacing)
+            for i in range(1, steps+1):
+                lon_i, lat_i, _ = geod.fwd(lon1, lat1, az1, i*spacing)
+                samp.append((lon_i, lat_i))
+            samp.append((lon2, lat2))
+        lons = np.array([p[0] for p in samp]); lats = np.array([p[1] for p in samp])
 
-        # Convert and compute cumulative distance
-        lons = np.array([p[0] for p in pts_samp])
-        lats = np.array([p[1] for p in pts_samp])
-        dists = np.zeros(len(pts_samp))
-        for i in range(1, len(pts_samp)):
+        # Distance along
+        dists = np.zeros(len(samp))
+        for i in range(1, len(samp)):
             _, _, seg = geod.inv(lons[i-1], lats[i-1], lons[i], lats[i])
             dists[i] = dists[i-1] + seg
-        print(f"[DEBUG] distance range: 0 to {dists.max():.1f} m")
 
-        # Domain mask
+        # Domain mask and nearest nodes
         tri_idx = trifinder(lons, lats)
         inside = tri_idx != -1
-        print(f"[DEBUG] in-domain: {inside.sum()} / {len(inside)} pts")
-
-        # Nearest nodes
         xs_s, ys_s = proj(lons, lats)
-        dist_n, idx_n = node_tree.query(np.column_stack((xs_s, ys_s)))
-        print(f"[DEBUG] nearest-node dist: {dist_n.min():.1f} to {dist_n.max():.1f} m")
+        dist_n, idx_n = tree.query(np.column_stack((xs_s, ys_s)))
 
-        # Extract section data
-        vals = da.values[:, idx_n]
-        deps = z2d[:, idx_n]
-        vals[:, ~inside] = np.nan
-        deps[:, ~inside] = np.nan
-        print(f"[DEBUG] vals: {np.nanmin(vals):.2f} to {np.nanmax(vals):.2f}")
-
-        # Depth for plotting
-        depth_plot = -deps if np.nanmax(deps) > 0 else deps
-        print(f"[DEBUG] depth_plot range: {np.nanmin(depth_plot):.1f} to {np.nanmax(depth_plot):.1f} m")
-
-        # Build 2D coords for contourf
-        X = np.broadcast_to(dists[np.newaxis, :], depth_plot.shape)
-        Y = depth_plot
-        print(f"[DEBUG] X range: {X.min():.1f} to {X.max():.1f}")
-        print(f"[DEBUG] Y range: {Y.min():.1f} to {Y.max():.1f}")
+        # Extract data
+        V = da.values[:, idx_n]
+        Z = z2d[:, idx_n]
+        V[:, ~inside] = np.nan; Z[:, ~inside] = np.nan
 
         # Plot
+        X, Y = np.broadcast_to(dists[np.newaxis, :], Z.shape), Z
         fig = ax.figure if ax else plt.figure(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
         ax = ax or fig.add_subplot(1,1,1)
-        cf_args = dict(cmap=(cmap or self.cfg.cmap), **(contourf_kwargs or {}))
-        cf = ax.contourf(X, Y, vals, **cf_args)
-
-        # Force axis limits to data range
+        cf = ax.contourf(X, Y, V, cmap=(cmap or self.cfg.cmap), **(contourf_kwargs or {}))
+                # Axis: distance (x), depth (y) water negative down, land positive up
         ax.set_xlim(np.nanmin(dists), np.nanmax(dists))
-        ax.set_ylim(np.nanmin(Y), np.nanmax(Y))
-        if title: ax.set_title(title)
-        ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
-        ax.invert_yaxis()
-
+        ax.set_ylim(np.nanmin(Y), np.nanmax(Y))  # natural order: negative bottom, positive top
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        if title:
+            ax.set_title(title)
         # Colorbar
-        lbl = da.attrs.get('long_name', da.name)
+        label = da.attrs.get('long_name', da.name)
         units = da.attrs.get('units', '')
-        label = f"{lbl} ({units})" if units else lbl
-        cbar = self._make_colorbar(ax, cf, label, colorbar_kwargs or {})
-
-        # Final debug
-        max_d = float(np.nanmax(dist_n[inside])) if inside.any() else None
-        print(f"[DEBUG] returning max_dist: {max_d:.1f} m")
+        cbar = self._make_colorbar(ax, cf, f"{label} ({units})" if units else label, colorbar_kwargs or {})
         return fig, ax, cbar
 
 
