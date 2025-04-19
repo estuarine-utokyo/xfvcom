@@ -1531,28 +1531,27 @@ class FvcomPlotter(PlotHelperMixin):
         xlabel: str = "Distance (m)",
         ylabel: str = "Depth (m)",
         title: str = None,
-        cmap: str = None,
         contourf_kwargs: dict = None,
         colorbar_kwargs: dict = None,
-        ax=None
-    ) -> tuple[plt.Figure, plt.Axes, Colorbar]:
+        ax=None,
+        **kwargs
+    ):
         """
-        Plot a vertical section of DataArray `da` along a horizontal transect.
+        Plot a vertical section of a 3D variable (da) on FVCOM mesh.
 
         Parameters:
-        - da: 2D DataArray (vertical × node) already sliced by time.
-        - lat, lon: Constant latitude or longitude for a straight transect.
-        - line: List of (lon, lat) tuples for arbitrary polyline section.
-        - spacing: Sampling interval along transect (meters).
-        - xlim, ylim: Axis limits.
-        - xlabel, ylabel, title: Labels and title.
-        - cmap: Colormap name or object.
-        - contourf_kwargs: Extra args for contourf().
-        - colorbar_kwargs: Extra args for colorbar().
-        - ax: Matplotlib Axes to plot on.
+          da: DataArray with dims (siglay/siglev, node) at single time
+          lat, lon: constant latitude or longitude for section
+          line: list of (lon, lat) pairs defining arbitrary transect
+          spacing: sampling interval (m)
+          xlim, ylim: axis limits
+          xlabel, ylabel, title: plot labels
+          contourf_kwargs: dict of base contourf args
+          colorbar_kwargs: dict for colorbar
+          ax: existing Matplotlib Axes
+          **kwargs: extra contourf keywords (override contourf_kwargs)
 
-        Returns:
-        - fig, ax, cbar: Figure, Axes, and Colorbar.
+        Returns: fig, ax, cbar
         """
         import numpy as np
         import matplotlib.pyplot as plt
@@ -1560,90 +1559,209 @@ class FvcomPlotter(PlotHelperMixin):
         from scipy.spatial import KDTree
         import pyproj
 
-        # Determine vertical/vertical dimension
-        vert_dim = 'siglay' if 'siglay' in da.dims else ('siglev' if 'siglev' in da.dims else None)
-        if vert_dim is None:
-            raise ValueError("DataArray must have 'siglay' or 'siglev' dimension.")
+        # Merge contourf arguments; direct kwargs override contourf_kwargs
+        cf_args = {} if contourf_kwargs is None else contourf_kwargs.copy()
+        cf_args.update(kwargs)
+        if 'cmap' not in cf_args and hasattr(self.cfg, 'cmap'):
+            cf_args['cmap'] = self.cfg.cmap
 
-        # Extract z (depth) at same time
+        # Extract contourf-specific settings
+        levels = cf_args.pop('levels', getattr(self.cfg, 'levels', None))
+        vmin   = cf_args.pop('vmin', None)
+        vmax   = cf_args.pop('vmax', None)
+        extend = cf_args.pop('extend', 'neither')
+
+        # Determine vertical dimension
+        vert_dim = 'siglay' if 'siglay' in da.dims else 'siglev'
+
+        # Get depth array at same time
         z_all = self.ds['z']
-        if 'time' in z_all.dims and 'time' in da.coords:
-            z_slice = z_all.sel(time=da['time'], method='nearest')
-            z2d = z_slice.values
+        if 'time' in z_all.dims:
+            if 'time' in da.coords:
+                z_slice = z_all.sel(time=da['time'], method='nearest')
+            else:
+                z_slice = z_all.isel(time=0)
+            z2d = z_slice.values  # (vertical, node)
         else:
             z2d = z_all.values
 
-        # Mesh setup
-        lon_nodes = self.ds['lon'].values
-        lat_nodes = self.ds['lat'].values
-        nv0 = self.ds['nv'].values.T - 1
-        triang = mtri.Triangulation(lon_nodes, lat_nodes, triangles=nv0)
+        # Prepare mesh triangulation for domain test
+        lon_n = self.ds['lon'].values; lat_n = self.ds['lat'].values
+        tris = self.ds['nv'].values.T - 1
+        triang = mtri.Triangulation(lon_n, lat_n, triangles=tris)
         trifinder = triang.get_trifinder()
-        # KDTree for nodes in UTM
-        mean_lon, mean_lat = lon_nodes.mean(), lat_nodes.mean()
+
+        # Build KDTree on projected nodes for nearest-node lookup
+        mean_lon, mean_lat = lon_n.mean(), lat_n.mean()
         zone = int((mean_lon + 180)//6) + 1
         hemi = 'north' if mean_lat >= 0 else 'south'
         proj = pyproj.Proj(f"+proj=utm +zone={zone} +{hemi} +datum=WGS84")
-        x_nodes, y_nodes = proj(lon_nodes, lat_nodes)
-        tree = KDTree(np.column_stack((x_nodes, y_nodes)))
+        x_n, y_n = proj(lon_n, lat_n)
+        tree = KDTree(np.column_stack((x_n, y_n)))
 
-        # Build section points
+        # Define transect endpoints
         if line:
             pts = line
         elif lat is not None:
-            pts = [(float(lon_nodes.min()), lat), (float(lon_nodes.max()), lat)]
+            pts = [(float(lon_n.min()), lat), (float(lon_n.max()), lat)]
         elif lon is not None:
-            pts = [(lon, float(lat_nodes.min())), (lon, float(lat_nodes.max()))]
+            pts = [(lon, float(lat_n.min())), (lon, float(lat_n.max()))]
         else:
-            raise ValueError("Specify lat, lon, or line.")
+            raise ValueError("Specify lat, lon, or line for section.")
 
-        # Sample along
+        # Sample points along transect at given spacing
         geod = pyproj.Geod(ellps='WGS84')
         samp = [pts[0]]
         for p0, p1 in zip(pts[:-1], pts[1:]):
-            lon1, lat1 = p0; lon2, lat2 = p1
-            az1, az2, dist = geod.inv(lon1, lat1, lon2, lat2)
-            steps = int(dist // spacing)
-            for i in range(1, steps+1):
-                lon_i, lat_i, _ = geod.fwd(lon1, lat1, az1, i*spacing)
+            lon0, lat0 = p0; lon1, lat1 = p1
+            az0, az1, dist = geod.inv(lon0, lat0, lon1, lat1)
+            nst = max(1, int(dist//spacing))
+            for i in range(1, nst+1):
+                lon_i, lat_i, _ = geod.fwd(lon0, lat0, az0, i*spacing)
                 samp.append((lon_i, lat_i))
-            samp.append((lon2, lat2))
-        lons = np.array([p[0] for p in samp]); lats = np.array([p[1] for p in samp])
+            samp.append((lon1, lat1))
+        lons = np.array([p[0] for p in samp])
+        lats = np.array([p[1] for p in samp])
 
-        # Distance along
-        dists = np.zeros(len(samp))
-        for i in range(1, len(samp)):
+        # Compute cumulative distance
+        ds = np.zeros(len(lons))
+        for i in range(1, len(lons)):
             _, _, seg = geod.inv(lons[i-1], lats[i-1], lons[i], lats[i])
-            dists[i] = dists[i-1] + seg
+            ds[i] = ds[i-1] + seg
 
-        # Domain mask and nearest nodes
+        # Domain mask
         tri_idx = trifinder(lons, lats)
         inside = tri_idx != -1
-        xs_s, ys_s = proj(lons, lats)
-        dist_n, idx_n = tree.query(np.column_stack((xs_s, ys_s)))
 
-        # Extract data
-        V = da.values[:, idx_n]
-        Z = z2d[:, idx_n]
-        V[:, ~inside] = np.nan; Z[:, ~inside] = np.nan
+        # Nearest-node for each sample
+        x_s, y_s = proj(lons, lats)
+        _, idx_n = tree.query(np.column_stack((x_s, y_s)))
 
-        # Plot
-        X, Y = np.broadcast_to(dists[np.newaxis, :], Z.shape), Z
+        # Extract variable and depth
+        V = da.values[:, idx_n].copy()
+        Z = z2d[:, idx_n].copy()
+        V[:, ~inside] = np.nan
+        Z[:, ~inside] = np.nan
+
+        # Build 2D grids
+        X = np.broadcast_to(ds[np.newaxis, :], Z.shape)
+        Y = Z
+
+                # Plot
         fig = ax.figure if ax else plt.figure(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
         ax = ax or fig.add_subplot(1,1,1)
-        cf = ax.contourf(X, Y, V, cmap=(cmap or self.cfg.cmap), **(contourf_kwargs or {}))
-                # Axis: distance (x), depth (y) water negative down, land positive up
-        ax.set_xlim(np.nanmin(dists), np.nanmax(dists))
-        ax.set_ylim(np.nanmin(Y), np.nanmax(Y))  # natural order: negative bottom, positive top
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
-        if title:
-            ax.set_title(title)
-        # Colorbar
-        label = da.attrs.get('long_name', da.name)
-        units = da.attrs.get('units', '')
-        cbar = self._make_colorbar(ax, cf, f"{label} ({units})" if units else label, colorbar_kwargs or {})
+        cs = ax.contourf(
+            X, Y, V,
+            levels=levels,
+            vmin=vmin, vmax=vmax,
+            extend=extend,
+            **cf_args
+        )
+        ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
+        if title: ax.set_title(title)
+        ax.set_xlim(ds.min(), ds.max())
+        # Set y-axis so shallow (near-zero) is at top and deep (large negative) at bottom
+        ax.set_ylim(np.nanmin(Y), np.nanmax(Y))
+
+        cbar = self._make_colorbar(ax, cs, da.attrs.get('long_name', da.name) + (f" ({da.attrs.get('units','')})" if 'units' in da.attrs else ''), colorbar_kwargs or {})
+
         return fig, ax, cbar
+
+    def _sample_transect(
+        self,
+        lat: float = None,
+        lon: float = None,
+        line: list[tuple[float, float]] = None,
+        spacing: float = 200.0
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Generate evenly spaced sample points along a transect.
+        Returns: lons, lats, cumulative distances (m).
+        """
+        import numpy as np
+        import pyproj
+
+        # Determine transect line endpoints
+        if line:
+            pts = line
+        elif lat is not None:
+            pts = [(float(self.ds['lon'].min()), lat), (float(self.ds['lon'].max()), lat)]
+        elif lon is not None:
+            pts = [(lon, float(self.ds['lat'].min())), (lon, float(self.ds['lat'].max()))]
+        else:
+            raise ValueError("Specify lat, lon, or line for section.")
+
+        geod = pyproj.Geod(ellps='WGS84')
+        samples = [pts[0]]
+        for p0, p1 in zip(pts[:-1], pts[1:]):
+            lon0, lat0 = p0; lon1, lat1 = p1
+            _, _, dist = geod.inv(lon0, lat0, lon1, lat1)
+            steps = int(dist // spacing)
+            for i in range(1, steps+1):
+                lon_i, lat_i, _ = geod.fwd(lon0, lat0, geod.inv(lon0, lat0, lon1, lat1)[0], i*spacing)
+                samples.append((lon_i, lat_i))
+            samples.append((lon1, lat1))
+
+        lons = np.array([p[0] for p in samples])
+        lats = np.array([p[1] for p in samples])
+        dists = np.zeros(len(samples))
+        for i in range(1, len(samples)):
+            _, _, seg = geod.inv(lons[i-1], lats[i-1], lons[i], lats[i])
+            dists[i] = dists[i-1] + seg
+        return lons, lats, dists
+
+    def _extract_section_data(
+        self,
+        da: xr.DataArray,
+        lons: np.ndarray,
+        lats: np.ndarray,
+        dists: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Build 2D grids X (distance), Y (depth), and V (values).
+        """
+        import numpy as np
+        import matplotlib.tri as mtri
+        from scipy.spatial import KDTree
+        import pyproj
+
+        # Triangulate mesh for domain test
+        lon_n = self.ds['lon'].values; lat_n = self.ds['lat'].values
+        triangles = self.ds['nv'].values.T - 1
+        triang = mtri.Triangulation(lon_n, lat_n, triangles=triangles)
+        trifinder = triang.get_trifinder()
+
+        # Project nodes to UTM for KDTree
+        mean_lon, mean_lat = lon_n.mean(), lat_n.mean()
+        zone = int((mean_lon+180)//6)+1; hemi = 'north' if mean_lat>=0 else 'south'
+        proj = pyproj.Proj(f"+proj=utm +zone={zone} +{hemi} +datum=WGS84")
+        x_n, y_n = proj(lon_n, lat_n)
+        tree = KDTree(np.column_stack((x_n, y_n)))
+
+        # Determine in-domain samples
+        tri_idx = trifinder(lons, lats)
+        inside = tri_idx != -1
+
+        # Nearest-node lookup
+        x_s, y_s = proj(lons, lats)
+        _, idx_n = tree.query(np.column_stack((x_s, y_s)))
+
+        # Extract variable values and mask
+        V = da.values[:, idx_n]
+        V[:, ~inside] = np.nan
+
+        # Extract depth z and mask
+        z_all = self.ds['z']
+        if 'time' in z_all.dims and 'time' in da.coords:
+            z2d = z_all.sel(time=da['time'], method='nearest').values
+        else:
+            z2d = z_all.values
+        Y = z2d[:, idx_n]
+        Y[:, ~inside] = np.nan
+
+        # Build distance grid
+        X = np.broadcast_to(dists[np.newaxis, :], Y.shape)
+        return X, Y, V
 
 
     # --------------------------------
