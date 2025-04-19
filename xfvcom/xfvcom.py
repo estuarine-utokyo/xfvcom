@@ -1260,13 +1260,26 @@ class FvcomPlotter(PlotHelperMixin):
             self._prepare_contourf_args(da, contourf_kwargs, kwargs)
 
         # Plot the contour map
-        plot = da.plot.contourf(x=x, y=y, ylim=ylim, levels=levels, cmap=cmap,
-                                vmin=vmin, vmax=vmax, extend=extend, ax=ax,
-                                add_colorbar=False, **merged_contourf_kwargs)
+        #plot = da.plot.contourf(x=x, y=y, ylim=ylim, levels=levels, cmap=cmap,
+        #                        vmin=vmin, vmax=vmax, extend=extend, ax=ax,
+        #                        add_colorbar=False, **merged_contourf_kwargs)
+        #if ylim is None:
+        #    ylim = (da[y].min().item(), da[y].max().item())
+        #    ax.set_ylim(ylim)
+        # Build kwargs for contourf
+        plot_kwargs = {
+            "x": x, "y": y,
+            "levels": levels, "cmap": cmap,
+            "vmin": vmin, "vmax": vmax, "extend": extend,
+            "ax": ax, "add_colorbar": False
+        }
+        # Only include ylim if explicitly set
+        if ylim is not None:
+            plot_kwargs["ylim"] = ylim
 
-        if ylim is None:
-            ylim = (da[y].min().item(), da[y].max().item())
-        
+        # Call contourf
+        plot = da.plot.contourf(**plot_kwargs, **merged_contourf_kwargs)        
+
         # Set axis formatting
         self._format_time_axis(ax, title, xlabel, ylabel, date_format)
 
