@@ -816,7 +816,7 @@ class FvcomPlotter(PlotHelperMixin):
             ax.plot(surf["time"], surf.values, **skw)
 
         # 11. Invert y-axis so that depth=0 is at the top
-        ax.invert_yaxis()
+        # ax.invert_yaxis()
 
         # 12. Set axis labels, title, and format the time axis
         # Construct default title if none provided
