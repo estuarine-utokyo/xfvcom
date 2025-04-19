@@ -708,7 +708,7 @@ class FvcomPlotter(PlotHelperMixin):
         
         return ax
 
-    def plot_timeseries_2d(self, var_name: str, index: int = None, 
+    def ts_contourf_z(self, var_name: str, index: int = None, 
                         xlim: tuple = None, ylim: tuple = None,
                         xlabel: str = "Time", ylabel: str = "Depth (m)", title: str = None,
                         rolling_window: int = None, ax=None, cmap=None, label=None, **kwargs) -> tuple[plt.Figure, plt.Axes, Colorbar]:
@@ -822,7 +822,7 @@ class FvcomPlotter(PlotHelperMixin):
         return fig, ax, cbar
 
 
-    def plot_timeseries_2d2(self, var_name, index=None, start=None, end=None, depth=False, rolling_window=None, ax=None, 
+    def plot_timeseries_2d(self, var_name, index=None, start=None, end=None, depth=False, rolling_window=None, ax=None, 
                                    ylim=None, levels=20, vmin=None, vmax=None, cmap=None, save_path=None, method='contourf',
                                    add_contour=False, label_contours=False, **kwargs):
         """
