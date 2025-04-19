@@ -1609,6 +1609,7 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             raise ValueError("Specify lat, lon, or line for section.")
 
+        '''
         # Sample points along transect at given spacing
         geod = pyproj.Geod(ellps='WGS84')
         samp = [pts[0]]
@@ -1628,7 +1629,13 @@ class FvcomPlotter(PlotHelperMixin):
         for i in range(1, len(lons)):
             _, _, seg = geod.inv(lons[i-1], lats[i-1], lons[i], lats[i])
             ds[i] = ds[i-1] + seg
-
+        '''
+        lons, lats, ds = self._sample_transect(
+            lat=lat,
+            lon=lon,
+            line=line,
+            spacing=spacing
+        )
         # Domain mask
         tri_idx = trifinder(lons, lats)
         inside = tri_idx != -1
