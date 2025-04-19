@@ -732,10 +732,6 @@ class FvcomPlotter(PlotHelperMixin):
         Returns:
         - (fig, ax, cbar): Figure, Axes, and Colorbar objects for the plot.
         """
-        # 1. Retrieve the DataArray and ensure variable exists
-        #if var_name not in self.ds:
-        #    raise ValueError(f"Variable '{var_name}' not found in dataset.")
-        #da = self.ds[var_name]
         # 1. Verify da has the required dimensions
         if "time" not in da.dims:
             raise ValueError(f"DataArray must have 'time' dimension, got {da.dims}")
@@ -806,7 +802,6 @@ class FvcomPlotter(PlotHelperMixin):
         # 11. Set axis labels, title, and format the time axis
         # Construct default title if none provided
         if title is None:
-            #long_name = da.attrs.get("long_name", var_name)
             long_name = da.attrs.get("long_name", da.name)
             rolling_text = f" with {rolling_window}-step Rolling Mean" if rolling_window else ""
             title = (f"Time Series of {long_name}" +
@@ -820,10 +815,6 @@ class FvcomPlotter(PlotHelperMixin):
 
         # 12. Create and attach colorbar
         # Determine colorbar label from variable metadata or provided `label`
-        #long_name = da.attrs.get("long_name", var_name)
-        #units = da.attrs.get("units", "")
-        #cbar_label = label if label is not None else (f"{long_name} ({units})" if units else long_name)
-        #cbar = self._make_colorbar(ax, contour, cbar_label, {})  # create colorbar with label&#8203;:contentReference[oaicite:4]{index=4}
         units = da.attrs.get("units", "")
         cbar_label = label if label is not None else (
             f"{long_name} ({units})" if units else long_name
