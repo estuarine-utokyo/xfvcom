@@ -1609,27 +1609,6 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             raise ValueError("Specify lat, lon, or line for section.")
 
-        '''
-        # Sample points along transect at given spacing
-        geod = pyproj.Geod(ellps='WGS84')
-        samp = [pts[0]]
-        for p0, p1 in zip(pts[:-1], pts[1:]):
-            lon0, lat0 = p0; lon1, lat1 = p1
-            az0, az1, dist = geod.inv(lon0, lat0, lon1, lat1)
-            nst = max(1, int(dist//spacing))
-            for i in range(1, nst+1):
-                lon_i, lat_i, _ = geod.fwd(lon0, lat0, az0, i*spacing)
-                samp.append((lon_i, lat_i))
-            samp.append((lon1, lat1))
-        lons = np.array([p[0] for p in samp])
-        lats = np.array([p[1] for p in samp])
-
-        # Compute cumulative distance
-        ds = np.zeros(len(lons))
-        for i in range(1, len(lons)):
-            _, _, seg = geod.inv(lons[i-1], lats[i-1], lons[i], lats[i])
-            ds[i] = ds[i-1] + seg
-        '''
         lons, lats, ds = self._sample_transect(
             lat=lat,
             lon=lon,
