@@ -1624,16 +1624,13 @@ class FvcomPlotter(PlotHelperMixin):
         _, idx_n = tree.query(np.column_stack((x_s, y_s)))
 
         # Extract variable and depth
-        V = da.values[:, idx_n].copy()
-        Z = z2d[:, idx_n].copy()
-        V[:, ~inside] = np.nan
-        Z[:, ~inside] = np.nan
-
-        # Build 2D grids
-        X = np.broadcast_to(ds[np.newaxis, :], Z.shape)
-        Y = Z
-
-                # Plot
+        X, Y, V = self._extract_section_data(
+            da,    # DataArray
+            lons,  # サンプリング経度配列
+            lats,  # サンプリング緯度配列
+            ds     # サンプリング累積距離配列
+        )
+        # Plot
         fig = ax.figure if ax else plt.figure(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
         ax = ax or fig.add_subplot(1,1,1)
         cs = ax.contourf(
