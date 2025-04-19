@@ -712,8 +712,10 @@ class FvcomPlotter(PlotHelperMixin):
                       xlim: tuple = None, ylim: tuple = None,
                       xlabel: str = "Time", ylabel: str = "Depth (m)", title: str = None,
                       rolling_window: int = None, ax=None, cmap=None, label=None,
-                      contourf_kwargs: dict = None, colorbar_kwargs: dict = None, **kwargs
-                     ) -> tuple[plt.Figure, plt.Axes, Colorbar]:
+                      contourf_kwargs: dict = None, colorbar_kwargs: dict = None,
+                      plot_surface: bool = False,
+                      surface_kwargs: dict | None = None,
+                      **kwargs) -> tuple[plt.Figure, plt.Axes, Colorbar]:
         """
         Plot a 2D time-series contour (time vs depth) for the specified variable.
         This method is specialized for z-coordinate (depth) data and does not support sigma coordinates.
@@ -728,6 +730,10 @@ class FvcomPlotter(PlotHelperMixin):
         - ax (matplotlib.axes.Axes): Axis to plot on. If None, a new figure and axis are created.
         - cmap: Colormap for the contour. Uses default from config if None.
         - label (str): Label for the colorbar (overrides variable long_name/units if provided).
+        - contourf_kwargs (dict): Additional keyword arguments for contourf.
+        - colorbar_kwargs (dict): Additional keyword arguments for colorbar.
+        - plot_surface (bool): If True, plot the surface elevation on top of the contour.
+        - surface_kwargs (dict): Additional keyword arguments for surface plot.
         - **kwargs: Additional contourf keyword arguments (levels, etc.).
         Returns:
         - (fig, ax, cbar): Figure, Axes, and Colorbar objects for the plot.
@@ -796,10 +802,23 @@ class FvcomPlotter(PlotHelperMixin):
         #     if kwargs.get("label_contours"):
         #         ax.clabel(cs, inline=True, fontsize=8)
 
-        # 10. Invert y-axis so that depth=0 is at the top (surface)
+        # 10. Optional: plot water surface elevation line
+        #       surface_kwargs: dict passed to ax.plot (e.g. color, linewidth)
+        if plot_surface:
+            skw = surface_kwargs or {}
+            # zeta を取得し、同じ spatial_dim,index で抽出
+            surf = self.ds["zeta"]
+            if spatial_dim:
+                surf = surf.isel({spatial_dim: index})
+            # 時間フィルタ
+            surf = self._apply_time_filter(surf, xlim)
+            # プロット
+            ax.plot(surf["time"], surf.values, **skw)
+
+        # 11. Invert y-axis so that depth=0 is at the top
         ax.invert_yaxis()
 
-        # 11. Set axis labels, title, and format the time axis
+        # 12. Set axis labels, title, and format the time axis
         # Construct default title if none provided
         if title is None:
             long_name = da.attrs.get("long_name", da.name)
@@ -807,13 +826,13 @@ class FvcomPlotter(PlotHelperMixin):
             title = (f"Time Series of {long_name}" +
                     (f" ({spatial_dim}={index})" if spatial_dim else "") +
                     f"{rolling_text}")
-        self._format_time_axis(ax, title, xlabel, ylabel, self.cfg.date_format)  # apply labels and date format&#8203;:contentReference[oaicite:3]{index=3}
+        self._format_time_axis(ax, title, xlabel, ylabel, self.cfg.date_format)
 
         # Apply depth limits if provided
         if ylim is not None:
             ax.set_ylim(ylim)
 
-        # 12. Create and attach colorbar
+        # 13. Create and attach colorbar
         # Determine colorbar label from variable metadata or provided `label`
         units = da.attrs.get("units", "")
         cbar_label = label if label is not None else (
@@ -827,6 +846,7 @@ class FvcomPlotter(PlotHelperMixin):
                                    ylim=None, levels=20, vmin=None, vmax=None, cmap=None, save_path=None, method='contourf',
                                    add_contour=False, label_contours=False, **kwargs):
         """
+        Obsolete. Remove this method in future versions.
         Plot a 2D time series for a specified variable as a contour map with time on the x-axis and a vertical coordinate (siglay/siglev) on the y-axis.
 
         Parameters:
