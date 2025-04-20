@@ -1596,7 +1596,7 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             raise ValueError("Specify lat, lon, or line for section.")
 
-        lons, lats, ds = self._sample_transect(lat=lat, lon=lon, line=line, spacing=spacing)
+        lons, lats, distances = self._sample_transect(lat=lat, lon=lon, line=line, spacing=spacing)
         # Domain mask
         tri_idx = trifinder(lons, lats)
         inside = tri_idx != -1
@@ -1606,7 +1606,7 @@ class FvcomPlotter(PlotHelperMixin):
         _, idx_n = tree.query(np.column_stack((x_s, y_s)))
 
         # Extract variable and depth
-        X, Y, V = self._extract_section_data(da, lons, lats, ds)
+        X, Y, V = self._extract_section_data(da, lons, lats, distances)
         # Plot
         fig = ax.figure if ax else plt.figure(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
         ax = ax or fig.add_subplot(1,1,1)
@@ -1617,7 +1617,7 @@ class FvcomPlotter(PlotHelperMixin):
         #    * distance: 1D array of sampled distances
         #    * depth:    2D array of shape (siglay, distance)
         sec_da = xr.DataArray(V, dims=("siglay", "distance"),
-            coords={"distance": ds, "depth": (("siglay","distance"), Y)})
+            coords={"distance": distances, "depth": (("siglay","distance"), Y)})
         
         # 1 Prepare contourf args on section-DataArray
         merged_cf_kwargs, levels, cmap_used, vmin, vmax, extend = \
@@ -1629,7 +1629,7 @@ class FvcomPlotter(PlotHelperMixin):
 
         ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
         if title: ax.set_title(title)
-        ax.set_xlim(ds.min(), ds.max())
+        ax.set_xlim(distances.min(), distances.max())
         # Set y-axis so shallow (near-zero) is at top and deep (large negative) at bottom
         ax.set_ylim(np.nanmin(Y), np.nanmax(Y))
 
@@ -1638,18 +1638,18 @@ class FvcomPlotter(PlotHelperMixin):
         ymin_axis, ymax_axis = ax.get_ylim()     # current axis limits
         fill_base = min(ymin_axis, ymax_axis)    # lower boundary in data coords
         # a) fill below seabed line (land patch under ocean)
-        ax.fill_between(ds, bottom_depth, fill_base, where=~np.isnan(bottom_depth),
+        ax.fill_between(distances, bottom_depth, fill_base, where=~np.isnan(bottom_depth),
             facecolor=land_color, edgecolor=None, zorder=cs.zorder - 0.5,  # between axes background and contourf
             clip_on=False)
         # b) fill entire vertical for columns completely outside mesh domain
         mask_nan = np.all(np.isnan(V), axis=0)
         if mask_nan.any():
-            ax.fill_between(ds[mask_nan], fill_base,
+            ax.fill_between(distances[mask_nan], fill_base,
                 ymax_axis,               # fill up to top of axis (air remains white elsewhere)
                 facecolor=land_color, edgecolor=None, zorder=cs.zorder - 0.5, clip_on=False)
 
         # Plot the seabed line on top (use true bottom = deepest depth)
-        ax.plot(ds, bottom_depth, color='k', linestyle='-', linewidth=1, zorder=cs.zorder + 1)
+        ax.plot(distances, bottom_depth, color='k', linestyle='-', linewidth=1, zorder=cs.zorder + 1)
 
         cbar = self._make_colorbar(ax, cs, da.attrs.get('long_name', da.name) + (f" ({da.attrs.get('units','')})" if 'units' in da.attrs else ''), colorbar_kwargs or {})
 
