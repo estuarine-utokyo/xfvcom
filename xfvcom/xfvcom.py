@@ -1655,13 +1655,12 @@ class FvcomPlotter(PlotHelperMixin):
 
         return fig, ax, cbar
 
-    def _sample_transect(
-        self,
-        lat: float = None,
-        lon: float = None,
-        line: list[tuple[float, float]] = None,
-        spacing: float = 200.0
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    # --------------------------------
+    # Private helper methods
+    # --------------------------------
+
+    def _sample_transect(self, lat: float = None, lon: float = None, line: list[tuple[float, float]] = None,
+        spacing: float = 200.0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Generate evenly spaced sample points along a transect.
         Returns: lons, lats, cumulative distances (m).
@@ -1698,13 +1697,8 @@ class FvcomPlotter(PlotHelperMixin):
             dists[i] = dists[i-1] + seg
         return lons, lats, dists
 
-    def _extract_section_data(
-        self,
-        da: xr.DataArray,
-        lons: np.ndarray,
-        lats: np.ndarray,
-        dists: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _extract_section_data(self, da: xr.DataArray, lons: np.ndarray, lats: np.ndarray,
+        dists: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Build 2D grids X (distance), Y (depth), and V (values).
         """
@@ -1752,9 +1746,6 @@ class FvcomPlotter(PlotHelperMixin):
         return X, Y, V
 
 
-    # --------------------------------
-    # Private helper methods
-    # --------------------------------
     def _prepare_contourf_args(self, da, contourf_kwargs, extra_kwargs):
         """
         Merge contourf_kwargs and extra_kwargs, and extract levels, cmap, vmin, vmax, extend.
@@ -1891,18 +1882,9 @@ class FvcomPlotter(PlotHelperMixin):
 
         return sliced, spatial_dim, layer_dim
 
-    def _prepare_ts_labels(
-        self,
-        data: xr.DataArray,
-        spatial_dim: str | None,
-        layer_dim: str | None,
-        index: int | None,
-        k: int | None,
-        rolling_window: int | None,
-        xlabel: str | None,
-        ylabel: str | None,
-        title: str | None
-    ) -> tuple[str, str, str]:
+    def _prepare_ts_labels(self, data: xr.DataArray, spatial_dim: str | None, layer_dim: str | None,
+        index: int | None, k: int | None, rolling_window: int | None,
+        xlabel: str | None, ylabel: str | None, title: str | None) -> tuple[str, str, str]:
         """
         Prepare and return xlabel, ylabel, title for ts_plot.
 
