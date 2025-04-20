@@ -1534,6 +1534,7 @@ class FvcomPlotter(PlotHelperMixin):
         contourf_kwargs: dict = None,
         colorbar_kwargs: dict = None,
         ax=None,
+        land_color: str = "#A0522D",  # Default seabed/land color (sienna)
         **kwargs
     ):
         """
@@ -1650,11 +1651,43 @@ class FvcomPlotter(PlotHelperMixin):
             add_colorbar=False,
             **merged_cf_kwargs
         )
+
         ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
         if title: ax.set_title(title)
         ax.set_xlim(ds.min(), ds.max())
         # Set y-axis so shallow (near-zero) is at top and deep (large negative) at bottom
         ax.set_ylim(np.nanmin(Y), np.nanmax(Y))
+
+        # 3 Now that y-limits are fixed, fill seabed and mesh-missing regions
+        bottom_depth = np.nanmax(Y, axis=0)      # seabed profile (deepest mesh)
+        ymin_axis, ymax_axis = ax.get_ylim()     # current axis limits
+        fill_base = min(ymin_axis, ymax_axis)    # lower boundary in data coords
+
+        # a) fill below seabed line
+        ax.fill_between(
+            ds,
+            bottom_depth,
+            fill_base,
+            where=~np.isnan(bottom_depth),
+            facecolor=land_color,
+            edgecolor=None,
+            zorder=cs.zorder-1
+        )
+
+        # b) fill vertical columns where no mesh exists
+        mask_nan = np.all(np.isnan(V), axis=0)
+        surface_depth = np.nanmin(Y, axis=0)     # top of mesh (shallowest)
+        ax.fill_between(
+            ds[mask_nan],
+            fill_base,
+            surface_depth[mask_nan],
+            facecolor=land_color,
+            edgecolor=None,
+            zorder=cs.zorder-1
+        )
+
+        # Plot the bottom curve
+        ax.plot(ds, bottom_depth, color='k', linestyle='-')
 
         cbar = self._make_colorbar(ax, cs, da.attrs.get('long_name', da.name) + (f" ({da.attrs.get('units','')})" if 'units' in da.attrs else ''), colorbar_kwargs or {})
 
