@@ -1523,7 +1523,7 @@ class FvcomPlotter(PlotHelperMixin):
         return fig, ax
 
     def section_contourf_z(self, da: xr.DataArray, lat: float = None, lon: float = None,
-        line: list[tuple[float, float]] = None, spacing: float = 200.0, xlim: tuple = None, ylim: tuple = None,
+        line: list[tuple[float, float]] = None, spacing: float = 100.0, xlim: tuple = None, ylim: tuple = None,
         xlabel: str = "Distance (m)", ylabel: str = "Depth (m)", title: str = None,
         ax=None, land_color: str = "#A0522D",  # Default seabed/land color (sienna)
         contourf_kwargs: dict = None, colorbar_kwargs: dict = None, **kwargs):
@@ -1644,16 +1644,16 @@ class FvcomPlotter(PlotHelperMixin):
         bottom_depth = np.nanmin(Y, axis=0)      # seabed profile (deepest mesh)
         ymin_axis, ymax_axis = ax.get_ylim()     # current axis limits
         fill_base = min(ymin_axis, ymax_axis)    # lower boundary in data coords
+        mask_land  = np.all(np.isnan(V), axis=0)
+        mask_water = ~mask_land
         # a) fill below seabed line (land patch under ocean)
-        ax.fill_between(distances, bottom_depth, fill_base, where=~np.isnan(bottom_depth),
+        ax.fill_between(distances, bottom_depth, fill_base, where=mask_water,
             facecolor=land_color, edgecolor=None, zorder=cs.zorder - 0.5,  # between axes background and contourf
             clip_on=True)
-        # b) fill entire vertical for columns completely outside mesh domain
-        mask_nan = np.all(np.isnan(V), axis=0)
-        if mask_nan.any():
-            ax.fill_between(distances[mask_nan], fill_base,
-                ymax_axis,               # fill up to top of axis (air remains white elsewhere)
-                facecolor=land_color, edgecolor=None, zorder=cs.zorder - 0.5, clip_on=True)
+        # b) fill entire vertical for land columns
+        #mask_nan = np.all(np.isnan(V), axis=0)
+        ax.fill_between(distances, fill_base, ymax_axis, where=mask_land,
+            facecolor=land_color, edgecolor=None, zorder=cs.zorder - 0.5, clip_on=True)
 
         # Plot the seabed line on top (use true bottom = deepest depth)
         ax.plot(distances, bottom_depth, color='k', linestyle='-', linewidth=1, zorder=cs.zorder + 1)
