@@ -1764,6 +1764,7 @@ class FvcomPlotter(PlotHelperMixin):
         # Determine vmin and vmax from data if not explicitly provided
         vmin = raw_vmin if raw_vmin is not None else da.min().item()
         vmax = raw_vmax if raw_vmax is not None else da.max().item()
+        print(f"vmin: {vmin}, vmax: {vmax}")
 
         # Convert levels if necessary:
         if levels is None:
@@ -1795,14 +1796,18 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             data_min = da.min().item()
             data_max = da.max().item()
+            print(f"data_min: {data_min}, data_max: {data_max}")
+            print(f"vmin: {vmin}, vmax: {vmax}")
             if vmin <= data_min and vmax >= data_max:
                 extend = "neither"
-            elif vmin <= data_min:
+            elif vmin > data_min and vmax >= data_max:
                 extend = "min"
-            elif vmax >= data_max:
+            elif vmax < data_max and vmin <= data_min:
                 extend = "max"
+                print("Here")
             else:
                 extend = "both"
+        print(f"extend: {extend}")
 
         return merged, levels, cmap, vmin, vmax, extend
 
