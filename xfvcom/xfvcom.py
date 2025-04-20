@@ -1662,8 +1662,7 @@ class FvcomPlotter(PlotHelperMixin):
         bottom_depth = np.nanmax(Y, axis=0)      # seabed profile (deepest mesh)
         ymin_axis, ymax_axis = ax.get_ylim()     # current axis limits
         fill_base = min(ymin_axis, ymax_axis)    # lower boundary in data coords
-
-        # a) fill below seabed line
+        # a) fill below seabed line (land patch under ocean)
         ax.fill_between(
             ds,
             bottom_depth,
@@ -1671,23 +1670,32 @@ class FvcomPlotter(PlotHelperMixin):
             where=~np.isnan(bottom_depth),
             facecolor=land_color,
             edgecolor=None,
-            zorder=cs.zorder-1
+            zorder=cs.zorder - 0.5,  # between axes background and contourf
+            clip_on=False
         )
-
-        # b) fill vertical columns where no mesh exists
+        # b) fill entire vertical for columns completely outside mesh domain
         mask_nan = np.all(np.isnan(V), axis=0)
-        surface_depth = np.nanmin(Y, axis=0)     # top of mesh (shallowest)
-        ax.fill_between(
-            ds[mask_nan],
-            fill_base,
-            surface_depth[mask_nan],
-            facecolor=land_color,
-            edgecolor=None,
-            zorder=cs.zorder-1
-        )
+        if mask_nan.any():
+            ax.fill_between(
+                ds[mask_nan],
+                fill_base,
+                ymax_axis,               # fill up to top of axis (air remains white elsewhere)
+                facecolor=land_color,
+                edgecolor=None,
+                zorder=cs.zorder - 0.5,
+                clip_on=False
+            )
 
-        # Plot the bottom curve
-        ax.plot(ds, bottom_depth, color='k', linestyle='-')
+        # Plot the seabed line on top (use true bottom = deepest depth)
+        seabed_line = np.nanmin(Y, axis=0)
+        ax.plot(
+            ds,
+            seabed_line,
+            color='k',
+            linestyle='-',
+            linewidth=1,
+            zorder=cs.zorder + 1
+        )
 
         cbar = self._make_colorbar(ax, cs, da.attrs.get('long_name', da.name) + (f" ({da.attrs.get('units','')})" if 'units' in da.attrs else ''), colorbar_kwargs or {})
 
