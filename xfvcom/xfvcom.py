@@ -26,6 +26,9 @@ from cartopy.io.img_tiles import GoogleTiles
 
 from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
 import inspect
+import matplotlib.tri as mtri
+from scipy.spatial import KDTree
+import pyproj
 from .helpers import PlotHelperMixin
 
 class FvcomDataLoader:
@@ -1559,6 +1562,18 @@ class FvcomPlotter(PlotHelperMixin):
         import matplotlib.tri as mtri
         from scipy.spatial import KDTree
         import pyproj
+
+        # 0 Validate that requested lat/lon lie within the dataset domain
+        lon_vals = self.ds['lon'].values if 'lon' in self.ds else None
+        lat_vals = self.ds['lat'].values if 'lat' in self.ds else None
+        if lat is not None and lat_vals is not None:
+            lat_min, lat_max = float(lat_vals.min()), float(lat_vals.max())
+            if not (lat_min <= lat <= lat_max):
+                raise ValueError(f"Latitude {lat} is outside domain bounds [{lat_min}, {lat_max}].")
+        if lon is not None and lon_vals is not None:
+            lon_min, lon_max = float(lon_vals.min()), float(lon_vals.max())
+            if not (lon_min <= lon <= lon_max):
+                raise ValueError(f"Longitude {lon} is outside domain bounds [{lon_min}, {lon_max}].")
 
         # Determine vertical dimension
         vert_dim = 'siglay' if 'siglay' in da.dims else 'siglev'
