@@ -1629,9 +1629,16 @@ class FvcomPlotter(PlotHelperMixin):
 
         ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
         if title: ax.set_title(title)
-        ax.set_xlim(distances.min(), distances.max())
+        # Set x-axis to distance
+        if xlim is not None:
+            ax.set_xlim(*xlim)
+        else:
+            ax.set_xlim(distances.min(), distances.max())     
         # Set y-axis so shallow (near-zero) is at top and deep (large negative) at bottom
-        ax.set_ylim(np.nanmin(Y), np.nanmax(Y))
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+        else:
+            ax.set_ylim(np.nanmin(Y), np.nanmax(Y))
 
         # 3 Now that y-limits are fixed, fill seabed and mesh-missing regions
         bottom_depth = np.nanmin(Y, axis=0)      # seabed profile (deepest mesh)
@@ -1640,17 +1647,18 @@ class FvcomPlotter(PlotHelperMixin):
         # a) fill below seabed line (land patch under ocean)
         ax.fill_between(distances, bottom_depth, fill_base, where=~np.isnan(bottom_depth),
             facecolor=land_color, edgecolor=None, zorder=cs.zorder - 0.5,  # between axes background and contourf
-            clip_on=False)
+            clip_on=True)
         # b) fill entire vertical for columns completely outside mesh domain
         mask_nan = np.all(np.isnan(V), axis=0)
         if mask_nan.any():
             ax.fill_between(distances[mask_nan], fill_base,
                 ymax_axis,               # fill up to top of axis (air remains white elsewhere)
-                facecolor=land_color, edgecolor=None, zorder=cs.zorder - 0.5, clip_on=False)
+                facecolor=land_color, edgecolor=None, zorder=cs.zorder - 0.5, clip_on=True)
 
         # Plot the seabed line on top (use true bottom = deepest depth)
         ax.plot(distances, bottom_depth, color='k', linestyle='-', linewidth=1, zorder=cs.zorder + 1)
 
+        # Add colorbar
         cbar = self._make_colorbar(ax, cs, da.attrs.get('long_name', da.name) + (f" ({da.attrs.get('units','')})" if 'units' in da.attrs else ''), colorbar_kwargs or {})
 
         return fig, ax, cbar
