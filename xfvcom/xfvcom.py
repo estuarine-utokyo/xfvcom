@@ -1659,7 +1659,7 @@ class FvcomPlotter(PlotHelperMixin):
         ax.set_ylim(np.nanmin(Y), np.nanmax(Y))
 
         # 3 Now that y-limits are fixed, fill seabed and mesh-missing regions
-        bottom_depth = np.nanmax(Y, axis=0)      # seabed profile (deepest mesh)
+        bottom_depth = np.nanmin(Y, axis=0)      # seabed profile (deepest mesh)
         ymin_axis, ymax_axis = ax.get_ylim()     # current axis limits
         fill_base = min(ymin_axis, ymax_axis)    # lower boundary in data coords
         # a) fill below seabed line (land patch under ocean)
@@ -1687,10 +1687,9 @@ class FvcomPlotter(PlotHelperMixin):
             )
 
         # Plot the seabed line on top (use true bottom = deepest depth)
-        seabed_line = np.nanmin(Y, axis=0)
         ax.plot(
             ds,
-            seabed_line,
+            bottom_depth,
             color='k',
             linestyle='-',
             linewidth=1,
