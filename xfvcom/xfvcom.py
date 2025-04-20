@@ -1559,18 +1559,6 @@ class FvcomPlotter(PlotHelperMixin):
         from scipy.spatial import KDTree
         import pyproj
 
-        # Merge contourf arguments; direct kwargs override contourf_kwargs
-        cf_args = {} if contourf_kwargs is None else contourf_kwargs.copy()
-        cf_args.update(kwargs)
-        if 'cmap' not in cf_args and hasattr(self.cfg, 'cmap'):
-            cf_args['cmap'] = self.cfg.cmap
-
-        # Extract contourf-specific settings
-        levels = cf_args.pop('levels', getattr(self.cfg, 'levels', None))
-        vmin   = cf_args.pop('vmin', None)
-        vmax   = cf_args.pop('vmax', None)
-        extend = cf_args.pop('extend', 'neither')
-
         # Determine vertical dimension
         vert_dim = 'siglay' if 'siglay' in da.dims else 'siglev'
 
@@ -1633,12 +1621,34 @@ class FvcomPlotter(PlotHelperMixin):
         # Plot
         fig = ax.figure if ax else plt.figure(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
         ax = ax or fig.add_subplot(1,1,1)
-        cs = ax.contourf(
-            X, Y, V,
+
+        # Build DataArray for section: 
+        # - dims: (siglay, distance)
+        # - coords:
+        #    * distance: 1D array of sampled distances
+        #    * depth:    2D array of shape (siglay, distance)
+        sec_da = xr.DataArray(
+            V,
+            dims=("siglay", "distance"),
+            coords={
+                "distance": ds,
+                "depth":    (("siglay","distance"), Y)
+            }
+        )
+        # 1 Prepare contourf args on section-DataArray
+        merged_cf_kwargs, levels, cmap_used, vmin, vmax, extend = \
+            self._prepare_contourf_args(sec_da, contourf_kwargs, kwargs)
+
+        # 2 use xarray's contourf wrapper (same as ts_contourf)
+        cs = sec_da.plot.contourf(
+            x="distance", y="depth",
             levels=levels,
+            cmap=cmap_used,
             vmin=vmin, vmax=vmax,
             extend=extend,
-            **cf_args
+            ax=ax,
+            add_colorbar=False,
+            **merged_cf_kwargs
         )
         ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
         if title: ax.set_title(title)
@@ -1750,38 +1760,63 @@ class FvcomPlotter(PlotHelperMixin):
     # --------------------------------
     # Private helper methods
     # --------------------------------
-
     def _prepare_contourf_args(self, da, contourf_kwargs, extra_kwargs):
         """
-        contourf_kwargs と extra_kwargs をマージし、
-        levels, cmap, vmin, vmax, extend を抽出して返す。
-
+        Merge contourf_kwargs and extra_kwargs, and extract levels, cmap, vmin, vmax, extend.
         Returns:
             merged_kwargs, levels, cmap, vmin, vmax, extend
         """
         contourf_kwargs = contourf_kwargs or {}
         merged = {**contourf_kwargs, **extra_kwargs}
 
-        #levels = merged.pop("levels", self.cfg.levels)
-        #cmap   = merged.pop("cmap",   self.cfg.cmap)
-        #vmin   = merged.pop("vmin",   da.min().item())
-        #vmax   = merged.pop("vmax",   da.max().item())
-        levels   = merged.pop("levels", self.cfg.levels)
-        cmap     = merged.pop("cmap",   self.cfg.cmap)
+        # Extract and handle contourf parameters with appropriate defaults
+        levels   = merged.pop("levels", getattr(self.cfg, "levels", None))
+        cmap     = merged.pop("cmap",   getattr(self.cfg, "cmap", None))
         raw_vmin = merged.pop("vmin",   None)
         raw_vmax = merged.pop("vmax",   None)
-        # When vmin and vmax are not provided, use the data min/max
-        vmin = raw_vmin if (raw_vmin is not None) else da.min().item()
-        vmax = raw_vmax if (raw_vmax is not None) else da.max().item()
 
+        # Determine vmin and vmax from data if not explicitly provided
+        vmin = raw_vmin if raw_vmin is not None else da.min().item()
+        vmax = raw_vmax if raw_vmax is not None else da.max().item()
+
+        # Convert levels if necessary:
+        if levels is None:
+            # Default to config levels if available, otherwise fallback to 21 levels
+            levels = self.cfg.levels if hasattr(self.cfg, "levels") else None
+            if levels is None:
+                levels = 21
+        if isinstance(levels, (int, np.integer)):
+            # If levels is an integer, create that many linearly spaced levels
+            n_levels = int(levels)
+            if vmin == vmax:
+                # Handle degenerate case: all data equal
+                levels = np.array([vmin, vmax])
+            else:
+                levels = np.linspace(vmin, vmax, n_levels)
+        elif isinstance(levels, (list, np.ndarray)):
+            # Use the list/array of levels directly
+            levels = np.asarray(levels)
+
+        # If no explicit vmin/vmax given, align vmin/vmax with the levels range
+        if raw_vmin is None and raw_vmax is None and isinstance(levels, np.ndarray):
+            if levels.size > 0:
+                vmin = levels.min()
+                vmax = levels.max()
+
+        # Determine the "extend" for contourf (how to handle values outside levels range)
         if "extend" in merged:
             extend = merged.pop("extend")
         else:
-            data_min, data_max = da.min().item(), da.max().item()
-            if   vmin <= data_min and vmax >= data_max: extend = "neither"
-            elif vmin <= data_min:                        extend = "min"
-            elif vmax >= data_max:                        extend = "max"
-            else:                                         extend = "both"
+            data_min = da.min().item()
+            data_max = da.max().item()
+            if vmin <= data_min and vmax >= data_max:
+                extend = "neither"
+            elif vmin <= data_min:
+                extend = "min"
+            elif vmax >= data_max:
+                extend = "max"
+            else:
+                extend = "both"
 
         return merged, levels, cmap, vmin, vmax, extend
 
