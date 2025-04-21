@@ -343,9 +343,118 @@ class FvcomPlotConfig:
     """
     Stores plot configuration settings.
     """
-    def __init__(self, figsize=(8,2), width=800, height=200, dpi=100, 
+    # ----------------------------------------------------------------
+    # Default figure settings
+    # ----------------------------------------------------------------
+    DEFAULT_FIGURE = {
+        'figsize':    (8, 2),
+        'dpi':        100,
+        'facecolor': 'white'
+    }
+
+    # ----------------------------------------------------------------
+    # Default color cycle & colormap
+    # ----------------------------------------------------------------
+    DEFAULT_COLOR = {
+        # Matplotlib “tab10” colors
+        'color_cycle': [
+            '#1f77b4',  # blue
+            '#ff7f0e',  # orange
+            '#2ca02c',  # green
+            '#d62728',  # red
+            '#9467bd',  # purple
+            '#8c564b',  # brown
+            '#e377c2',  # pink
+            '#7f7f7f',  # gray
+            '#bcbd22',  # olive
+            '#17becf'   # cyan
+        ],
+        'cmap':           'jet',
+        'norm':           None
+    }
+
+    # ----------------------------------------------------------------
+    # Default grid settings
+    # ----------------------------------------------------------------
+    DEFAULT_GRID = {
+        'linestyle': '--',
+        'linewidth': 0.5,
+        'color':     'gray',
+        'alpha':     0.7
+    }
+
+    # ----------------------------------------------------------------
+    # Class‐level defaults for font sizes (can be overridden)
+    # ----------------------------------------------------------------
+    DEFAULT_FONT_SIZES = {
+        'xticks':       11,   # size of x-axis tick labels
+        'yticks':       11,   # size of y-axis tick labels
+        'xlabel':       12,   # size of x-axis label
+        'ylabel':       12,   # size of y-axis label
+        'title':        14,   # size of axes title
+        'suptitle':     14,   # size of figure suptitle
+        'legend':       12,   # size of legend text
+        'legend_title': 12,   # size of legend title
+        'annotation':   12,   # size of annotation text
+        'text':         12,   # size of generic text
+        'colorbar':     11,   # size of colorbar tick labels
+        'cbar_label':   12,   # size of colorbar axis label
+        'cbar_title':   14,   # size of colorbar title
+        'tick_params':  11    # size applied when using ax.tick_params
+    }
+    # ----------------------------------------------------------------
+    # Class‐level defaults for line widths (can be overridden)
+    # ----------------------------------------------------------------
+    DEFAULT_LINE_WIDTHS = {
+        'plot':        1.5,   # linewidth for ax.plot
+        'contour':     1.0,   # linewidths for ax.contour
+        'grid':        0.8,   # linewidth for ax.grid
+        'axes':        1.2,   # overall axes line width (spines & ticks)
+        'spines':      1.2,   # line width for each spine
+        'tick_params': 0.8,   # width parameter in ax.tick_params
+        'legend':      1.0,   # frame line width for legend
+        'colorbar':    1.0,   # outline line width for colorbar
+        'errorbar':    1.0,   # elinewidth for ax.errorbar
+        'hist':        1.0,   # edge line width for ax.hist
+        'bar':         1.0,   # edge line width for ax.bar
+        'boxplot':     1.0,   # line width for ax.boxplot
+        'scatter':     0.5,   # edge width for ax.scatter markers
+        'annotation':  0.8    # bbox line width for ax.annotate
+    }
+
+    # Obsolete for the past code. After updating, delete this.
+    '''
+    DEFAULT_ARROW_OPTIONS = {
+        "arrow_scale": 1.0,
+        "arrow_scale": 1.0,
+        "arrow_width": 0.002,
+        "arrow_color": "blue",
+        "arrow_alpha": 0.7,
+        "arrow_angles": "uv",
+        "arrow_headlength": 5,
+        "arrow_headwidth": 3,
+        "arrow_headaxislength": 4.5
+    }
+    '''
+    # ----------------------------------------------------------------
+    # Default arrow properties (can be overridden via arrow_options)
+    # ----------------------------------------------------------------
+    DEFAULT_ARROW_OPTIONS = {
+        "scale": 1.0,
+        "width": 0.002,
+        "color": "blue",
+        "alpha": 0.7,
+        "angles": "uv",
+        "headlength": 5,
+        "headwidth": 3,
+        "headaxislength": 4.5
+    }
+
+    def __init__(self, figsize=None, dpi=None, facecolor=None, width=800, height=200, 
                  cbar_size="1%", cbar_pad=0.1, cmap="jet", levels=21,
-                 title_fontsize=14, label_fontsize=12, tick_fontsize=11, fontsize=None, **kwargs):
+                 title_fontsize=14, label_fontsize=12, tick_fontsize=11,
+                 figure=None, color=None, grid=None,
+                 fontsize=None, linewidth=None, arrow_options=None, **kwargs):
         """
         Initialize the FvcomPlotConfig instance.
         Parameters:
@@ -357,27 +466,116 @@ class FvcomPlotConfig:
         - cbar_pad: Padding between the colorbar and the plot.
         - cmap: Colormap to use for the plot.
         - levels: Number of levels for the colormap.
+        - title_fontsize: Font size for the plot title.
+        - label_fontsize: Font size for the x and y labels.
+        - tick_fontsize: Font size for the tick labels.
         - fontsize: Font size settings for various plot elements.
+        - linewidth: Line width for the plot lines.
         - **kwargs: Additional keyword arguments for customization.
         """
-        self.figsize = figsize
+        # Merge figure settings
+        fig_opts = {**self.DEFAULT_FIGURE, **(figure or {})}
+        # Override by individual args if provided
+        if figsize   is not None: fig_opts['figsize']   = figsize
+        if dpi       is not None: fig_opts['dpi']       = dpi
+        if facecolor is not None: fig_opts['facecolor'] = facecolor
+        for name, val in fig_opts.items():
+            setattr(self, name, val)
+
+        # Merge user-provided color settings
+        col_opts = {**self.DEFAULT_COLOR, **(color or {})}
+        self.color_cycle = col_opts['color_cycle']
+        self.cmap        = col_opts['cmap']
+        self.norm        = col_opts['norm']
+        
+        # Merge grid settings
+        grid_opts = {**self.DEFAULT_GRID, **(grid or {})}
+        self.grid_linestyle = grid_opts['linestyle']
+        self.grid_linewidth = grid_opts['linewidth']
+        self.grid_color     = grid_opts['color']
+        self.grid_alpha     = grid_opts['alpha']        
+        
+
+        # ------------------------------------------------------------
+        # Merge and assign font sizes
+        # ------------------------------------------------------------
+        merged_fs = {**self.DEFAULT_FONT_SIZES, **(fontsize or {})}
+        self.fontsize = merged_fs
+        # Also expose as individual attributes: fontsize_xticks, fontsize_xlabel, …
+        for name, size in merged_fs.items():
+            setattr(self, f"fontsize_{name}", size)
+        # ------------------------------------------------------------
+        # Merge and assign line widths
+        # ------------------------------------------------------------
+        merged_lw = {**self.DEFAULT_LINE_WIDTHS, **(linewidth or {})}
+        self.linewidth = merged_lw
+        # Also expose as individual attributes: linewidth_plot, linewidth_grid, …
+        for name, lw in merged_lw.items():
+            setattr(self, f"linewidth_{name}", lw)
+
+        merged_ao = {**self.DEFAULT_ARROW_OPTIONS, **(arrow_options or {})}
+        self.arrow_options = merged_ao
+        # Assign each arrow option as an attribute with 'arrow_' prefix
+        for name, val in merged_ao.items():
+            setattr(self, f"arrow_{name}", val)
+
+        # Obsolete. After updating, delete this part.
+        #self.figsize = figsize
         self.width = width
         self.height = height
-        self.dpi = dpi
+        #self.dpi = dpi
         self.cbar_size = cbar_size
         self.cbar_pad = cbar_pad
-        self.cmap = cmap
+        #self.cmap = cmap
         self.levels = levels
         self.title_fontsize = title_fontsize
         self.label_fontsize = label_fontsize
         self.tick_fontsize = tick_fontsize
+        self.date_format = kwargs.get('date_format', '%Y-%m-%d')
+        self.plot_color = kwargs.get("plot_color", "red")
+
+        '''
         # Default font sizes for various plot elements
+        #default_fontsize = {
+        #    'xticks': 11, 'yticks': 11, 'xlabel': 12, 'ylabel': 12, 'title': 14,
+        #    'legend': 12, 'annotation': 12, 'colorbar': 11, 'tick_params': 11,
+        #    'text': 12, 'legend_title': 12, 'cbar_title': 14, 'cbar_label': 14
+        #}
         default_fontsize = {
-            'xticks': 11, 'yticks': 11, 'xlabel': 12, 'ylabel': 12, 'title': 14,
-            'legend': 12, 'annotation': 12, 'colorbar': 11, 'tick_params': 11,
-            'text': 12, 'legend_title': 12, 'cbar_title': 14, 'cbar_label': 14
+            'xticks':       11,   # size of x-axis tick labels
+            'yticks':       11,   # size of y-axis tick labels
+            'xlabel':       12,   # size of x-axis label
+            'ylabel':       12,   # size of y-axis label
+            'title':        14,   # size of axes title
+            'suptitle':     14,   # size of figure suptitle
+            'legend':       12,   # size of legend text
+            'legend_title': 12,   # size of legend title
+            'annotation':   12,   # size of annotation text
+            'text':         12,   # size of generic text
+            'colorbar':     11,   # size of colorbar tick labels
+            'cbar_label':   12,   # size of colorbar axis label
+            'cbar_title':   14,   # size of colorbar title
+            'tick_params':  11    # size applied when using ax.tick_params
         }
         self.fontsize = {**default_fontsize, **(fontsize or {})}
+        # Line width settings
+        default_linewidth = {
+            'plot':        1.5,   # linewidth for ax.plot
+            'contour':     1.0,   # linewidths for ax.contour
+            'grid':        0.8,   # linewidth for ax.grid
+            'axes':        1.2,   # overall axes line width (spines & ticks)
+            'spines':      1.2,   # line width for each spine
+            'tick_params': 0.8,   # width parameter in ax.tick_params
+            'legend':      1.0,   # frame line width for legend
+            'colorbar':    1.0,   # outline line width for colorbar
+            'errorbar':    1.0,   # elinewidth for ax.errorbar
+            'hist':        1.0,   # edge line width for ax.hist
+            'bar':         1.0,   # edge line width for ax.bar
+            'boxplot':     1.0,   # line width for ax.boxplot
+            'scatter':     0.5,   # edge width for ax.scatter markers
+            'annotation':  0.8    # bbox line width for ax.annotate
+        }
+        self.linewidth = {**default_linewidth, **(linewidth or {})}        
         self.plot_color = kwargs.get("plot_color", "red")
         self.date_format = kwargs.get('date_format', '%Y-%m-%d')
         # Arrow configuration with defaults provided dynamically
@@ -394,6 +592,7 @@ class FvcomPlotConfig:
         }
         for key, value in defaults.items():
             setattr(self, key, kwargs.get(key, value))
+        '''
 
 class FvcomPlotter(PlotHelperMixin):
     """
@@ -1624,9 +1823,10 @@ class FvcomPlotter(PlotHelperMixin):
             self._prepare_contourf_args(sec_da, contourf_kwargs, kwargs)
 
         # 2 use xarray's contourf wrapper (same as ts_contourf)
-        cs = sec_da.plot.contourf(x="distance", y="depth", levels=levels, cmap=cmap_used,
-            vmin=vmin, vmax=vmax, extend=extend, ax=ax, add_colorbar=False, **merged_cf_kwargs)
-
+        cs = sec_da.plot.contourf(x="distance", y="depth", levels=levels, corner_mask=False, cmap=cmap_used,
+            vmin=vmin, vmax=vmax, extend=extend, linewidths=0, antialiased=False, ax=ax,
+            add_colorbar=False, **merged_cf_kwargs)
+        
         ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
         if title: ax.set_title(title)
         # Set x-axis to distance
@@ -1656,7 +1856,7 @@ class FvcomPlotter(PlotHelperMixin):
             facecolor=land_color, edgecolor=None, zorder=cs.zorder - 0.5, clip_on=True)
 
         # Plot the seabed line on top (use true bottom = deepest depth)
-        ax.plot(distances, bottom_depth, color='k', linestyle='-', linewidth=1, zorder=cs.zorder + 1)
+        ax.plot(distances, bottom_depth, color='k', linestyle='-', linewidth=0.5, zorder=cs.zorder + 1)
 
         # Add colorbar
         cbar = self._make_colorbar(ax, cs, da.attrs.get('long_name', da.name) + (f" ({da.attrs.get('units','')})" if 'units' in da.attrs else ''), colorbar_kwargs or {})
