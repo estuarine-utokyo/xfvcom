@@ -414,13 +414,13 @@ class PlotHelperMixin:
     A mixin class to provide helper methods for batch plotting and other common operations.
     """
 
-    def plot_timeseries_in_batches(self, plotter, vars, index, log=None, batch_size=4, k=None, start=None, end=None, save_prefix="plot", **kwargs):
+    def ts_plot_in_batches(self, plotter, varnames, index, log=None, batch_size=4, k=None, xlim=None, save_prefix="plot", **kwargs):
         """
         Plot variables in batches.
 
         Parameters:
         - plotter: FvcomPlotter object
-        - vars: List of variable names to plot.
+        - varnames: List of variable names to plot.
         - index: Index of the node or nele to plot.
         - batch_size: Number of variables per figure.
         - start, end: Start and end times for the time series.
@@ -428,16 +428,16 @@ class PlotHelperMixin:
         - **kwargs: Additional arguments for customization.
         """
 
-        if not isinstance(vars, list) or len(vars) == 0:
+        if not isinstance(varnames, list) or len(varnames) == 0:
             print("ERROR: Variable names are not included in 'vars' list.")
             return None
         
         # 分割数を計算
-        num_batches = ceil(len(vars) / batch_size)
+        num_batches = ceil(len(varnames) / batch_size)
 
         for batch_num in range(num_batches):
             # 対象の変数を抽出
-            batch_vars = vars[batch_num * batch_size : (batch_num + 1) * batch_size]
+            batch_vars = varnames[batch_num * batch_size : (batch_num + 1) * batch_size]
 
             # 図の作成
             fig, axes = plt.subplots(len(batch_vars), 1, figsize=(10, 3 * len(batch_vars)), sharex=True)
@@ -446,7 +446,7 @@ class PlotHelperMixin:
 
             # 各変数のプロット
             for var, ax in zip(batch_vars, axes):
-                plotter.plot_timeseries(var_name=var, index=index, log=log, k=k, start=start, end=end, ax=ax, **kwargs)
+                plotter.ts_plot(varname=var, index=index, log=log, k=k, xlim=xlim, ax=ax, **kwargs)
                 ax.set_title(var, fontsize=14)
 
             # 図全体の調整
@@ -459,6 +459,7 @@ class PlotHelperMixin:
             plt.close(fig)
 
         print(f"Saved {num_batches} figures as '{save_prefix}_batch_#.png'.")
+
 
     def plot_timeseries_for_river_in_batches(self, plotter, var_name, batch_size=4, start=None, end=None, save_prefix="river_plot", **kwargs):
         """

@@ -1656,18 +1656,20 @@ class FvcomPlotter(PlotHelperMixin):
 
         return fig, ax, cbar
 
-    def ts_plot(self, da: xr.DataArray, index: int = None, k: int = None, ax=None,
+    def ts_plot(self, da: xr.DataArray = None, varname: str =None, index: int = None, k: int = None, ax=None,
                 xlabel: str = None, ylabel: str = None, title: str = None,
                 color: str = None, linestyle: str = None, date_format: str = None,
                 xlim: tuple = None, ylim: tuple = None, rolling_window=None, log=False,
                 **kwargs) -> tuple[plt.Figure, plt.Axes]:
         """
-        1-D time series plot.
+        1-D time series plot. Provides a DataArray or variable name to extract from the dataset.
         
         Parameters:
         ----------
-        da : xr.DataArray
+        da : xr.DataArray, optional
             DataArray with a 'time' dimension.
+        varname : str, optional
+            Variable name to extract from the dataset. Default: None.
         index : int, optional
             Index for spatial dimension (node/nele). Not needed for pure time series.
         k : int, optional
@@ -1702,7 +1704,14 @@ class FvcomPlotter(PlotHelperMixin):
         tuple: (fig, ax)
         """
         # 1) Slice da based on its dimensions
-        #dims = da.dims
+        if da is None:
+            # da is extracted from self.ds[varname]
+            if varname is None:
+                raise ValueError("Either 'da' or 'varname' must be provided.")
+            da = self.ds[varname]
+        elif varname is not None:
+            raise ValueError("Only one of 'da' or 'varname' should be provided.")
+        
         data, spatial_dim, layer_dim = self._slice_time_series(da, index, k)
 
         # 2) Apply rolling mean before time filtering
