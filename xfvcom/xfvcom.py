@@ -808,62 +808,46 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def ts_wind_vector(self, u_var="uwind_speed", v_var="vwind_speed", index=None, start=None, end=None,
-                                    rolling_window=None, ax=None, plot_wind_speed=True, **kwargs):
+    def ts_vector(self, da_x, da_y, index=None, rolling_window=None, with_magnitude=True, ax=None, **kwargs):
         """
-        Plot wind vector time series for a specific element and wind speed magnitude (optional).
+        Plot vector time series for at a node/nele index and their magnitudes (optional), e.g., wind vectors. 
 
         Parameters:
         -----------
-        - u_var: Name of the variable representing the u-component of the wind.
-        - v_var: Name of the variable representing the v-component of the wind.
-        - index: Element (nele) index to plot the data for.
-        - start: Start time for the period to plot (e.g., "2020-01-01 00:00:00").
-        - end: End time for the period to plot (e.g., "2020-12-31 23:59:59").
+        - da_x (2D/1D DataArray): x-component of the vector (e.g., ds.uwind_speed).
+        - da_y (2D/1D DataArray): y-component of the vector (e.g., ds.vwind_speed).
+        - index: nele/node index to plot (optional).
         - rolling_window: Size of the rolling window for moving average (optional).
-        - ax: matplotlib axis object. If None, a new axis will be created.
-        - plot_wind_speed: If True, plot the wind speed magnitude.
-        - **kwargs: Additional keyword arguments for customization (e.g., dpi).
+        - with_magnitude: If True, plot its magnitude.
+        - ax: matplotlib axis object. If None, a new figure and axis will be created.
+        - **kwargs: Additional keyword arguments for customization.
     
         Returns:
         --------
         - fig: The matplotlib figure object.
         - ax: The matplotlib axis object.
         """
-        nele = index
-        if u_var not in self.ds or v_var not in self.ds:
-            print(f"Error: One or both of the variables '{u_var}' and '{v_var}' are not found in the dataset.")
-            return None
-        
-        # Select the data
-        if nele is not None:
-            if "nele" not in self.ds[u_var].dims:
-                print(f"Error: The variable '{u_var}' does not have 'nele' as a dimension. Try with 'nele=None'.")
-                return None
-            else:
-                u_data = self.ds[u_var].isel(nele=nele)
-                v_data = self.ds[v_var].isel(nele=nele)
+
+        if da_x.ndim == da_y.ndim == 2:
+            u = da_x[:, index]
+            v = da_y[:, index]
+            index_name = da_x.dims[1]
+        elif da_x.ndim == da_y.ndim == 1:
+            u = da_x
+            v = da_y
+            index_name = None
         else:
-            u_data = self.ds[u_var]
-            v_data = self.ds[v_var]
+            raise ValueError(f"Both da_x and da_y must be 2‑D or 1-D; "
+                            f"got shapes {da_x.shape} and {da_y.shape}.")
 
         # Apply rolling mean if specified
         if rolling_window:
-            u_data = u_data.rolling(time=rolling_window, center=True).mean().dropna(dim="time")
-            v_data = v_data.rolling(time=rolling_window, center=True).mean().dropna(dim="time")
+            u = u.rolling(time=rolling_window, center=True).mean().dropna(dim="time")
+            v = v.rolling(time=rolling_window, center=True).mean().dropna(dim="time")
             # Ensure time alignment after rolling and dropna
-            time = u_data["time"]
-        else:
-            time = self.ds["time"]
-
-        if start:
-            start = np.datetime64(start)
-        if end:
-            end = np.datetime64(end)
-        time_mask = (time >= start) & (time <= end) if start and end else slice(None)
-        u = u_data.isel(time=time_mask).values
-        v = v_data.isel(time=time_mask).values
-        time = time[time_mask]
+            #time = u["time"]
+        #else:
+        time = u["time"]
 
         # Compute wind speed magnitude
         speed = np.sqrt(u**2 + v**2)
@@ -878,7 +862,7 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             fig = ax.figure
         # Plot wind speed magnitude
-        if plot_wind_speed:
+        if with_magnitude:
             ax.plot(time, speed, label="Wind Speed (m/s)", color=self.cfg.plot_color, alpha=0.5)
 
         # Quiver plot for wind vectors
@@ -905,15 +889,15 @@ class FvcomPlotter(PlotHelperMixin):
 
         # Format axes
         rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
-        nele_text = f" (nele={nele})" if nele is not None else ""
-        title = f"Wind Vector and Speed Time Series {nele_text}{rolling_text}"
+        index_text = f" ({index_name}={index})" if index_name is not None else ""
+        title = f"Wind Vector and Speed Time Series {index_text}{rolling_text}"
         ax.set_title(title, fontsize=self.cfg.fontsize['title'])
         ax.set_xlabel("Time", fontsize=self.cfg.fontsize['xlabel'])
         ax.set_ylabel("Wind Speed (m/s)", fontsize=self.cfg.fontsize['ylabel'])
         ax.xaxis.set_major_formatter(DateFormatter(date_format))
         fig.autofmt_xdate()
         ax.grid(True)
-        if plot_wind_speed:
+        if with_magnitude:
             ax.legend()
         
         return fig, ax
