@@ -391,15 +391,15 @@ class FvcomPlotConfig:
         'yticks':       11,   # size of y-axis tick labels
         'xlabel':       12,   # size of x-axis label
         'ylabel':       12,   # size of y-axis label
-        'title':        14,   # size of axes title
-        'suptitle':     14,   # size of figure suptitle
-        'legend':       12,   # size of legend text
-        'legend_title': 12,   # size of legend title
+        'title':        12,   # size of axes title
+        'suptitle':     12,   # size of figure suptitle
+        'legend':       10,   # size of legend text
+        'legend_title': 11,   # size of legend title
         'annotation':   12,   # size of annotation text
         'text':         12,   # size of generic text
         'colorbar':     11,   # size of colorbar tick labels
         'cbar_label':   12,   # size of colorbar axis label
-        'cbar_title':   14,   # size of colorbar title
+        'cbar_title':   12,   # size of colorbar title
         'tick_params':  11    # size applied when using ax.tick_params
     }
     # ----------------------------------------------------------------
@@ -808,8 +808,9 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def ts_vector(self, da_x, da_y, index=None, rolling_window=None, with_magnitude=True, 
-                  show_vec_legend=True, vec_legend_speed=10, vec_legend_loc=(0.85,0.9), ax=None, **kwargs):
+    def ts_vector(self, da_x, da_y, index=None, xlabel="", ylabel="Wind speed (m/s)", title=None, 
+                  rolling_window=None, show_legend=True, with_magnitude=True, 
+                  show_vec_legend=True, vec_legend_speed=10, vec_legend_loc=(0.85,0.1), ax=None, **kwargs):
         """
         Plot vector time series for at a node/nele index and their magnitudes (optional), e.g., wind vectors. 
 
@@ -910,18 +911,28 @@ class FvcomPlotter(PlotHelperMixin):
         ax.set_ylim(-max_v, max_v)
 
         # Format axes
-        rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
-        index_text = f" ({index_name}={index})" if index_name is not None else ""
-        title = f"Wind Vector and Speed Time Series {index_text}{rolling_text}"
+        rolling_text = f" with {rolling_window}-hour rolling mean" if rolling_window else ""
+        index_text = f"({index_name}={index})" if index_name is not None else ""
+        if title is None:
+            title = f"Wind vector time series {index_text}{rolling_text}"
         ax.set_title(title, fontsize=self.cfg.fontsize['title'])
-        ax.set_xlabel("Time", fontsize=self.cfg.fontsize['xlabel'])
-        ax.set_ylabel("Wind Speed (m/s)", fontsize=self.cfg.fontsize['ylabel'])
+        ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize['xlabel'])
+        ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize['ylabel'])
         date_format = kwargs.get('date_format', self.cfg.date_format)
         ax.xaxis.set_major_formatter(DateFormatter(date_format))
         fig.autofmt_xdate()
-        ax.grid(True)
-        if with_magnitude:
-            ax.legend()
+
+        # Add y=0 line
+        frame_color = ax.spines["left"].get_edgecolor()  # Retrieve the color of the left spine
+        ax.axhline(
+            0.0,                       # y = 0
+            color=frame_color,         # Use the same color as the frame
+            linewidth=self.cfg.linewidth_axes * 0.3,  # Make it thinner
+            zorder=5                   # Ensure it is above the quiver arrows and other elements
+        )
+        
+        if show_legend and with_magnitude:
+            ax.legend(fontsize=self.cfg.fontsize['legend'])
         
         return fig, ax
 
