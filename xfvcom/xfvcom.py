@@ -829,6 +829,8 @@ class FvcomPlotter(PlotHelperMixin):
         """
 
         if da_x.ndim == da_y.ndim == 2:
+            if index is None:
+                raise ValueError("Index must be provided for 2D DataArrays.")
             u = da_x[:, index]
             v = da_y[:, index]
             index_name = da_x.dims[1]
@@ -842,18 +844,21 @@ class FvcomPlotter(PlotHelperMixin):
 
         # Apply rolling mean if specified
         if rolling_window:
-            u = u.rolling(time=rolling_window, center=True).mean().dropna(dim="time")
-            v = v.rolling(time=rolling_window, center=True).mean().dropna(dim="time")
+            #u = u.rolling(time=rolling_window, center=True).mean().dropna(dim="time")
+            #v = v.rolling(time=rolling_window, center=True).mean().dropna(dim="time")
             # Ensure time alignment after rolling and dropna
-            #time = u["time"]
-        #else:
+            uv = xr.Dataset({"u": u, "v": v})
+            uv = (uv.rolling(time=rolling_window, center=True).mean().dropna(dim="time"))
+            u = uv["u"]
+            v = uv["v"]
+
         time = u["time"]
 
         # Compute wind speed magnitude
         speed = np.sqrt(u**2 + v**2)
 
         # Adjust scale for quiver plot
-        max_speed = np.max(speed)
+        max_speed = float(np.max(speed)) if speed.size else 0.0
         #scale_factor = max_speed / 10  # Adjust to fit arrows within the plot
 
         figsize = kwargs.get('figsize', self.cfg.figsize)
