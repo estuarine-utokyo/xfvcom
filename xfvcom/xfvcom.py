@@ -808,20 +808,29 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def plot_wind_vector_timeseries(self, u_var="uwind_speed", v_var="vwind_speed", nele=None, start=None, end=None,
-                                    rolling_window=None, save_path=None, plot_wind_speed=True, **kwargs):
+    def ts_wind_vector(self, u_var="uwind_speed", v_var="vwind_speed", index=None, start=None, end=None,
+                                    rolling_window=None, ax=None, plot_wind_speed=True, **kwargs):
         """
-        Plot wind vector time series for a specific element.
+        Plot wind vector time series for a specific element and wind speed magnitude (optional).
 
         Parameters:
+        -----------
         - u_var: Name of the variable representing the u-component of the wind.
         - v_var: Name of the variable representing the v-component of the wind.
-        - nele: Element index to plot the data for.
+        - index: Element (nele) index to plot the data for.
         - start: Start time for the period to plot (e.g., "2020-01-01 00:00:00").
         - end: End time for the period to plot (e.g., "2020-12-31 23:59:59").
-        - rolling_window: Size of the rolling window for moving average (optional).        - save_path: Path to save the plot as an image. If None, the plot is displayed.
+        - rolling_window: Size of the rolling window for moving average (optional).
+        - ax: matplotlib axis object. If None, a new axis will be created.
+        - plot_wind_speed: If True, plot the wind speed magnitude.
         - **kwargs: Additional keyword arguments for customization (e.g., dpi).
+    
+        Returns:
+        --------
+        - fig: The matplotlib figure object.
+        - ax: The matplotlib axis object.
         """
+        nele = index
         if u_var not in self.ds or v_var not in self.ds:
             print(f"Error: One or both of the variables '{u_var}' and '{v_var}' are not found in the dataset.")
             return None
@@ -864,8 +873,10 @@ class FvcomPlotter(PlotHelperMixin):
         #scale_factor = max_speed / 10  # Adjust to fit arrows within the plot
 
         figsize = kwargs.get('figsize', self.cfg.figsize)
-        fig, ax = plt.subplots(figsize=figsize)
-
+        if ax is None:
+            fig, ax = plt.subplots(figsize=figsize, dpi=self.cfg.dpi)
+        else:
+            fig = ax.figure
         # Plot wind speed magnitude
         if plot_wind_speed:
             ax.plot(time, speed, label="Wind Speed (m/s)", color=self.cfg.plot_color, alpha=0.5)
@@ -902,13 +913,10 @@ class FvcomPlotter(PlotHelperMixin):
         ax.xaxis.set_major_formatter(DateFormatter(date_format))
         fig.autofmt_xdate()
         ax.grid(True)
-        ax.legend()
-
-        if save_path:
-            dpi = kwargs.get('dpi', self.cfg.dpi)  # Use provided dpi or default to config dpi
-            plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
+        if plot_wind_speed:
+            ax.legend()
         
-        return ax
+        return fig, ax
 
     def ts_contourf_z(self, da: xr.DataArray, index: int = None, 
                       xlim: tuple = None, ylim: tuple = None,
@@ -1048,7 +1056,7 @@ class FvcomPlotter(PlotHelperMixin):
                                    ylim=None, levels=20, vmin=None, vmax=None, cmap=None, save_path=None, method='contourf',
                                    add_contour=False, label_contours=False, **kwargs):
         """
-        Obsolete. Remove this method in future versions.
+        Obsolete. Remove this method in future versions. Use ts_contourf_z instead.
         Plot a 2D time series for a specified variable as a contour map with time on the x-axis and a vertical coordinate (siglay/siglev) on the y-axis.
 
         Parameters:
