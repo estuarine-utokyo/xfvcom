@@ -414,7 +414,8 @@ class PlotHelperMixin:
     A mixin class to provide helper methods for batch plotting and other common operations.
     """
 
-    def ts_plot_in_batches(self, plotter, varnames, index, log=None, batch_size=4, k=None, xlim=None, save_prefix="plot", **kwargs):
+    def ts_plot_in_batches(self, plotter, varnames, index, log=None, batch_size=4, k=None, xlim=None,
+                           png_prefix="plot", dpi=300, **kwargs):
         """
         Plot variables in batches.
 
@@ -424,8 +425,8 @@ class PlotHelperMixin:
         - index: Index of the node or nele to plot.
         - batch_size: Number of variables per figure.
         - start, end: Start and end times for the time series.
-        - save_prefix: Prefix for saved file names (e.g., "plot").
-        - **kwargs: Additional arguments for customization.
+        - png_prefix: Prefix for saved PNG file names (e.g., "PNG/time_node").
+        - **kwargs: Transferred to FvcomPlotter.ts_plot(**kwargs).
         """
 
         if not isinstance(varnames, list) or len(varnames) == 0:
@@ -454,11 +455,11 @@ class PlotHelperMixin:
             fig.tight_layout(rect=[0, 0, 1, 0.95])  # タイトルとプロット間のスペース調整
 
             # 保存または表示
-            save_path = f"{save_prefix}_batch_{batch_num + 1}.png"
-            fig.savefig(save_path, dpi=300, bbox_inches="tight")
+            save_path = f"{png_prefix}_batch_{batch_num + 1}.png"
+            fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
             plt.close(fig)
 
-        print(f"Saved {num_batches} figures as '{save_prefix}_batch_#.png'.")
+        print(f"Saved {num_batches} figures as '{png_prefix}_batch_#.png'.")
 
 
     def plot_timeseries_for_river_in_batches(self, plotter, var_name, batch_size=4, start=None, end=None, save_prefix="river_plot", **kwargs):
@@ -470,7 +471,7 @@ class PlotHelperMixin:
         - var_name: Variable name to plot.
         - batch_size: Number of rivers per figure.
         - start, end: Start and end times for the time series.
-        - save_prefix: Prefix for saved file names (e.g., "river_plot").
+        - png_prefix: Prefix for saved file names (e.g., "river_plot").
         - **kwargs: Additional arguments for customization.
         """
 
