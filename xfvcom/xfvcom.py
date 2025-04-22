@@ -808,7 +808,8 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def ts_vector(self, da_x, da_y, index=None, rolling_window=None, with_magnitude=True, ax=None, **kwargs):
+    def ts_vector(self, da_x, da_y, index=None, rolling_window=None, with_magnitude=True, 
+                  show_vec_legend=True, vec_legend_speed=10, vec_legend_loc=(0.85,0.9), ax=None, **kwargs):
         """
         Plot vector time series for at a node/nele index and their magnitudes (optional), e.g., wind vectors. 
 
@@ -871,22 +872,38 @@ class FvcomPlotter(PlotHelperMixin):
             ax.plot(time, speed, label="Wind Speed (m/s)", color=self.cfg.plot_color, alpha=0.5)
 
         # Quiver plot for wind vectors
-        quiver_kwargs = {key: value for key, value in kwargs.items() if key not in ["rolling_window", "figsize", "dpi"]}
-        angles = kwargs.get('angles', self.cfg.arrow_angles)
-        headlength = kwargs.get('headlength', self.cfg.arrow_headlength)
-        headwidth = kwargs.get('headwidth', self.cfg.arrow_headwidth)
-        headaxislength = kwargs.get('headaxislength', self.cfg.arrow_headaxislength)
-        width = kwargs.get('width', self.cfg.arrow_width)
-        scale = kwargs.get('scale', self.cfg.arrow_scale)
-        color = kwargs.get('color', self.cfg.arrow_color)
-        alpha = kwargs.get('alpha', self.cfg.arrow_alpha)
-        date_format = kwargs.get('date_format', self.cfg.date_format)
+        # Prepare quiver keyword arguments
+        #     Allow user to pass scale="auto" (default) for automatic scaling
+        scale_kwarg = kwargs.get("scale", "auto")
+        if scale_kwarg == "auto":
+            # empirical: make the longest arrow fill ~10 % of y‑axis height
+            scale = 1.0
+        else:
+            scale = scale_kwarg
 
-        ax.quiver(
-            time, [0] * len(time), u, v, angles=angles, headlength=headlength, headwidth=headwidth,
-            headaxislength=headaxislength, width=width, scale_units="y", scale=scale, 
-            color=color, alpha=alpha, **quiver_kwargs
+        quiver_opts = dict(
+            angles   = kwargs.get("angles",    self.cfg.arrow_angles),
+            headlength     = kwargs.get("headlength",     self.cfg.arrow_headlength),
+            headwidth      = kwargs.get("headwidth",      self.cfg.arrow_headwidth),
+            headaxislength = kwargs.get("headaxislength", self.cfg.arrow_headaxislength),
+            width   = kwargs.get("width",     self.cfg.arrow_width),
+            color   = kwargs.get("color",     self.cfg.arrow_color),
+            alpha   = kwargs.get("alpha",     self.cfg.arrow_alpha),
+            scale_units = "y",
+            scale   = scale
         )
+
+        Q = ax.quiver(time, np.zeros(len(time)), u, v, **quiver_opts)
+
+        # Add quiverkey
+        if show_vec_legend:
+            ref_speed = (max_speed * 0.3) if vec_legend_speed is None else vec_legend_speed
+            ax.quiverkey(Q, *vec_legend_loc, ref_speed,
+                        f"{ref_speed:.1f} m/s",
+                        labelpos='E', coordinates='axes',
+                        color=quiver_opts["color"],
+                        alpha=quiver_opts["alpha"],
+                        fontproperties={'size': self.cfg.fontsize_legend})
 
         # Format y-axis to accommodate negative and positive values
         max_v = np.max(np.abs(max_speed))
@@ -899,6 +916,7 @@ class FvcomPlotter(PlotHelperMixin):
         ax.set_title(title, fontsize=self.cfg.fontsize['title'])
         ax.set_xlabel("Time", fontsize=self.cfg.fontsize['xlabel'])
         ax.set_ylabel("Wind Speed (m/s)", fontsize=self.cfg.fontsize['ylabel'])
+        date_format = kwargs.get('date_format', self.cfg.date_format)
         ax.xaxis.set_major_formatter(DateFormatter(date_format))
         fig.autofmt_xdate()
         ax.grid(True)
