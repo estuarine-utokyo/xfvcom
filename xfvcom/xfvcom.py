@@ -728,7 +728,90 @@ class FvcomPlotter(PlotHelperMixin):
             **kwargs
         )
 
-    def ts_discharge(self, varname, river_index, start=None, end=None, rolling_window=None,
+    def ts_discharge(
+            self,
+            varname: str,
+            river_index: int,
+            start=None,
+            end=None,
+            rolling_window: int | None = None,
+            ax=None,
+            save_path: str | None = None,
+            **kwargs):
+        """
+        Plot a river-discharge time-series by delegating to self.ts_plot().
+
+        Parameters
+        ----------
+        varname : str
+            Variable name with a 'rivers' dimension.
+        river_index : int
+            Index along the 'rivers' dimension.
+        start, end : str | np.datetime64 | None
+            Optional time bounds forwarded via xlim.
+        rolling_window : int | None
+            Centered rolling-mean window (hours).
+        ax : matplotlib.axes.Axes | None
+            Pre-created axis. A new fig/ax is created if None.
+        save_path : str | None
+            File path to save the figure.
+        **kwargs
+            Extra keyword arguments forwarded to self.ts_plot().
+
+        Returns
+        -------
+        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
+            The figure and axis containing the plot.
+        """
+
+        # 1) Validate variable
+        if varname not in self.ds:
+            raise ValueError(f"Variable '{varname}' not found in dataset.")
+        if "rivers" not in self.ds[varname].dims:
+            raise ValueError(f"Variable '{varname}' must include a 'rivers' dim.")
+
+        # 2) Extract 1-D DataArray for selected river
+        da = self.ds[varname].isel(rivers=river_index)
+
+        # 3) Resolve river name for labels
+        if "river_names" in self.ds:
+            raw = self.ds["river_names"].isel(rivers=river_index).values
+            river_name = raw.decode("utf-8").strip() if isinstance(raw, (bytes, bytearray)) else str(raw)
+        else:
+            river_name = f"river {river_index}"
+
+        # 4) Default title / ylabel
+        roll_txt = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+        default_title = f"Time Series of {varname} for {river_name} (river={river_index}){roll_txt}"
+        default_ylabel = varname
+
+        # 5) Ensure we have an axis (create if None)
+        if ax is None:
+            fig, ax = plt.subplots(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
+        else:
+            fig = ax.figure
+
+        # 6) Delegate to ts_plot (ax provided so it draws on same axis)
+        fig, ax = self.ts_plot(
+            da=da,
+            rolling_window=rolling_window,
+            xlabel="Time",
+            ylabel=kwargs.pop("ylabel", default_ylabel),
+            title=kwargs.pop("title", default_title),
+            xlim=(start, end) if (start is not None or end is not None) else None,
+            ax=ax,
+            **kwargs,
+        )
+
+        # 7) Optional save
+        if save_path:
+            dpi = kwargs.get("dpi", self.cfg.dpi)
+            fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
+
+        return fig, ax
+
+
+    def ts_discharge2(self, varname, river_index, start=None, end=None, rolling_window=None,
                                    ax=None, save_path=None, **kwargs):
         """
         Plot a time series for a specified variable at a given discharge index.
