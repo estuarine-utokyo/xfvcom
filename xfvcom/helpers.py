@@ -414,19 +414,18 @@ class PlotHelperMixin:
     A mixin class to provide helper methods for batch plotting and other common operations.
     """
 
-    def ts_plot_in_batches(self, plotter, varnames, index, log=None, batch_size=4, k=None, xlim=None,
+    def ts_plot_in_batches(self, varnames, index, log=None, batch_size=4, k=None, xlim=None,
                            png_prefix="plot", dpi=300, **kwargs):
         """
         Plot variables in batches.
 
         Parameters:
-        - plotter: FvcomPlotter object
         - varnames: List of variable names to plot.
         - index: Index of the node or nele to plot.
         - batch_size: Number of variables per figure.
         - start, end: Start and end times for the time series.
         - png_prefix: Prefix for saved PNG file names (e.g., "PNG/time_node").
-        - **kwargs: Transferred to FvcomPlotter.ts_plot(**kwargs).
+        - **kwargs: Transferred to self.ts_plot(**kwargs).
         """
 
         if not isinstance(varnames, list) or len(varnames) == 0:
@@ -447,7 +446,7 @@ class PlotHelperMixin:
 
             # 各変数のプロット
             for var, ax in zip(batch_vars, axes):
-                plotter.ts_plot(varname=var, index=index, log=log, k=k, xlim=xlim, ax=ax, **kwargs)
+                self.ts_plot(varname=var, index=index, log=log, k=k, xlim=xlim, ax=ax, **kwargs)
                 ax.set_title(var, fontsize=14)
 
             # 図全体の調整
