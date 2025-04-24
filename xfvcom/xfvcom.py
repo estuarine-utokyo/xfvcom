@@ -728,16 +728,8 @@ class FvcomPlotter(PlotHelperMixin):
             **kwargs
         )
 
-    def ts_discharge(
-            self,
-            varname: str,
-            river_index: int,
-            start=None,
-            end=None,
-            rolling_window: int | None = None,
-            ax=None,
-            save_path: str | None = None,
-            **kwargs):
+    def ts_discharge(self, varname: str, river_index: int, xlim: tuple =None, ylim: tuple =None,
+                     rolling_window: int | None = None, ax=None, **kwargs):
         """
         Plot a river-discharge time-series by delegating to self.ts_plot().
 
@@ -753,8 +745,6 @@ class FvcomPlotter(PlotHelperMixin):
             Centered rolling-mean window (hours).
         ax : matplotlib.axes.Axes | None
             Pre-created axis. A new fig/ax is created if None.
-        save_path : str | None
-            File path to save the figure.
         **kwargs
             Extra keyword arguments forwarded to self.ts_plot().
 
@@ -776,9 +766,15 @@ class FvcomPlotter(PlotHelperMixin):
         # 3) Resolve river name for labels
         if "river_names" in self.ds:
             raw = self.ds["river_names"].isel(rivers=river_index).values
-            river_name = raw.decode("utf-8").strip() if isinstance(raw, (bytes, bytearray)) else str(raw)
+            river_name = raw.item() if isinstance(raw, np.ndarray) else raw
+            #river_name = raw.decode("utf-8").strip() if isinstance(raw, (bytes, bytearray)) else str(raw)
         else:
             river_name = f"river {river_index}"
+
+        #river_name = self.ds["river_names"].isel(rivers=river_index).values
+        #if isinstance(river_name, np.ndarray):
+        #    river_name = river_name.item()  # 単一値を取得
+        river_name = river_name.decode('utf-8').strip() 
 
         # 4) Default title / ylabel
         roll_txt = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
@@ -798,15 +794,15 @@ class FvcomPlotter(PlotHelperMixin):
             xlabel="Time",
             ylabel=kwargs.pop("ylabel", default_ylabel),
             title=kwargs.pop("title", default_title),
-            xlim=(start, end) if (start is not None or end is not None) else None,
+            xlim=xlim,
             ax=ax,
             **kwargs,
         )
 
         # 7) Optional save
-        if save_path:
-            dpi = kwargs.get("dpi", self.cfg.dpi)
-            fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
+        #if save_path:
+        #    dpi = kwargs.get("dpi", self.cfg.dpi)
+        #    fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
 
         return fig, ax
 
