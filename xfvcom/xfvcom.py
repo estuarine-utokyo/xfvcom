@@ -728,8 +728,7 @@ class FvcomPlotter(PlotHelperMixin):
             **kwargs
         )
 
-    def ts_discharge(self, varname: str, river_index: int, xlim: tuple =None, ylim: tuple =None,
-                     rolling_window: int | None = None, ax=None, **kwargs):
+    def ts_discharge(self, varname: str, river_index: int, rolling_window: int = None, title=None, verbose=False, ax=None, **kwargs):
         """
         Plot a river-discharge time-series by delegating to self.ts_plot().
 
@@ -739,10 +738,12 @@ class FvcomPlotter(PlotHelperMixin):
             Variable name with a 'rivers' dimension.
         river_index : int
             Index along the 'rivers' dimension.
-        start, end : str | np.datetime64 | None
-            Optional time bounds forwarded via xlim.
         rolling_window : int | None
             Centered rolling-mean window (hours).
+        title : str | None
+            Title for the plot. If None, a default title is generated.
+        verbose : bool
+            If True, prints the river name and index.
         ax : matplotlib.axes.Axes | None
             Pre-created axis. A new fig/ax is created if None.
         **kwargs
@@ -776,10 +777,21 @@ class FvcomPlotter(PlotHelperMixin):
         #    river_name = river_name.item()  # 単一値を取得
         river_name = river_name.decode('utf-8').strip() 
 
-        # 4) Default title / ylabel
+        # 4) Default title / xlabel / ylabel
         roll_txt = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
-        default_title = f"Time Series of {varname} for {river_name} (river={river_index}){roll_txt}"
-        default_ylabel = varname
+        if title is None:
+            title = ""
+        elif isinstance(title, str):
+            pass
+        else:
+            title = f"Time Series of {varname} for {river_name} (river={river_index}){roll_txt}"
+        xlabel = kwargs.pop("xlabel", "")
+        ylabel = kwargs.pop("ylabel", varname)
+        if verbose:
+            default_label  = f"{river_name} (index={river_index})"
+        else:
+            default_label  = f"{river_name}"
+        label = kwargs.pop("label", default_label)
 
         # 5) Ensure we have an axis (create if None)
         if ax is None:
@@ -788,21 +800,8 @@ class FvcomPlotter(PlotHelperMixin):
             fig = ax.figure
 
         # 6) Delegate to ts_plot (ax provided so it draws on same axis)
-        fig, ax = self.ts_plot(
-            da=da,
-            rolling_window=rolling_window,
-            xlabel="Time",
-            ylabel=kwargs.pop("ylabel", default_ylabel),
-            title=kwargs.pop("title", default_title),
-            xlim=xlim,
-            ax=ax,
-            **kwargs,
-        )
-
-        # 7) Optional save
-        #if save_path:
-        #    dpi = kwargs.get("dpi", self.cfg.dpi)
-        #    fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
+        fig, ax = self.ts_plot(da=da, rolling_window=rolling_window, xlabel=xlabel, ylabel=ylabel,
+                               title=title, label=label, ax=ax, **kwargs)
 
         return fig, ax
 
