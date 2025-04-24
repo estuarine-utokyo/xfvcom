@@ -463,9 +463,9 @@ class PlotHelperMixin:
 
             # ---- 3-3) Plot each variable ---------------------------
             for var, ax in zip(batch_vars, axes):
-                self.ts_plot(varname=var, index=index, k=k, ax=ax, **kwargs)
-                ax.set_title(var, fontsize=self.cfg.fontsize_title)
-
+                self.ts_plot(varname=var, index=index, k=k, label=var, ax=ax, **kwargs)
+                #ax.set_title(var, fontsize=self.cfg.fontsize_title)
+                ax.legend(fontsize=self.cfg.fontsize_legend)
             # ---- 3-4) Layout & save -------------------------------
             fig.suptitle(
                 f"Time-Series Batch {b + 1}/{num_batches}",

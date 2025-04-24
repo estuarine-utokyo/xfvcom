@@ -772,21 +772,19 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             river_name = f"river {river_index}"
 
-        #river_name = self.ds["river_names"].isel(rivers=river_index).values
-        #if isinstance(river_name, np.ndarray):
-        #    river_name = river_name.item()  # 単一値を取得
         river_name = river_name.decode('utf-8').strip() 
 
         # 4) Default title / xlabel / ylabel
-        roll_txt = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
-        if title is None:
-            title = ""
-        elif isinstance(title, str):
-            pass
-        else:
+        if isinstance(title, str):
+            title = title.strip()        # explicit string
+        elif title:                       # Truthy but not str (e.g. True, 1)
+            roll_txt = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
             title = f"Time Series of {varname} for {river_name} (river={river_index}){roll_txt}"
-        xlabel = kwargs.pop("xlabel", "")
-        ylabel = kwargs.pop("ylabel", varname)
+        else:                              # None, False, "", 0 …
+            title = ""                   # no label
+
+        xlabel = kwargs.pop("xlabel", None)
+        ylabel = kwargs.pop("ylabel", True)
         if verbose:
             default_label  = f"{river_name} (index={river_index})"
         else:
@@ -1780,7 +1778,7 @@ class FvcomPlotter(PlotHelperMixin):
         return fig, ax, cbar
 
     def ts_plot(self, da: xr.DataArray = None, varname: str =None, index: int = None, k: int = None, ax=None,
-                xlabel: str = None, ylabel: str = None, title: str = None,
+                xlabel: str |bool| None = None, ylabel: str |bool| None = True, title: str |bool| None = None,
                 color: str = None, linestyle: str = None, date_format: str = None,
                 xlim: tuple = None, ylim: tuple = None, rolling_window=None, log=False,
                 **kwargs) -> tuple[plt.Figure, plt.Axes]:
@@ -1801,8 +1799,8 @@ class FvcomPlotter(PlotHelperMixin):
             Layer index for vertical dimension (siglay/siglev). Not needed for 2D or 1D series.
         ax : matplotlib.axes.Axes, optional
             Existing axis. Creates new one if None.
-        xlabel : str, optional
-            X-axis label. Default: 'Time'.
+        xlabel : str | bool | None, optional
+            X-axis label. If True, use default label 'Time'. If None, no label. Default None.
         ylabel : str, optional
             Y-axis label. Default: da.long_name or da.name.
         title : str, optional
@@ -1868,6 +1866,13 @@ class FvcomPlotter(PlotHelperMixin):
         # Apply log scale via helper (handles warnings for non-positive data)
         self._apply_log_scale(ax, data, log)
 
+        if xlabel:
+            ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize['xlabel'])
+        if ylabel:
+            ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize['ylabel'])
+        if title:
+            ax.set_title(title, fontsize=self.cfg.fontsize['title'])
+        
         # 7) Y‑axis limits
         if ylim is not None:
             ymin, ymax    = ylim
@@ -2257,7 +2262,7 @@ class FvcomPlotter(PlotHelperMixin):
 
     def _prepare_ts_labels(self, data: xr.DataArray, spatial_dim: str | None, layer_dim: str | None,
         index: int | None, k: int | None, rolling_window: int | None,
-        xlabel: str | None, ylabel: str | None, title: str | None) -> tuple[str, str, str]:
+        xlabel: str | bool | None, ylabel: str | bool | None, title: str | bool | None) -> tuple[str, str, str]:
         """
         Prepare and return xlabel, ylabel, title for ts_plot.
 
@@ -2268,15 +2273,45 @@ class FvcomPlotter(PlotHelperMixin):
         units     = data.attrs.get("units", "")
 
         # Set default xlabel only when None
-        if xlabel is None:
+        if isinstance(xlabel, str):
+            xlabel = xlabel.strip()
+        elif xlabel:               # Truthy but not str → True
             xlabel = "Time"
+        else:                      # None, False, "" → no label
+            xlabel = ""
 
         # Set default ylabel only when None
-        if ylabel is None:
+        if isinstance(ylabel, str):
+            ylabel = ylabel.strip()
+        elif ylabel:               # Truthy but not str → True
             ylabel = f"{long_name} ({units})"
+        else:                      # None, False, "" → no label
+            ylabel = ""
 
-        # Build title only when None
+        # Set default title only when True
+        if isinstance(title, str):
+            title = title.strip()
+        elif title:               # Truthy but not str → True
+            # add rolling text if requested
+            roll_txt = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+            if spatial_dim:
+                if layer_dim:
+                    title = f"Time Series of {long_name} ({spatial_dim}={index}, {layer_dim}={k}){roll_txt}"
+                else:
+                    title = f"Time Series of {long_name} ({spatial_dim}={index}){roll_txt}"
+            else:
+                title = f"Time Series of {long_name}{roll_txt}"
+        else:                      # None, False, "" → no label
+            xlabel = ""
+
+        # Build title only when True
         if title is None:
+            title = ""
+        elif isinstance(title, str):
+            pass
+        else:
+
+        #if title is None:
             # add rolling text if requested
             roll_txt = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
             if spatial_dim:
