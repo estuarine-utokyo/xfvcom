@@ -414,51 +414,136 @@ class PlotHelperMixin:
     A mixin class to provide helper methods for batch plotting and other common operations.
     """
 
-    def ts_plot_in_batches(self, varnames, index, log=None, batch_size=4, k=None, xlim=None,
-                           png_prefix="plot", dpi=300, **kwargs):
+    def ts_plot_in_batches(self, varnames, index, batch_size=4, k=None, png_prefix="plot", **kwargs):
         """
-        Plot variables in batches.
+        Batch-plot multiple variables (time-series) in groups of `batch_size`,
+        delegating each subplot to self.ts_plot().
 
         Parameters:
-        - varnames: List of variable names to plot.
-        - index: Index of the node or nele to plot.
-        - batch_size: Number of variables per figure.
-        - start, end: Start and end times for the time series.
-        - png_prefix: Prefix for saved PNG file names (e.g., "PNG/time_node").
-        - **kwargs: Transferred to self.ts_plot(**kwargs).
+        valnames: List of variable names to plot.
+        index: Index of the node or nele to plot.
+        batch_size: Number of variables per figure.
+        png_prefix: Prefix for saved PNG file names (e.g., "PNG/time_node").
+        k: Optional index for the variable to plot.
+        **kwargs: Transferred to self.ts_plot(**kwargs).
         """
-
+        # ------------------------------------------------------------
+        # 0) Basic validation
+        # ------------------------------------------------------------
         if not isinstance(varnames, list) or len(varnames) == 0:
-            print("ERROR: Variable names are not included in 'vars' list.")
-            return None
-        
-        # 分割数を計算
+            raise ValueError("'varnames' must be a non-empty list.")
+     
+        # ------------------------------------------------------------
+        # 1) Split into batches
+        # ------------------------------------------------------------
         num_batches = ceil(len(varnames) / batch_size)
 
-        for batch_num in range(num_batches):
-            # 対象の変数を抽出
-            batch_vars = varnames[batch_num * batch_size : (batch_num + 1) * batch_size]
+        # ------------------------------------------------------------
+        # 2) Pop plotting-specific kwargs
+        # ------------------------------------------------------------
+        dpi    = kwargs.pop("dpi",    self.cfg.dpi)
+        sharex = kwargs.pop("sharex", True)
 
-            # 図の作成
-            fig, axes = plt.subplots(len(batch_vars), 1, figsize=(10, 3 * len(batch_vars)), sharex=True)
+        for b in range(num_batches):
+            # ---- 3-1) Variables in this batch ----------------------
+            batch_vars = varnames[b * batch_size:(b + 1) * batch_size]
+
+            # ---- 3-2) Figure & axes --------------------------------
+            width, height = self.cfg.figsize              # e.g., (8, 2)
+            batch_figsize  = (width, height * len(batch_vars)) # scale height by n rows
+            #fig_height    = height * len(batch_vars)  # scale by rows
+            fig, axes = plt.subplots(
+                len(batch_vars), 1,
+                figsize=batch_figsize,
+                sharex=sharex,
+                dpi=self.cfg.dpi                      # Figure dpi follows config
+            )
             if len(batch_vars) == 1:
-                axes = [axes]  # 変数が1つの場合、axesをリストにする
+                axes = [axes]
 
-            # 各変数のプロット
+            # ---- 3-3) Plot each variable ---------------------------
             for var, ax in zip(batch_vars, axes):
-                self.ts_plot(varname=var, index=index, log=log, k=k, xlim=xlim, ax=ax, **kwargs)
-                ax.set_title(var, fontsize=14)
+                self.ts_plot(varname=var, index=index, k=k, ax=ax, **kwargs)
+                ax.set_title(var, fontsize=self.cfg.fontsize_title)
 
-            # 図全体の調整
-            fig.suptitle(f"Time Series Batch {batch_num + 1}", fontsize=16)
-            fig.tight_layout(rect=[0, 0, 1, 0.95])  # タイトルとプロット間のスペース調整
-
-            # 保存または表示
-            save_path = f"{png_prefix}_batch_{batch_num + 1}.png"
+            # ---- 3-4) Layout & save -------------------------------
+            fig.suptitle(
+                f"Time-Series Batch {b + 1}/{num_batches}",
+                fontsize=self.cfg.fontsize_suptitle
+            )
+            fig.tight_layout(rect=[0, 0, 1, 0.95])
+            save_path = f"{png_prefix}_batch_{b + 1}.png"
             fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
             plt.close(fig)
 
-        print(f"Saved {num_batches} figures as '{png_prefix}_batch_#.png'.")
+        print(f"Saved {num_batches} figure(s) as '{png_prefix}_batch_#.png'.")
+
+    def ts_river_in_batches(self, varname: str, batch_size: int = 4,
+            png_prefix: str = "river_plot", **kwargs):
+        """
+        Plot one river variable for *all* rivers in batches, delegating to self.ts_river().
+
+        Parameters
+        ----------
+        varname : str
+            Variable name to plot (must have 'rivers' and 'time' dims).
+        batch_size : int, default 4
+            Number of rivers per figure.
+        xlim : tuple | None, optional
+            (start, end) time limits forwarded to ts_river / ts_plot.
+        png_prefix : str, default "river_plot"
+            Prefix for saved PNG files (e.g. "river_plot_batch_1.png").
+        **kwargs
+            Additional keyword arguments passed straight to self.ts_river()
+            (e.g. rolling_window=24, color="k", linestyle="--").
+        """
+
+        # ---- 1) Determine river count and batches------------------------------
+        if "river_names" not in self.ds:
+            raise ValueError("Dataset lacks 'river_names'; cannot infer river count.")
+        num_rivers = int(self.ds["river_names"].sizes["rivers"])
+        num_batches = ceil(num_rivers / batch_size)
+
+        # ---- 2) Clean up kwargs for plotting -------------------------------
+        dpi = kwargs.pop("dpi", self.cfg.dpi)
+        sharex = kwargs.pop("sharex", True)
+
+        for b in range(num_batches):
+            start_i = b * batch_size
+            end_i   = min((b + 1) * batch_size, num_rivers)
+            river_idxs = range(start_i, end_i)
+
+            # ---- 3) Make one figure per batch --------------------------------
+            # --- determine base figsize -----------------------------------
+            width, height = self.cfg.figsize              # e.g., (8, 2)
+            batch_figsize  = (width, height * len(river_idxs)) # scale height by n rows
+
+            fig, axes = plt.subplots(
+                len(river_idxs), 1,
+                figsize=batch_figsize, #(10, 3 * len(river_idxs)),
+                sharex=sharex
+            )
+            if len(river_idxs) == 1:   # axes is Axes if n==1 → listify
+                axes = [axes]
+
+            # ---- 4) Plot each river -----------------------------------------
+            for idx, ax in zip(river_idxs, axes):
+                self.ts_river(varname=varname, river_index=idx, ax=ax, **kwargs)
+
+            # ---- 5) Layout & save -------------------------------------------
+            fig.suptitle(
+                f"{varname} – Rivers {start_i}–{end_i-1} "
+                f"(batch {b+1}/{num_batches})",
+                fontsize=self.cfg.fontsize_suptitle
+            )
+            fig.tight_layout(rect=[0, 0, 1, 0.95])
+
+            save_path = f"{png_prefix}_batch_{b+1}.png"
+            fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
+            plt.close(fig)
+
+        print(f"Saved {num_batches} figure(s) as '{png_prefix}_batch_#.png'.")
+
 
 
     def plot_timeseries_for_river_in_batches(self, plotter, var_name, batch_size=4, start=None, end=None, save_prefix="river_plot", **kwargs):
