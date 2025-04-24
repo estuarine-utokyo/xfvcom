@@ -808,28 +808,73 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def ts_vector(self, da_x, da_y, index=None, xlabel="", ylabel="Wind speed (m/s)", title=None, 
-                  rolling_window=None, show_legend=True, with_magnitude=True, 
-                  show_vec_legend=True, vec_legend_speed=10, vec_legend_loc=(0.85,0.1), ax=None, **kwargs):
+    def ts_vector(self, da_x: xr.DataArray =None, da_y: xr.DataArray =None, varname_x: str =None, varname_y: str =None,
+                  index: int =None, xlabel: str ="", ylabel: str ="Wind speed (m/s)", title: str =None,
+                  rolling_window: int =None, show_legend: bool =True, with_magnitude: bool =True, 
+                  show_vec_legend: bool =True, vec_legend_speed: float =10, vec_legend_loc: tuple =(0.85,0.1),
+                  ax=None, **kwargs):
         """
-        Plot vector time series for at a node/nele index and their magnitudes (optional), e.g., wind vectors. 
+        Plot time-series of vector components (u, v) and optionally their magnitude.
+        Accept either (da_x, da_y) or (varname_x, varname_y) exclusively.
+        Passing the DataArray objects directly is effective when you need to avoid performance degradation in parallel processing.
 
         Parameters:
         -----------
-        - da_x (2D/1D DataArray): x-component of the vector (e.g., ds.uwind_speed).
-        - da_y (2D/1D DataArray): y-component of the vector (e.g., ds.vwind_speed).
-        - index: nele/node index to plot (optional).
-        - rolling_window: Size of the rolling window for moving average (optional).
-        - with_magnitude: If True, plot its magnitude.
-        - ax: matplotlib axis object. If None, a new figure and axis will be created.
-        - **kwargs: Additional keyword arguments for customization.
+        da_x (2D/1D DataArray), optional: DataArray for the x-component (e.g., ds.uwind_speed).
+        da_y (2D/1D DataArray), optional: DataArray for the y-component (e.g., ds.vwind_speed).
+        varname_x (str), optional: Dataset variable name for the x-component (e.g., 'uwind_speed').
+        varname_y (str), optional: Dataset variable name for the y-component (e.g., 'vwind_speed').
+        index (int), optional: Index of the node/nele to plot (for 2D DataArrays).
+        xlabel (str): Label for the x-axis.
+        ylabel (str): Label for the y-axis.
+        title (str): Title of the plot.
+        rolling_window (int): Size of the rolling window for moving average.
+        show_legend (bool): If True, show the legend.
+        with_magnitude (bool): If True, plot the magnitude of the vector.
+        show_vec_legend (bool): If True, show the vector legend.
+        vec_legend_speed (float): Speed for the vector legend.
+        vec_legend_loc (tuple): Location of the vector legend in axes coordinates. 
+        ax: matplotlib axis object. If None, a new figure and axis will be created.
+        **kwargs: Additional keyword arguments for customization.
     
         Returns:
         --------
-        - fig: The matplotlib figure object.
-        - ax: The matplotlib axis object.
+        fig: The matplotlib figure object.
+        ax: The matplotlib axis object.
         """
 
+        # ------------------------------------------------------------
+        # 1. Validate the input combination
+        # ------------------------------------------------------------
+        has_da      = (da_x is not None) or (da_y is not None)
+        has_varname = (varname_x is not None) or (varname_y is not None)
+
+        # Both groups specified or neither → error
+        if (has_da and has_varname) or (not has_da and not has_varname):
+            raise ValueError(
+                "Specify either (da_x & da_y) *or* (varname_x & varname_y), but not both or neither."
+            )
+
+        # Only one of each pair given → error
+        if (da_x is None) != (da_y is None):
+            raise ValueError("Both da_x and da_y must be supplied together.")
+        if (varname_x is None) != (varname_y is None):
+            raise ValueError("Both varname_x and varname_y must be supplied together.")
+
+        # ------------------------------------------------------------
+        # 2. Convert variable names to DataArrays when necessary
+        # ------------------------------------------------------------
+        if has_varname:
+            if varname_x not in self.ds or varname_y not in self.ds:
+                raise ValueError(
+                    f"Variables '{varname_x}' or '{varname_y}' not found in the dataset."
+                )
+            da_x = self.ds[varname_x]
+            da_y = self.ds[varname_y]
+
+        # ------------------------------------------------------------
+        # 3. Slice by index or use full 1-D series
+        # ------------------------------------------------------------
         if da_x.ndim == da_y.ndim == 2:
             if index is None:
                 raise ValueError("Index must be provided for 2D DataArrays.")
@@ -1663,6 +1708,8 @@ class FvcomPlotter(PlotHelperMixin):
                 **kwargs) -> tuple[plt.Figure, plt.Axes]:
         """
         1-D time series plot. Provides a DataArray or variable name to extract from the dataset.
+        Accept either da or varname exclusively.
+        Passing the DataArray objects directly is effective when you need to avoid performance degradation in parallel processing.
         
         Parameters:
         ----------
