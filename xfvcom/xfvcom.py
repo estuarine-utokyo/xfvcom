@@ -728,14 +728,14 @@ class FvcomPlotter(PlotHelperMixin):
             **kwargs
         )
 
-    def plot_timeseries_for_river(self, var_name, river_index, start=None, end=None, rolling_window=None,
+    def ts_discharge(self, varname, river_index, start=None, end=None, rolling_window=None,
                                    ax=None, save_path=None, **kwargs):
         """
-        Plot a time series for a specified variable at a given river index.
+        Plot a time series for a specified variable at a given discharge index.
 
         Parameters:
-        - var_name: Name of the variable to plot.
-        - river_index: Index of the `rivers` to plot.
+        - varname: Name of the variable to plot.
+        - river_index: Index of the `discharges` to plot.
         - start: Start time for the plot (datetime or string).
         - end: End time for the plot (datetime or string).
         - rolling_window: Size of the rolling window for moving average (optional).
@@ -743,14 +743,14 @@ class FvcomPlotter(PlotHelperMixin):
         - save_path: Path to save the plot as an image (optional).
         - **kwargs: Additional arguments for customization (e.g., dpi, figsize).
         """
-        if var_name not in self.ds:
-            print(f"Error: the variable '{var_name}' is not found in the dataset.")
+        if varname not in self.ds:
+            print(f"Error: the variable '{varname}' is not found in the dataset.")
             return None
 
         # Validate the dimensions of the variable
-        variable_dims = self.ds[var_name].dims
+        variable_dims = self.ds[varname].dims
         if "rivers" not in variable_dims or "time" not in variable_dims:
-            raise ValueError(f"Variable {var_name} does not have 'rivers' and 'time' as dimensions.")
+            raise ValueError(f"Variable {varname} does not have 'rivers' and 'time' as dimensions.")
 
         # Retrieve and clean river name
         if "river_names" not in self.ds:
@@ -762,7 +762,7 @@ class FvcomPlotter(PlotHelperMixin):
 
 
         # Select the data
-        data = self.ds[var_name].isel(rivers=river_index)
+        data = self.ds[varname].isel(rivers=river_index)
         # Apply rolling mean if specified
         if rolling_window:
             data = data.rolling(time=rolling_window, center=True).mean()
@@ -787,14 +787,14 @@ class FvcomPlotter(PlotHelperMixin):
         # Plotting
         #color = kwargs.get('color', self.cfg.plot_color)
         color = kwargs.pop('color', self.cfg.plot_color)
-        ax.plot(time, data, label=f"{var_name} (river={river_index})", color=color, **kwargs)
+        ax.plot(time, data, label=f"{varname} (river={river_index})", color=color, **kwargs)
 
         # Formatting
         rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
-        title = f"Time Series of {var_name} for {river_name} (river={river_index}){rolling_text}"
+        title = f"Time Series of {varname} for {river_name} (river={river_index}){rolling_text}"
         ax.set_title(title, fontsize=self.cfg.fontsize['title'])
         ax.set_xlabel("Time", fontsize=self.cfg.fontsize['xlabel'])
-        ax.set_ylabel(var_name, fontsize=self.cfg.fontsize['ylabel'])
+        ax.set_ylabel(varname, fontsize=self.cfg.fontsize['ylabel'])
         date_format = kwargs.get('date_format', self.cfg.date_format)
         ax.xaxis.set_major_formatter(DateFormatter(date_format))
         fig.autofmt_xdate()
