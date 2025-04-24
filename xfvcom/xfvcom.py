@@ -728,9 +728,9 @@ class FvcomPlotter(PlotHelperMixin):
             **kwargs
         )
 
-    def ts_discharge(self, varname: str, river_index: int, rolling_window: int = None, title=None, verbose=False, ax=None, **kwargs):
+    def ts_river(self, varname: str, river_index: int, rolling_window: int = None, title=None, verbose=False, ax=None, **kwargs):
         """
-        Plot a river-discharge time-series by delegating to self.ts_plot().
+        Plot a river variable time-series by delegating to self.ts_plot().
 
         Parameters
         ----------
