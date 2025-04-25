@@ -443,6 +443,10 @@ class PlotHelperMixin:
         # ------------------------------------------------------------
         dpi    = kwargs.pop("dpi",    self.cfg.dpi)
         sharex = kwargs.pop("sharex", True)
+        legend = kwargs.pop("legend", True)
+        title  = kwargs.pop("title",  True)
+        suptitle = kwargs.pop("suptitle", True)
+        # ------------------------------------------------------------
 
         for b in range(num_batches):
             # ---- 3-1) Variables in this batch ----------------------
@@ -465,12 +469,14 @@ class PlotHelperMixin:
             for var, ax in zip(batch_vars, axes):
                 self.ts_plot(varname=var, index=index, k=k, label=var, ax=ax, **kwargs)
                 #ax.set_title(var, fontsize=self.cfg.fontsize_title)
-                ax.legend(fontsize=self.cfg.fontsize_legend)
+                if legend:
+                    ax.legend(fontsize=self.cfg.fontsize_legend)
             # ---- 3-4) Layout & save -------------------------------
-            fig.suptitle(
-                f"Time-Series Batch {b + 1}/{num_batches}",
-                fontsize=self.cfg.fontsize_suptitle
-            )
+            if title and suptitle:
+                fig.suptitle(
+                    f"Time-Series Batch {b + 1}/{num_batches}",
+                    fontsize=self.cfg.fontsize_suptitle
+                )
             fig.tight_layout(rect=[0, 0, 1, 0.95])
             save_path = f"{png_prefix}_batch_{b + 1}.png"
             fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
@@ -507,6 +513,9 @@ class PlotHelperMixin:
         # ---- 2) Clean up kwargs for plotting -------------------------------
         dpi = kwargs.pop("dpi", self.cfg.dpi)
         sharex = kwargs.pop("sharex", True)
+        legend = kwargs.pop("legend", True)
+        title = kwargs.pop("title", True)
+        suptitle = kwargs.pop("suptitle", True)
 
         for b in range(num_batches):
             start_i = b * batch_size
@@ -528,14 +537,17 @@ class PlotHelperMixin:
 
             # ---- 4) Plot each river -----------------------------------------
             for idx, ax in zip(river_idxs, axes):
-                self.ts_river(varname=varname, river_index=idx, ax=ax, **kwargs)
-
+                _, ax = self.ts_river(varname=varname, river_index=idx, ax=ax, **kwargs)
+                # Plot legend
+                if legend:
+                    ax.legend(fontsize=self.cfg.fontsize_legend)
             # ---- 5) Layout & save -------------------------------------------
-            fig.suptitle(
-                f"{varname} – Rivers {start_i}–{end_i-1} "
-                f"(batch {b+1}/{num_batches})",
-                fontsize=self.cfg.fontsize_suptitle
-            )
+            if title and suptitle:
+                fig.suptitle(
+                    f"{varname} - Rivers {start_i}-{end_i-1} "
+                    f"(batch {b+1}/{num_batches})",
+                    fontsize=self.cfg.fontsize_suptitle
+                )
             fig.tight_layout(rect=[0, 0, 1, 0.95])
 
             save_path = f"{png_prefix}_batch_{b+1}.png"

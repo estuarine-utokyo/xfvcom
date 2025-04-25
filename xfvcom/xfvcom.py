@@ -728,14 +728,16 @@ class FvcomPlotter(PlotHelperMixin):
             **kwargs
         )
 
-    def ts_river(self, varname: str, river_index: int, rolling_window: int = None, title=None, verbose=False, ax=None, **kwargs):
+    def ts_river(self, da: xr.DataArray = None, varname: str =None, river_index: int =None, rolling_window: int = None, title=None, verbose=False, ax=None, **kwargs):
         """
         Plot a river variable time-series by delegating to self.ts_plot().
 
         Parameters
         ----------
+        da : xr.DataArray, optional
+            DataArray with 'time' and 'rivers' dimension.
         varname : str
-            Variable name with a 'rivers' dimension.
+            Variable name with 'time' and 'rivers' dimension.
         river_index : int
             Index along the 'rivers' dimension.
         rolling_window : int | None
@@ -756,13 +758,16 @@ class FvcomPlotter(PlotHelperMixin):
         """
 
         # 1) Validate variable
-        if varname not in self.ds:
-            raise ValueError(f"Variable '{varname}' not found in dataset.")
-        if "rivers" not in self.ds[varname].dims:
-            raise ValueError(f"Variable '{varname}' must include a 'rivers' dim.")
+        if da is None:
+            # da is extracted from self.ds[varname]
+            if varname is None:
+                raise ValueError("Either 'da' or 'varname' must be provided.")
+            da = self.ds[varname]
+        elif varname is not None:
+            raise ValueError("Only one of 'da' or 'varname' should be provided.")
 
         # 2) Extract 1-D DataArray for selected river
-        da = self.ds[varname].isel(rivers=river_index)
+        da = da.isel(rivers=river_index)
 
         # 3) Resolve river name for labels
         if "river_names" in self.ds:
