@@ -7,17 +7,25 @@ from scipy.stats import pearsonr
 
 def clean_kwargs(func, kwargs):
     """
-    Clean kwargs to avoid conflicts with the explicit arguments of the given function.
+    Filter kwargs so that only arguments accepted by *func* survive.
+
+    Parameters
+    ----------
+    func : Callable
+        Target function whose signature is inspected.
+    kwargs : dict
+        Original keyword arguments.
+
+    Returns
+    -------
+    dict
+        Filtered kwargs that can be safely expanded with ** when
+        calling *func*.
     """
     func_args = inspect.signature(func).parameters
-    clean_kwargs = {}
-    for key, value in kwargs.items():
-        if key in func_args:
-            clean_kwargs[key] = value  # 関数の引数として渡すキーは保持
-        elif key not in func_args:
-            clean_kwargs[key] = value  # その他のキーも保持
-    return clean_kwargs
-
+    # Keep keys that appear in the callee's signature
+    return {k: v for k, v in kwargs.items() if k in func_args}
+    
 def unpack_plot_kwargs(kwargs):
     """
     Unpack nested 'plot_kwargs' dictionary if present.

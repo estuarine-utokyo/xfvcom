@@ -12,6 +12,8 @@ import inspect
 import subprocess
 import cartopy.crs as ccrs
 from tqdm import tqdm
+import xarray as xr
+from typing import Callable, Optional, Any
 # import dask
 # from dask.delayed import delayed
 
@@ -214,17 +216,18 @@ class FrameGenerator:
         """
         cls, time, da, plotter, output_dir, base_name, post_process_func, plot_kwargs = args
         
+        # verbose flag (default: False)
+        verbose = plot_kwargs.pop("verbose", False)
+
         # Unpack and clean plot_kwargs
-        #print("Original plot_kwargs:", plot_kwargs)
-        plot_kwargs = unpack_plot_kwargs(plot_kwargs)
-        #print("Unpacked plot_kwargs:", plot_kwargs)
-        plot_kwargs = clean_kwargs(plotter.plot_2d, plot_kwargs)
-        #print("Cleaned plot_kwargs:", plot_kwargs)
+        plot_kwargs = clean_kwargs(plotter.plot_2d, unpack_plot_kwargs(plot_kwargs))
+
+        if verbose:
+            print(f"[FrameGenerator] time={time}, kwargs={plot_kwargs}")
+
         save_path = os.path.join(output_dir, f"{base_name}_{time}.png")
 
-        cls.plot_data(da, time, plotter, save_path, post_process_func, plot_kwargs)
-        #da = da.isel(time=time)
-        #plotter.plot_2d(da=da, save_path=save_path, post_process_func=post_process_func, **plot_kwargs)
+        cls.plot_data(da=da, time=time, plotter=plotter, save_path=save_path, post_process_func=post_process_func, **plot_kwargs)
         return save_path
 
     @staticmethod
@@ -232,7 +235,9 @@ class FrameGenerator:
         """
         各プロセスが `time_slices` に含まれる複数の time ステップを一括処理
         """
+        
         cls, time_slice, da, plotter, output_dir, base_name, post_process_func, plot_kwargs = args
+        verbose = plot_kwargs.pop("verbose", False)
 
         # Unpack and clean plot_kwargs
         #print("Original plot_kwargs:", plot_kwargs)
@@ -251,18 +256,21 @@ class FrameGenerator:
         da = da.isel(time=time_slice).load()
 
         frames = []
-        for i, time in enumerate(time_slice):
-            save_path = os.path.join(proc_output_dir, f"{base_name}_{time}.png")
-            # デバッグ用の出力
-            print(f"Processing time={time}, ds.dims={da.dims}")
+        class_label = cls.__name__   # e.g., "FrameGenerator"
+        for i, t in enumerate(time_slice):
+            if verbose:
+                print(f"[{class_label}] rank={rank}  time={t}")
+            save_path = os.path.join(proc_output_dir, f"{base_name}_{t}.png")
             frame_data = da.isel(time=i) if 'time' in da.dims else da
-            cls.plot_data(frame_data, time, plotter, save_path, post_process_func, plot_kwargs)
+
+            cls.plot_data(da=frame_data, time=t, plotter=plotter, save_path=save_path, post_process_func=post_process_func, **plot_kwargs)
             frames.append(save_path)
 
         return frames
 
     @staticmethod
-    def plot_data(da=None, time=None, plotter=None, save_path=None, post_process_func=None, plot_kwargs=None):
+    def plot_data(*, da: xr.DataArray | None =None, time: int | None =None, plotter: "FvcomPlotter", save_path: str | None =None,
+                  post_process_func: Callable[[plt.Axes], None] | None = None, **plot_kwargs):
         """
         Generate a single frame with the given parameters.
 
@@ -275,97 +283,28 @@ class FrameGenerator:
         - plot_kwargs: Additional arguments for the plot.
         """
         
-        if da is None:
-            print(f"Mesh plot only")
-        elif "time" in da.dims and time is not None:
+        # Ensure dict once at the very top
+        plot_kwargs = plot_kwargs or {}
+
+        if da is None and not plot_kwargs.get("with_mesh", False):
+            raise ValueError("'da' is None and 'with_mesh' is False — nothing to plot.")
+
+        if da is not None and "time" in da.dims and time is not None:
             da = da.isel(time=time)
 
-        # Call the plotter's plot_2d method with the given arguments.
-        def wrapped_post_process_func(ax):
-            if post_process_func:
-                # This function is used to dynamically pass the required arguments if specified.
-                func_args = inspect.signature(post_process_func).parameters
-
-                # Dynamically pass the required arguments (da, time).
-                kwargs = {"ax": ax}
-                if "da" in func_args:
-                    kwargs["da"] = da
-                if "time" in func_args:
-                    kwargs["time"] = time
-                
-                post_process_func(**kwargs)
+        # Wrap post-process callback
+        def _wrapped(ax: plt.Axes) -> None:
+            if post_process_func is None:
+                return
+            sig = inspect.signature(post_process_func).parameters
+            kw: dict[str, Any] = {"ax": ax}
+            if "da" in sig:
+                kw["da"] = da
+            if "time" in sig:
+                kw["time"] = time
+            post_process_func(**kw)
         
-        return plotter.plot_2d(da=da, save_path=save_path, post_process_func=wrapped_post_process_func, **plot_kwargs)
-
-    @staticmethod
-    def plot_data_org(da, time=None, plotter=None, save_path=None, post_process_func=None, plot_kwargs=None):
-        """
-        Generate a single frame with the given parameters.
-
-        Parameters:
-        - da: DataArray to plot.
-        - time: Time index to select from the DataArray.
-        - plotter: FvcomPlotter instance used for plotting.
-        - save_path: Path to save the generated frame.
-        - post_process_func: Function to apply custom processing to the plot.
-        - plot_kwargs: Additional arguments for the plot.
-        """
-        # Extract the da for the given time index if specified.
-        if time is not None:
-            da = da.isel(time=time)
-        else:
-            da = da
-
-        # Call the plotter's plot_2d method with the given arguments.
-        def wrapped_post_process_func(ax):
-            if post_process_func:
-                # This function is used to dynamically pass the required arguments if specified.
-                func_args = inspect.signature(post_process_func).parameters
-
-                # Dynamically pass the required arguments (da, time).
-                kwargs = {"ax": ax}
-                if "da" in func_args:
-                    kwargs["da"] = da
-                if "time" in func_args:
-                    kwargs["time"] = time
-                
-                post_process_func(**kwargs)
-        
-        return plotter.plot_2d(da=da, save_path=save_path, post_process_func=wrapped_post_process_func, **plot_kwargs)
-    
-    @classmethod
-    def generate_frames_org(cls, da, output_dir, plotter, processes, base_name="frame", post_process_func=None, **plot_kwargs):
-        """
-        Generate frames using multiprocessing with the class's generate_frame method.
-        """
-        output_dir = os.path.expanduser(output_dir)
-        os.makedirs(output_dir, exist_ok=True)
-
-        time_indices = range(da.sizes["time"])
-        args_list = [(cls, time, da, plotter, output_dir, base_name, post_process_func, plot_kwargs) for time in time_indices]
-
-        # Check the number of available processes
-        max_procs = multiprocessing.cpu_count()
-        # スパコンのジョブ環境で設定されたプロセス数を取得（なければNone）
-        job_procs = os.environ.get("SLURM_CPUS_PER_TASK") or os.environ.get("PBS_NP") or os.environ.get("LSB_DJOB_NUMPROC")
-
-        # 取得した環境変数を整数に変換（環境変数が None の場合はデフォルトを max_procs に）
-        if job_procs:
-            job_procs = int(job_procs)
-        else:
-            job_procs = max_procs  # 環境変数がない場合は最大コア数を仮の値とする
-
-        print(f"Total available cores: {job_procs}")
-        
-        # 指定した processes をチェック
-        if processes > job_procs:
-            raise ValueError(f"Error: The specified processes ({processes}) exceed the available job processes ({job_procs}).")
-
-        # Use the class's generate_frame method
-        with Pool(processes=processes) as pool:
-            frames = pool.map(cls.generate_frame, args_list)
-
-        return frames
+        return plotter.plot_2d(da=da, save_path=save_path, post_process_func=_wrapped, **plot_kwargs)
 
     @classmethod
     def generate_frames(cls, da, output_dir, plotter, processes, base_name="frame", post_process_func=None, **plot_kwargs):

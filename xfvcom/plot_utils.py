@@ -4,7 +4,37 @@ import shutil
 import pandas as pd
 import re
 import time
+import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
+import numpy as np
+
 from .helpers import FrameGenerator, create_gif, convert_gif_to_mp4
+
+def prepare_contourf_args(
+    data, *, vmin=None, vmax=None, levels=None, cmap="viridis"
+):
+    """Return kwargs dict for tricontourf / contourf.
+
+    Notes
+    -----
+    * When *levels* is an int, it is passed directly to the colormap.
+    * vmin / vmax fall back to data min / max if None.
+    """
+    vmin = float(np.nanmin(data)) if vmin is None else vmin
+    vmax = float(np.nanmax(data)) if vmax is None else vmax
+    if isinstance(levels, int):
+        levels = np.linspace(vmin, vmax, levels + 1)
+    kwargs = dict(levels=levels, cmap=cmap, norm=Normalize(vmin, vmax))
+    return kwargs
+
+
+def add_colorbar(fig: plt.Figure, mappable, *, cax=None, label=None, **cbar_opts):
+    """Attach a colorbar to *fig* and return the Colorbar instance."""
+    cbar = fig.colorbar(mappable, cax=cax, **cbar_opts)
+    if label is not None:
+        cbar.set_label(label)
+    return cbar
+
 
 def create_anim_2d_plot(plotter, processes, var_name, siglay=None, fps=10, generate_gif=True, generate_mp4=False,
                         cleanup=False, post_process_func=None, plot_kwargs=None):
@@ -49,7 +79,8 @@ def create_anim_2d_plot(plotter, processes, var_name, siglay=None, fps=10, gener
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)  # サブディレクトリを含めて削除
     os.makedirs(output_dir) 
-        
+
+    plot_kwargs = plot_kwargs or {}     
     frames = FrameGenerator.generate_frames(da=da, output_dir=output_dir, plotter=plotter, processes=processes, 
                                             base_name=base_name, post_process_func=post_process_func, **plot_kwargs)
     #print(f"frames={frames}") 
