@@ -30,6 +30,7 @@ import matplotlib.tri as mtri
 from scipy.spatial import KDTree
 import pyproj
 from .helpers import PlotHelperMixin
+from .plot_utils import prepare_contourf_args, add_colorbar
 
 class FvcomDataLoader:
     """
@@ -1352,42 +1353,58 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def plot_2d(self, da=None, with_mesh=False, coastlines=False, obclines=False,
-                vmin=None, vmax=None, levels=20, ax=None, save_path=None,
-                use_latlon=True, projection=ccrs.Mercator(), plot_grid=False,
-                add_tiles=False, tile_provider=GoogleTiles(style="satellite"), tile_zoom=12,
-                verbose=False, post_process_func=None, xlim=None, ylim=None, **kwargs):
+    def plot_2d(self, *, da=None, save_path=None, post_process_func=None, **kwargs):
         """
-        Plot the triangular mesh of the FVCOM grid.
+        Plot scalar field (DataArray) or mesh-only figure.
 
         Parameters:
-        - da: DataArray to plot. Default is None (wireframe).
-        - with_mesh: If True, plot the mesh lines. Default is True.
-        - coastlines: If True, plot coastlines. Default is False.
-        - obclines: If True, plot open boundary lines. Default is False.
-        - vmin: Minimum value for color scaling.
-        - vmax: Maximum value for color scaling.
-        - levels: Number of contour levels or a list of levels.
-        - ax: matplotlib axis object. If None, a new axis will be created.
-        - save_path: Path to save the plot as an image (optional).
-        - use_latlon: If True, use (lon, lat) for nodes. If False, use (x, y).
-        - projection: Cartopy projection for geographic plotting. Default is PlateCarree.
-        - add_tiles: If True, add a tile map (for lat/lon plotting only).
-        - tile_provider: Tile provider for the background.
-        - tile_zoom (int): Zoom level for the tile map.
-        - post_process_func: Function to apply custom plots or decorations to the Axes.
-        - **kwargs: Additional arguments for customization.
+        ----------
+        da : xr.DataArray, optional
+            Field to plot. ``None`` allowed when ``with_mesh=True`` in **kwargs.
+        save_path : str, optional
+            PNG output path. If omitted, the figure is not saved.
+        post_process_func : callable(ax[, da, time]), optional
+            Callback executed after base map is drawn.
+        **kwargs :
+            All legacy keywords (with_mesh, coastlines, obclines, vmin, vmax,
+            levels, projection, plot_grid, add_tiles, tile_provider, tile_zoom,
+            verbose, xlim, ylim, ...) are still accepted.        
         
         Note:
+        -------
         projection in the following can be ccrs.Mercator(), which is the best in mid-latitudes.
             plt.subplots(figsize=figsize, subplot_kw={'projection': projection})
         The other parts, transform=ccrs.PlateCarree() must be set to inform lon/lat coords are used.
         Mercator is not lon/lat coords, so transform=ccrs.PlateCarree() is necessary.
-        
-        """
 
-        self.use_latlon = use_latlon       
-        transform = ccrs.PlateCarree() if self.use_latlon else None
+        """
+        # ------------------------------------------------------------------
+        # 0. Legacy keyword extraction with defaults
+        # ------------------------------------------------------------------
+        ax       = kwargs.get("ax")                                      # pre-created Axes or None
+        
+        projection    = kwargs.get("projection", ccrs.Mercator())        # map projection
+        use_latlon    = kwargs.get("use_latlon", True)                   # lon/lat or Cartesian
+        self.use_latlon = use_latlon
+        transform     = ccrs.PlateCarree() if self.use_latlon else None
+
+        with_mesh     = kwargs.get("with_mesh", False)                   # draw mesh lines
+        coastlines    = kwargs.get("coastlines", False)                  # draw coastlines
+        obclines      = kwargs.get("obclines", False)                    # draw open-boundary lines
+        plot_grid     = kwargs.get("plot_grid", False)                   # lat/lon grid
+        add_tiles     = kwargs.get("add_tiles", False)                   # web tiles
+        tile_provider = kwargs.get("tile_provider", GoogleTiles(style="satellite"))
+        tile_zoom     = kwargs.get("tile_zoom", 12)
+
+        verbose       = kwargs.get("verbose", False)                     # console logging
+        xlim          = kwargs.get("xlim")                               # (xmin,xmax)
+        ylim          = kwargs.get("ylim")                               # (ymin,ymax)
+
+        vmin          = kwargs.get("vmin")                               # color range
+        vmax          = kwargs.get("vmax")
+        levels        = kwargs.get("levels", 20)
+        cmap          = kwargs.get("cmap", "viridis")
+
         # Extract coordinates
         if self.use_latlon:
             x = self.ds["lon"].values
@@ -1613,8 +1630,6 @@ class FvcomPlotter(PlotHelperMixin):
                     dynamic_kwargs[arg] = ax
                 elif arg == "da":
                     dynamic_kwargs[arg] = da
-                elif arg == "time":
-                    dynamic_kwargs[arg] = time
                 elif arg in locals():  # ローカルスコープで値を取得
                     dynamic_kwargs[arg] = locals()[arg]
                 elif arg in globals():  # グローバルスコープで値を取得
