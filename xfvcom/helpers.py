@@ -14,6 +14,7 @@ import cartopy.crs as ccrs
 from tqdm import tqdm
 import xarray as xr
 from typing import Callable, Optional, Any
+from .plot_options import FvcomPlotOptions 
 # import dask
 # from dask.delayed import delayed
 
@@ -270,7 +271,7 @@ class FrameGenerator:
 
     @staticmethod
     def plot_data(*, da: xr.DataArray | None =None, time: int | None =None, plotter: "FvcomPlotter", save_path: str | None =None,
-                  post_process_func: Callable[[plt.Axes], None] | None = None, **plot_kwargs):
+                  post_process_func: Callable[[plt.Axes], None] | None = None, opts: FvcomPlotOptions | None = None,  **plot_kwargs):
         """
         Generate a single frame with the given parameters.
 
@@ -282,9 +283,14 @@ class FrameGenerator:
         - post_process_func: Function to apply custom processing to the plot.
         - plot_kwargs: Additional arguments for the plot.
         """
-        
-        # Ensure dict once at the very top
-        plot_kwargs = plot_kwargs or {}
+
+        # --- unify option source --------------------------------
+        if opts is None:
+            # still old-style → convert
+            opts = FvcomPlotOptions.from_kwargs(**plot_kwargs)
+        else:
+            # new-style + extra kwargs → merge into opts.extra
+            opts.extra.update(plot_kwargs)
 
         if da is None and not plot_kwargs.get("with_mesh", False):
             raise ValueError("'da' is None and 'with_mesh' is False — nothing to plot.")
@@ -304,7 +310,7 @@ class FrameGenerator:
                 kw["time"] = time
             post_process_func(**kw)
         
-        return plotter.plot_2d(da=da, save_path=save_path, post_process_func=_wrapped, **plot_kwargs)
+        return plotter.plot_2d(da=da, save_path=save_path, post_process_func=_wrapped, opts=opts)
 
     @classmethod
     def generate_frames(cls, da, output_dir, plotter, processes, base_name="frame", post_process_func=None, **plot_kwargs):
@@ -598,3 +604,11 @@ def get_index_by_value(array, value):
     # If the array is neither a list nor a numpy array, raise a TypeError.
     else:
         raise TypeError(f"Unsupported type: {type(array)}. Expected list or numpy array.")
+
+
+def pick_first(*values, default=None):
+    """Return first non-None value; otherwise *default*."""
+    for v in values:
+        if v is not None:
+            return v
+    return default

@@ -4,7 +4,6 @@ import os
 import numpy as np
 import xarray as xr
 import pandas as pd
-import pyproj
 from sklearn.neighbors import NearestNeighbors
 import matplotlib.pyplot as plt
 from matplotlib.colorbar import Colorbar
@@ -13,7 +12,7 @@ from matplotlib.dates import DateFormatter
 import matplotlib.cm as cm
 from matplotlib.colors import Normalize, BoundaryNorm
 import matplotlib.colors as mcolors
-import matplotlib.tri as tri
+import matplotlib.axes as maxes
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.ticker import LogLocator, LogFormatter
@@ -29,8 +28,12 @@ import inspect
 import matplotlib.tri as mtri
 from scipy.spatial import KDTree
 import pyproj
-from .helpers import PlotHelperMixin
+from .helpers import PlotHelperMixin, pick_first
 from .plot_utils import prepare_contourf_args, add_colorbar
+from .decorators import precedence
+from .plot_options import FvcomPlotOptions
+from typing import Any, Callable, Sequence, Dict, Tuple
+_TRICF_SIG = set(inspect.signature(maxes.Axes.tricontourf).parameters)
 
 class FvcomDataLoader:
     """
@@ -894,7 +897,7 @@ class FvcomPlotter(PlotHelperMixin):
                   index: int =None, xlabel: str ="", ylabel: str ="Wind speed (m/s)", title: str =None,
                   rolling_window: int =None, show_legend: bool =True, with_magnitude: bool =True, 
                   show_vec_legend: bool =True, vec_legend_speed: float =10, vec_legend_loc: tuple =(0.85,0.1),
-                  ax=None, **kwargs):
+                  ax=None, opts: FvcomPlotOptions | None = None, **kwargs):
         """
         Plot time-series of vector components (u, v) and optionally their magnitude.
         Accept either (da_x, da_y) or (varname_x, varname_y) exclusively.
@@ -924,6 +927,11 @@ class FvcomPlotter(PlotHelperMixin):
         fig: The matplotlib figure object.
         ax: The matplotlib axis object.
         """
+
+        if opts is None:
+            opts = FvcomPlotOptions.from_kwargs(**kwargs)
+        else:
+            opts.extra.update(kwargs)
 
         # ------------------------------------------------------------
         # 1. Validate the input combination
@@ -1300,9 +1308,6 @@ class FvcomPlotter(PlotHelperMixin):
 
         # Plot using contourf or pcolormesh
         cmap = cmap or kwargs.pop("cmap", "viridis") 
-        auto_levels = True
-        if vmin is not None or vmax is not None:
-            auto_levels = False
         vmin = vmin or kwargs.pop("vmin", values.min())
         vmax = vmax or kwargs.pop("vmax", values.max())
         levels = levels or kwargs.get("levels", 20)  # Number of contour levels
@@ -1310,11 +1315,6 @@ class FvcomPlotter(PlotHelperMixin):
             levels = np.linspace(vmin, vmax, levels)
         elif isinstance(levels, (list, np.ndarray)):
             levels = np.array(levels)
-            auto_levels = False
-        if auto_levels:
-            norm = Normalize(vmin=vmin, vmax=vmax)
-        else:
-            norm = BoundaryNorm(levels, ncolors=256, clip=False)
         if method == "contourf":
             cf = ax.contourf(time_grid, y_grid, values, levels=levels, cmap=cmap, norm=norm, extend='both', **kwargs)
             cbar = plt.colorbar(cf, ax=ax, extend='both')
@@ -1353,7 +1353,9 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def plot_2d(self, *, da=None, save_path=None, post_process_func=None, **kwargs):
+    @precedence("ax", "lw", "color", "linestyle")
+    def plot_2d(self, *, da: xr.DataArray | None =None, save_path=None, post_process_func=None,
+                opts: FvcomPlotOptions | None = None, local: dict[str, Any] | None =None, **_):
         """
         Plot scalar field (DataArray) or mesh-only figure.
 
@@ -1378,32 +1380,27 @@ class FvcomPlotter(PlotHelperMixin):
         Mercator is not lon/lat coords, so transform=ccrs.PlateCarree() is necessary.
 
         """
-        # ------------------------------------------------------------------
-        # 0. Legacy keyword extraction with defaults
-        # ------------------------------------------------------------------
-        ax       = kwargs.get("ax")                                      # pre-created Axes or None
-        
-        projection    = kwargs.get("projection", ccrs.Mercator())        # map projection
-        use_latlon    = kwargs.get("use_latlon", True)                   # lon/lat or Cartesian
+
+        # unify option source --------------------------------
+        assert opts is not None          # for safety; can be omitted
+        extra = opts.extra
+                
+        projection    = opts.projection        # map projection
+        use_latlon    = opts.use_latlon        # lon/lat or Cartesian
         self.use_latlon = use_latlon
         transform     = ccrs.PlateCarree() if self.use_latlon else None
 
-        with_mesh     = kwargs.get("with_mesh", False)                   # draw mesh lines
-        coastlines    = kwargs.get("coastlines", False)                  # draw coastlines
-        obclines      = kwargs.get("obclines", False)                    # draw open-boundary lines
-        plot_grid     = kwargs.get("plot_grid", False)                   # lat/lon grid
-        add_tiles     = kwargs.get("add_tiles", False)                   # web tiles
-        tile_provider = kwargs.get("tile_provider", GoogleTiles(style="satellite"))
-        tile_zoom     = kwargs.get("tile_zoom", 12)
+        with_mesh     = opts.with_mesh         # draw mesh lines
+        coastlines    = opts.coastlines        # draw coastlines
+        obclines      = opts.obclines          # draw open-boundary lines
+        plot_grid     = opts.plot_grid         # lat/lon grid
+        add_tiles     = opts.add_tiles         # web tiles
+        tile_provider = opts.tile_provider
+        tile_zoom     = opts.tile_zoom
 
-        verbose       = kwargs.get("verbose", False)                     # console logging
-        xlim          = kwargs.get("xlim")                               # (xmin,xmax)
-        ylim          = kwargs.get("ylim")                               # (ymin,ymax)
-
-        vmin          = kwargs.get("vmin")                               # color range
-        vmax          = kwargs.get("vmax")
-        levels        = kwargs.get("levels", 20)
-        cmap          = kwargs.get("cmap", "viridis")
+        verbose       = opts.verbose           # console logging
+        xlim          = opts.xlim              # (xmin,xmax)
+        ylim          = opts.ylim              # (ymin,ymax)
 
         # Extract coordinates
         if self.use_latlon:
@@ -1416,7 +1413,7 @@ class FvcomPlotter(PlotHelperMixin):
         if da is not None:
             values = da.values
             default_cbar_label = f"{da.long_name} ({da.units})"
-            cbar_label = kwargs.get("cbar_label", default_cbar_label)
+            cbar_label = extra.get("cbar_label", default_cbar_label)
         else:
             with_mesh=True
         # Extract triangle connectivity
@@ -1450,7 +1447,7 @@ class FvcomPlotter(PlotHelperMixin):
 
         # Create Triangulation
         try:
-            triang = tri.Triangulation(x, y, triangles=nv)
+            triang = mtri.Triangulation(x, y, triangles=nv)
             if verbose:
                 print(f"Number of triangles: {len(triang.triangles)}")
         except ValueError as e:
@@ -1458,8 +1455,9 @@ class FvcomPlotter(PlotHelperMixin):
             return None
 
         # Set up axis
+        ax = (local or {}).get("ax")           # pre-created Axes or None
         if ax is None:
-            figsize = kwargs.get("figsize", self.cfg.figsize)
+            figsize = opts.figsize or self.cfg.figsize
             if self.use_latlon:
                 fig, ax = plt.subplots(figsize=figsize, subplot_kw={'projection': projection})
             else:
@@ -1480,90 +1478,81 @@ class FvcomPlotter(PlotHelperMixin):
             #ax.add_image(tile_provider, 8)  # Zoom level 8 is suitable for regional plots
 
         # Argument treatment to avoid conflicts with **kwargs
-        with_mesh = kwargs.pop('with_mesh', with_mesh)  # Remove with_mesh from kwargs
-        lw = kwargs.pop('lw', 0.5)  # Line width for mesh plot
-        
-        #if not with_mesh:
-        #    lw = 0
-        color = kwargs.pop('color', "#36454F")  # Line color for mesh plot
-        coastline_color = kwargs.pop('coastline_color', 'gray')  # coastline color
-        obcline_color = kwargs.pop('obcline_color', "blue")  # Open boundary line color
-        linestyle = kwargs.pop('linestyle', '--')  # Line style for lat/lon gridlines
-        #linewidth = kwargs.pop('linewidth', 0.5)  # Line width for lat/lon gridlines
-        
-        # Filter tricontourf-specific kwargs to avoid conflicts
-        valid_tricontourf_args = inspect.signature(ax.tricontourf).parameters.keys()
-        tricontourf_kwargs = {key: kwargs[key] for key in valid_tricontourf_args if key in kwargs}
+        # with_mesh = opts.with_mesh  # Remove with_mesh from kwargs
 
+        # --------------------------------------------
+        # precedence resolution for style parameters
+        # --------------------------------------------
+        lw = pick_first((local or {}).get("lw"), opts.mesh_linewidth, 0.5)
+        color = pick_first((local or {}).get("color"), opts.mesh_color, "#36454F")
+        coastline_color = pick_first((local or {}).get("coastline_color"), opts.coastline_color, "gray")
+        obcline_color = pick_first((local or {}).get("obcline_color"), opts.obcline_color, "blue")
+        linestyle = pick_first((local or {}).get("linestyle"), opts.grid_linestyle, "--")        
         # Prepare color plot
         if da is not None:
-            cmap = kwargs.pop("cmap", "viridis") 
-            auto_levels = True
-            if vmin is not None or vmax is not None:
-                auto_levels = False
-            vmin = vmin or kwargs.pop("vmin", values.min().item())
-            vmax = vmax or kwargs.pop("vmax", values.max().item())
-            if np.all(values == values[0]):  
-                vmax += 1e-6  # Sligtly increase vmax to avoid errors
-            if vmin > vmax:
-                raise ValueError(f"Invalid range: vmin ({vmin}) must be less than vmax ({vmax}).")
+            cmap_raw = extra.get("cmap",  opts.cmap)
+            cmap_obj = plt.get_cmap(cmap_raw) if isinstance(cmap_raw, str) else cmap_raw
 
-            if verbose:
-                print(f"Color range: {vmin} to {vmax}")
+            # --- build tc_kwargs -----------------------------------------
+            tc_kwargs = {k: extra[k] for k in _TRICF_SIG if k in extra}
 
-            levels = levels or kwargs.pop("levels", 20)  # Number of contour levels
+            # ---- range ---------------------------------------------------
+            vmin = extra.get("vmin", opts.vmin)
+            vmax = extra.get("vmax", opts.vmax)
+            if vmin is None: vmin = float(values.min())
+            if vmax is None: vmax = float(values.max())
+
+            # ---- levels + norm ------------------------------------------
+            levels = extra.get("levels", opts.levels)
+
             if isinstance(levels, int):
-                levels = np.linspace(vmin, vmax, levels)
-                auto_levels = False
-            elif isinstance(levels, (list, np.ndarray)):
-                levels = np.array(levels)
-                levels = levels[(levels >= vmin) & (levels <= vmax)]
-                if len(levels) == 0:
-                    raise ValueError("Filtered levels are empty after applying vmin and vmax.")
-                auto_levels = False
-            else:
-                raise ValueError("Invalid levels argument. Must be an integer or a list of levels.")
+                # int  -> 線形レベル配列（境界数 = levels）
+                levels_arr = np.linspace(vmin, vmax, levels)
+            else:                               # list / ndarray
+                levels_arr = np.asarray(levels, float)
 
-            if auto_levels:
-                norm = Normalize(vmin=vmin, vmax=vmax)
-            else:
-                norm = BoundaryNorm(levels, ncolors=256, clip=False)
+            # values: ndarray of the DataArray at this time step
+            data_min = float(values.min())
+            data_max = float(values.max())
 
+            extend_flag = "neither"
+            if data_min < vmin and data_max > vmax:
+                extend_flag = "both"
+            elif data_min < vmin:
+                extend_flag = "min"
+            elif data_max > vmax:
+                extend_flag = "max"
+
+            tc_kwargs.update({
+                "vmin": vmin,
+                "vmax": vmax,
+                "levels": levels_arr,
+                "norm": BoundaryNorm(levels_arr, cmap_obj.N, clip=False)
+            })
         # Handle Cartesian coordinates
         if not self.use_latlon:
-            title = kwargs.pop("title", "FVCOM Mesh (Cartesian)")
+            title   = extra.get("title", "FVCOM Mesh (Cartesian)")
             if da is not None:
-                cf = ax.tricontourf(triang, values, levels=levels, cmap=cmap, norm=norm, extend='both', **tricontourf_kwargs)
-                cbar = plt.colorbar(cf, ax=ax, extend='both', orientation='vertical', shrink=1.0)
+                cf = ax.tricontourf(triang, values, cmap=cmap_obj, transform=None, extend=extend_flag, **tc_kwargs)
+                cbar = plt.colorbar(cf, ax=ax, extend=extend_flag, orientation='vertical', shrink=1.0)
                 cbar.set_label(cbar_label, fontsize=self.cfg.fontsize['cbar_label'], labelpad=10)
             if with_mesh:
                 ax.triplot(triang, color=color, lw=lw)
             ax.set_xlim(xmin, xmax)
             ax.set_ylim(ymin, ymax)
             ax.set_title(title, fontsize=self.cfg.fontsize["title"])
-            xlabel = kwargs.get("xlabel", "X (m)")
-            ylabel = kwargs.get("ylabel", "Y (m)")
+            xlabel = extra.get("xlabel",  "X (m)")
+            ylabel = extra.get("ylabel",  "Y (m)")
             ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize["xlabel"])
             ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize["ylabel"])
             ax.set_aspect("equal")
         # Handle lat/lon coordinates
         else:
-            #if add_tiles:
-            #    ax.add_image(tile_provider, 8)
-            #if da is not None:
-            #    ax.add_patch(plt.Rectangle(
-            #    (xmin, ymin),   # 左下の座標
-            #     xmax - xmin,    # 横幅
-            #     ymax - ymin,    # 縦幅
-            #    color="lightgray",         # 塗りつぶしの色
-            #    transform=ccrs.PlateCarree(),  # 緯度経度座標系での指定
-            #    zorder=0  # 他のプロットの下に描画
-            #    ))
-            title = kwargs.pop("title", "")
+            title   = extra.get("title", "")
             if da is not None:
-                cf = ax.tricontourf(triang, values, levels=levels, cmap=cmap, norm=norm, extend='both',
-                                    transform=ccrs.PlateCarree(), **tricontourf_kwargs)
-                cbar = plt.colorbar(cf, ax=ax, extend='both', orientation='vertical', shrink=1.0)
+                cf = ax.tricontourf(triang, values, cmap=cmap_obj, transform=ccrs.PlateCarree(),
+                                    extend=extend_flag, **tc_kwargs)
+                cbar = plt.colorbar(cf, ax=ax, extend=extend_flag, orientation='vertical', shrink=1.0)
                 cbar.set_label(cbar_label, fontsize=self.cfg.fontsize["cbar_label"], labelpad=10)
             if with_mesh:
                 # Always use PlateCarree here.
@@ -1572,8 +1561,8 @@ class FvcomPlotter(PlotHelperMixin):
             ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())
             #ax.set_extent([xmin, xmax, ymin, ymax], crs=projection)
             ax.set_title(title, fontsize=self.cfg.fontsize["title"])
-            xlabel = kwargs.get("xlabel", "Longitude")
-            ylabel = kwargs.get("ylabel", "Latitude")
+            xlabel  = extra.get("xlabel",  "Longitude")
+            ylabel  = extra.get("ylabel",  "Latitude")        
             ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize["xlabel"])
             ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize["ylabel"])
             ax.set_aspect('equal')
@@ -1618,34 +1607,35 @@ class FvcomPlotter(PlotHelperMixin):
             node_bc = self.ds.node_bc.values
             ax.plot(x[node_bc[:]], y[node_bc[:]], color=obcline_color, linewidth=1, transform=transform)
 
+        # --- user post-processing -----------------------------------------
         if post_process_func:
-            # post_process_func の引数を解析
-            func_signature = inspect.signature(post_process_func)
-            valid_args = func_signature.parameters.keys()
+            # Analyse function signature
+            func_sig = inspect.signature(post_process_func)
+            valid_args = func_sig.parameters.keys()
 
-            # 有効な引数に対応する値を取得または生成
-            dynamic_kwargs = {}
+            # Build kwargs dynamically
+            dyn_kwargs = {}
+            frame_locals  = locals()   # everything defined inside plot_2d
+            frame_globals = globals()  # module-level names
+
             for arg in valid_args:
                 if arg == "ax":
-                    dynamic_kwargs[arg] = ax
+                    dyn_kwargs[arg] = ax
                 elif arg == "da":
-                    dynamic_kwargs[arg] = da
-                elif arg in locals():  # ローカルスコープで値を取得
-                    dynamic_kwargs[arg] = locals()[arg]
-                elif arg in globals():  # グローバルスコープで値を取得
-                    dynamic_kwargs[arg] = globals()[arg]
+                    dyn_kwargs[arg] = da
+                elif arg in frame_locals:
+                    dyn_kwargs[arg] = frame_locals[arg]
+                elif arg in frame_globals:
+                    dyn_kwargs[arg] = frame_globals[arg]
                 else:
                     print(f"Warning: Unable to resolve argument '{arg}'.")
 
-            # post_process_funcを呼び出し
-            post_process_func(**dynamic_kwargs)
-
-        #if post_process_func:
-        #    post_process_func(ax, **kwargs)
+            # Call the user callback
+            post_process_func(**dyn_kwargs)
 
         # Save the plot if requested
         if save_path:
-            dpi = kwargs.get("dpi", self.cfg.dpi)
+            dpi = opts.dpi or self.cfg.dpi
             fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
             print(f"Plot saved to: {save_path}")
 
@@ -2096,7 +2086,6 @@ class FvcomPlotter(PlotHelperMixin):
         Build 2D grids X (distance), Y (depth), and V (values).
         """
         import numpy as np
-        import matplotlib.tri as mtri
         from scipy.spatial import KDTree
         import pyproj
 

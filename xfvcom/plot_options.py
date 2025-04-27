@@ -1,35 +1,130 @@
 # xfvcom/plot_options.py
+from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Sequence, Tuple, Dict
 import cartopy.crs as ccrs
+from cartopy.io.img_tiles import GoogleTiles
+
 
 @dataclass
 class FvcomPlotOptions:
-    # --- 共通 ---
-    cmap: str = "viridis"
-    vmin: float | None = None
-    vmax: float | None = None
-    levels: int | Sequence[float] = 20
-    date_fmt: str = "%Y-%m-%d"
+    """
+    One-stop option container for every plotting method in the xfvcom package.
+    All fields have sensible defaults so you can override only what you need.
+    """
 
-    # 2D／メッシュ
-    with_mesh: bool = False
-    coastlines: bool = False
-    obclines: bool = False
-    add_tiles: bool = False
-    plot_grid: bool = False
-    projection: ccrs.Projection = ccrs.Mercator()
+    # ------------------------------------------------------------
+    # 1. Color & scaling
+    # ------------------------------------------------------------
+    cmap       : str                       = "viridis"
+    vmin       : float | None              = None
+    vmax       : float | None              = None
+    levels     : int | Sequence[float]     = 20
+    extend     : str                       = "both"
+    norm       : Any | None                = None     # Custom matplotlib.colors.Normalize
 
-    # ベクトル
-    arrow_width : float = 0.002
-    headlength  : int   = 5
-    headwidth   : int   = 3
+    # ------------------------------------------------------------
+    # 2. Date / time axis
+    # ------------------------------------------------------------
+    date_fmt   : str                       = "%Y-%m-%d"
 
-    # 余剰 kwargs
-    extra: dict[str, Any] = field(default_factory=dict, repr=False)
+    # ------------------------------------------------------------
+    # 3. Figure / axis basics
+    # ------------------------------------------------------------
+    figsize    : Tuple[float, float] | None = None
+    dpi        : int | None                 = None
+    xlabel     : str | None                 = None
+    ylabel     : str | None                 = None
+    title      : str | None                 = None
 
+    # ------------------------------------------------------------
+    # 4. Spatial extent & projection
+    # ------------------------------------------------------------
+    xlim       : Tuple[float, float] | None = None
+    ylim       : Tuple[float, float] | None = None
+    use_latlon : bool                       = True
+    projection : ccrs.Projection            = field(default_factory=lambda: ccrs.Mercator())
+
+    # ------------------------------------------------------------
+    # 5. 2-D mesh / map specific
+    # ------------------------------------------------------------
+    with_mesh        : bool                 = False
+    coastlines       : bool                 = False
+    obclines         : bool                 = False
+    plot_grid        : bool                 = False
+    add_tiles        : bool                 = False
+    tile_provider    : Any                  = field(default_factory=lambda: GoogleTiles(style="satellite"))
+    tile_zoom        : int                  = 12
+    mesh_linewidth   : float                = 0.5
+    mesh_color       : str                  = "#36454F"
+    coastline_color  : str                  = "gray"
+    obcline_color    : str                  = "blue"
+    grid_linestyle   : str                  = "--"
+    grid_linewidth   : float                = 0.5
+
+    # ------------------------------------------------------------
+    # 6. Colorbar
+    # ------------------------------------------------------------
+    colorbar         : bool                 = True
+    cbar_label       : str | None           = None
+    cbar_size        : str                  = "1%"
+    cbar_pad         : float                = 0.1
+    cbar_kwargs      : Dict[str, Any]       = field(default_factory=dict)
+
+    # ------------------------------------------------------------
+    # 7. Rolling / smoothing (ts_ 系)
+    # ------------------------------------------------------------
+    rolling_window   : int | None           = None
+    min_periods      : int | None           = None
+
+    # ------------------------------------------------------------
+    # 8. Vector (ts_vector) options
+    # ------------------------------------------------------------
+    arrow_width          : float            = 0.002
+    arrow_color          : str              = "blue"
+    arrow_alpha          : float            = 0.7
+    arrow_angles         : str              = "uv"
+    arrow_headlength     : int              = 5
+    arrow_headwidth      : int              = 3
+    arrow_headaxislength : float            = 4.5
+    scale                : float | str      = "auto"
+    scale_units          : str              = "y"
+    show_vec_legend      : bool             = True
+    vec_legend_speed     : float | None     = None   # None → 0.3*max
+    vec_legend_loc       : Tuple[float, float]       = (0.85, 0.1)
+    with_magnitude       : bool             = True
+
+    # ------------------------------------------------------------
+    # 9. ts_contourf / ts_contourf_z
+    # ------------------------------------------------------------
+    add_contour      : bool                 = False
+    label_contours   : bool                 = False
+    plot_surface     : bool                 = False
+    surface_kwargs   : Dict[str, Any]       = field(default_factory=dict)
+
+    # ------------------------------------------------------------
+    # 10. Section plots
+    # ------------------------------------------------------------
+    spacing          : float                = 200.0
+    land_color       : str                  = "#A0522D"
+
+    # ------------------------------------------------------------
+    # 11. Miscellaneous
+    # ------------------------------------------------------------
+    verbose          : bool                 = False
+    log_scale        : bool                 = False
+
+    # ------------------------------------------------------------
+    # 12. Future / rarely-used kwargs bucket
+    # ------------------------------------------------------------
+    extra            : Dict[str, Any]       = field(default_factory=dict, repr=False)
+
+    # ------------------------------------------------------------
+    # Helper constructor to keep backward compatibility with **kwargs
+    # ------------------------------------------------------------
     @classmethod
-    def from_kwargs(cls, **kwargs):
+    def from_kwargs(cls, **kwargs) -> "FvcomPlotOptions":
+        """Convert legacy **kwargs into FvcomPlotOptions (unknown keys → extra)."""
         field_names = {f.name for f in cls.__dataclass_fields__.values()}
         core = {k: kwargs.pop(k) for k in list(kwargs) if k in field_names}
         return cls(**core, extra=kwargs)
