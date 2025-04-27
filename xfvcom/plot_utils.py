@@ -50,7 +50,7 @@ def create_anim_2d_plot(plotter, processes, var_name, siglay=None, fps=10, gener
         shutil.rmtree(output_dir)  # サブディレクトリを含めて削除
     os.makedirs(output_dir) 
         
-    frames = FrameGenerator.generate_frames(data_array=da, output_dir=output_dir, plotter=plotter, processes=processes, 
+    frames = FrameGenerator.generate_frames(da=da, output_dir=output_dir, plotter=plotter, processes=processes, 
                                             base_name=base_name, post_process_func=post_process_func, **plot_kwargs)
     #print(f"frames={frames}") 
     # `proc_*` 内のフレームを `frames/` に統合（上書きする）
