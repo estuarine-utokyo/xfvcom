@@ -281,7 +281,11 @@ class FrameGenerator:
         - plotter: FvcomPlotter instance used for plotting.
         - save_path: Path to save the generated frame.
         - post_process_func: Function to apply custom processing to the plot.
-        - plot_kwargs: Additional arguments for the plot.
+        - opts: FvcomPlotOptions instance for plot options.
+        - **plot_kwargs: Additional arguments for the plot.
+
+        Returns:
+        - FvcomPlotter.plot_2d: The plotter instance used for plotting.
         """
 
         # --- unify option source --------------------------------
@@ -292,7 +296,7 @@ class FrameGenerator:
             # new-style + extra kwargs → merge into opts.extra
             opts.extra.update(plot_kwargs)
 
-        if da is None and not plot_kwargs.get("with_mesh", False):
+        if da is None and not opts.with_mesh:
             raise ValueError("'da' is None and 'with_mesh' is False — nothing to plot.")
 
         if da is not None and "time" in da.dims and time is not None:
