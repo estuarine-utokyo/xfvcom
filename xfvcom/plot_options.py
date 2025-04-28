@@ -67,8 +67,8 @@ class FvcomPlotOptions:
     # ------------------------------------------------------------
     colorbar         : bool                 = True
     cbar_label       : str | None           = None
-    cbar_size        : str                  = "1%"
-    cbar_pad         : float                = 0.1
+    cbar_size        : str | None           = None
+    cbar_pad         : float | None         = None
     cbar_kwargs      : Dict[str, Any]       = field(default_factory=dict)
 
     # ------------------------------------------------------------

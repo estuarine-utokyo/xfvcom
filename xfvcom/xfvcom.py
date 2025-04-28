@@ -24,6 +24,7 @@ import cartopy.io.img_tiles as cimgt
 from cartopy.io.img_tiles import GoogleTiles
 
 from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
+from cartopy.mpl.geoaxes import GeoAxes
 import inspect
 import matplotlib.tri as mtri
 from scipy.spatial import KDTree
@@ -378,6 +379,15 @@ class FvcomPlotConfig:
     }
 
     # ----------------------------------------------------------------
+    # Default colorbar settings
+    # ----------------------------------------------------------------
+    DEFAULT_COLORBAR = {
+        "size":   "2.0%",  # width of cbar relative to main axes
+        "pad":    0.10,    # gap between axes and cbar (axes fraction)
+        "kwargs": {}       # → forwarded verbatim to `figure.colorbar`
+    }
+
+    # ----------------------------------------------------------------
     # Default grid settings
     # ----------------------------------------------------------------
     DEFAULT_GRID = {
@@ -455,10 +465,14 @@ class FvcomPlotConfig:
     }
 
     def __init__(self, figsize=None, dpi=None, facecolor=None, width=800, height=200, 
-                 cbar_size="1%", cbar_pad=0.1, cmap="jet", levels=21,
-                 title_fontsize=14, label_fontsize=12, tick_fontsize=11,
+                 cmap="jet", levels=21, title_fontsize=14, label_fontsize=12, tick_fontsize=11,
                  figure=None, color=None, grid=None,
-                 fontsize=None, linewidth=None, arrow_options=None, **kwargs):
+                 fontsize=None, linewidth=None, arrow_options=None,
+                 colorbar:dict | None =None,
+                 cbar_size: str | None = None,
+                 cbar_pad:  float | None = None,
+                 cbar_kwargs: dict | None = None,
+                 **kwargs):
         """
         Initialize the FvcomPlotConfig instance.
         Parameters:
@@ -492,6 +506,18 @@ class FvcomPlotConfig:
         self.cmap        = col_opts['cmap']
         self.norm        = col_opts['norm']
         
+        # ------------------------------------------------------------
+        # Color-bar defaults
+        # ------------------------------------------------------------
+        cb_base = {**self.DEFAULT_COLORBAR, **(colorbar or {})}
+        if cbar_size   is not None: cb_base["size"]   = cbar_size
+        if cbar_pad    is not None: cb_base["pad"]    = cbar_pad
+        if cbar_kwargs is not None: cb_base["kwargs"] = {
+                                        **cb_base["kwargs"], **cbar_kwargs}
+        self.cbar_size   = cb_base["size"]
+        self.cbar_pad    = cb_base["pad"]
+        self.cbar_kwargs = cb_base["kwargs"]
+
         # Merge grid settings
         grid_opts = {**self.DEFAULT_GRID, **(grid or {})}
         self.grid_linestyle = grid_opts['linestyle']
@@ -528,8 +554,8 @@ class FvcomPlotConfig:
         self.width = width
         self.height = height
         #self.dpi = dpi
-        self.cbar_size = cbar_size
-        self.cbar_pad = cbar_pad
+        #self.cbar_size = cbar_size
+        #self.cbar_pad = cbar_pad
         #self.cmap = cmap
         self.levels = levels
         self.title_fontsize = title_fontsize
@@ -1534,8 +1560,7 @@ class FvcomPlotter(PlotHelperMixin):
             title   = extra.get("title", "FVCOM Mesh (Cartesian)")
             if da is not None:
                 cf = ax.tricontourf(triang, values, cmap=cmap_obj, transform=None, extend=extend_flag, **tc_kwargs)
-                cbar = plt.colorbar(cf, ax=ax, extend=extend_flag, orientation='vertical', shrink=1.0)
-                cbar.set_label(cbar_label, fontsize=self.cfg.fontsize['cbar_label'], labelpad=10)
+                cbar = self._make_colorbar(ax, cf, cbar_label, opts=opts)
             if with_mesh:
                 ax.triplot(triang, color=color, lw=lw)
             ax.set_xlim(xmin, xmax)
@@ -1552,8 +1577,9 @@ class FvcomPlotter(PlotHelperMixin):
             if da is not None:
                 cf = ax.tricontourf(triang, values, cmap=cmap_obj, transform=ccrs.PlateCarree(),
                                     extend=extend_flag, **tc_kwargs)
-                cbar = plt.colorbar(cf, ax=ax, extend=extend_flag, orientation='vertical', shrink=1.0)
-                cbar.set_label(cbar_label, fontsize=self.cfg.fontsize["cbar_label"], labelpad=10)
+                #cbar = plt.colorbar(cf, ax=ax, extend=extend_flag, orientation='vertical', shrink=1.0)
+                cbar = self._make_colorbar(ax, cf, cbar_label, opts=opts)
+                #cbar.set_label(cbar_label, fontsize=self.cfg.fontsize["cbar_label"], labelpad=10)
             if with_mesh:
                 # Always use PlateCarree here.
                 ax.triplot(triang, color=color, lw=lw, transform=ccrs.PlateCarree())
@@ -2193,20 +2219,55 @@ class FvcomPlotter(PlotHelperMixin):
 
         return merged, levels, cmap, vmin, vmax, extend
 
-    def _make_colorbar(self, ax, mappable, label, colorbar_kwargs):
+    def _make_colorbar(self, ax, mappable, label,
+                       colorbar_kwargs: dict | None = None,
+                       opts: FvcomPlotOptions | None = None):
         """
         Create and attach a colorbar to `ax` for the given mappable (QuadContourSet).
+        Obeying priority:
+            opts.*  >  self.cfg.*  > hard-coded
+
+        Parameters
+        ----------
+        ax              : matplotlib Axes
+        mappable        : QuadContourSet / ScalarMappable
+        label           : str  (default label)
+        colorbar_kwargs : dict
+        opts            : FvcomPlotOptions | None
+                        No colorbar if opts.colorbar=False
+                        Override by opts.cbar_size / cbar_pad / cbar_kwargs
         """
+
+        if opts is not None and opts.colorbar is False:   # ← ここを追加
+            return None
+
+        size  = (opts.cbar_size if (opts and opts.cbar_size is not None)
+                else self.cfg.cbar_size)
+        pad   = (opts.cbar_pad  if (opts and opts.cbar_pad  is not None)
+                else self.cfg.cbar_pad)
+
+        extra = dict(self.cfg.cbar_kwargs)
+        if opts and opts.cbar_kwargs:
+            extra.update(opts.cbar_kwargs)
+        if colorbar_kwargs:
+            extra.update(colorbar_kwargs)
+
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
         divider = make_axes_locatable(ax)
-        cax = divider.append_axes("right",
-                                  size=self.cfg.cbar_size,
-                                  pad=self.cfg.cbar_pad)
-        cbar = ax.figure.colorbar(mappable,
-                                  cax=cax,
-                                  extend='both',
-                                  label=label,
-                                  **(colorbar_kwargs or {}))
-        cbar.ax.yaxis.label.set_size(self.cfg.label_fontsize)
+        if isinstance(ax, GeoAxes):
+            cax = divider.append_axes("right", size=size, pad=pad, axes_class=plt.Axes)
+        else:
+            cax = divider.append_axes("right", size=size, pad=pad)
+
+        # cax = divider.append_axes("right", size=size, pad=pad)
+        cbar = ax.figure.colorbar(mappable, cax=cax, **extra)
+
+        lb = opts.cbar_label if (opts and opts.cbar_label is not None) else label
+        if lb:
+            cbar.set_label(lb,
+                        fontsize=self.cfg.fontsize['cbar_label'],
+                        labelpad=extra.pop("labelpad", 10))
+
         return cbar
 
     def _format_time_axis(self, ax: plt.Axes, title: str, xlabel: str, ylabel: str,
