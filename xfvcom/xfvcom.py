@@ -33,7 +33,8 @@ from .helpers import PlotHelperMixin, pick_first
 from .plot_utils import prepare_contourf_args, add_colorbar
 from .decorators import precedence
 from .plot_options import FvcomPlotOptions
-from typing import Any, Callable, Sequence, Dict, Tuple
+from typing import Any, Callable, Dict, Tuple
+from collections.abc import Sequence
 _TRICF_SIG = set(inspect.signature(maxes.Axes.tricontourf).parameters)
 
 class FvcomDataLoader:
@@ -1641,6 +1642,77 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
+    def plot_vector2d(
+        self,
+        *,
+        time: int | slice | list | tuple,
+        siglay: int | slice | list | tuple,
+        reduce: dict = None,      # {"time": "mean", "siglay": "mean"}
+        skip: int | str | None = None, # "auto" or explicit integer
+        var_u: str = "u",
+        var_v: str = "v",
+        ax: plt.Axes | None = None,
+        opts: FvcomPlotOptions | None = None,
+        **kwargs
+    ) -> plt.Axes:
+        """
+        Plot a 2-D current vector map for a single (time, siglay) slice.
+        This is step-1 minimal version: no averaging, no automatic scaling.
+
+        Parameters
+        ----------
+        time, siglay : int | slice | list | tuple
+            Selection for time and vertical indices.  Examples:
+                time=0
+                time=slice("2020-01-01","2020-02-01")
+                time=[0,1,2,3]
+        reduce : dict, optional
+            Mapping {'time': 'mean'|'sum'|None, 'siglay': 'mean'|'sum'|None}.
+            Use it to compute residual currents or vertical means.
+        skip : int | str, optional
+            Arrow subsampling interval.  "auto" selects a reasonable value
+            based on the mesh size (default "auto").
+        
+        """
+        # 0) option merge
+        if opts is None:
+            opts = FvcomPlotOptions()
+        opts.extra.update(kwargs)
+
+        if skip == "auto" and opts.vec_skip != "auto":
+            skip = opts.vec_skip
+        
+        # 1) determine skip
+        nele_total = self.ds.sizes.get("nele", len(self.ds["lonc"]))
+
+        if skip is None:                             # no thinning
+            skip_val = 1
+        elif skip == "auto":
+            skip_val = self._auto_skip(nele_total)
+        else:
+            skip_val = int(skip)
+
+        # 2) slice & reduce u,v   ← ここが大きな変更
+        uc, vc = self._select_and_reduce_uv(
+            self.ds[var_u], self.ds[var_v],
+            time_sel=time, siglay_sel=siglay, reduce=reduce
+        )
+
+        # 3) prepare base map if ax is None (unchanged)
+        if ax is None:
+            ax = self.plot_2d(da=None, opts=FvcomPlotOptions(with_mesh=True))
+
+        # 4) quiver plot
+        q = ax.quiver(
+            self.ds["lonc"][::skip_val], self.ds["latc"][::skip_val],
+            uc[::skip_val], vc[::skip_val],
+            transform=ccrs.PlateCarree(),
+            zorder=opts.vec_zorder,
+            scale_units="xy", angles="xy",
+            **kwargs
+        )
+        return ax
+
     def ts_contourf(self, da: xr.DataArray, index: int = None, x='time', y='siglay', xlim=None, ylim=None,
                     xlabel='Time', ylabel='Sigma', title=None,
                     rolling_window=None, min_periods=None, ax=None, date_format=None,
@@ -2364,6 +2436,137 @@ class FvcomPlotter(PlotHelperMixin):
         mp = min_periods if min_periods is not None else window//2 + 1
         return da.rolling(time=window, center=True, min_periods=mp).mean()
 
+    def _interp_uv_to_centers(
+        self,
+        u: xr.DataArray,
+        v: xr.DataArray
+    ) -> tuple[xr.DataArray, xr.DataArray]:
+        """
+        Return velocities located at cell centers.
+
+        * If u,v are defined on 'node', perform simple node-average.
+        * If they are already on 'nele', return as-is.
+        """
+        # case 1: already cell-centered
+        if "nele" in u.dims and "nele" in v.dims:
+            return u, v
+
+        # case 2: node-based -> average three surrounding nodes
+        if "node" in u.dims and "node" in v.dims:
+            idx = self.ds["nv_zero"].values          # (nele, 3)
+            uc = (u.isel(node=xr.DataArray(idx[:, 0], dims="nele")) +
+                  u.isel(node=xr.DataArray(idx[:, 1], dims="nele")) +
+                  u.isel(node=xr.DataArray(idx[:, 2], dims="nele"))) / 3.0
+            vc = (v.isel(node=xr.DataArray(idx[:, 0], dims="nele")) +
+                  v.isel(node=xr.DataArray(idx[:, 1], dims="nele")) +
+                  v.isel(node=xr.DataArray(idx[:, 2], dims="nele"))) / 3.0
+            return uc, vc
+
+        # unsupported dimension set
+        raise ValueError(
+            f"Unsupported dims for u,v: {u.dims} / {v.dims}. "
+            "Expect 'node' or 'nele'."
+        )
+
+    def _select_and_reduce_uv(
+        self,
+        u3d: xr.DataArray,
+        v3d: xr.DataArray,
+        time_sel=None,
+        siglay_sel=None,
+        reduce: dict | None = None,
+    ) -> tuple[xr.DataArray, xr.DataArray]:
+        """
+        Slice 3-D velocity fields and apply optional averaging, then
+        interpolate to cell centres.
+
+        Parameters
+        ----------
+        u3d, v3d : DataArray
+            3-D arrays with dims ('time', 'siglay', 'node' or 'nele').
+        time_sel  : int | slice | list | tuple | None
+            Selection for the 'time' dimension.  None → keep all.
+        siglay_sel: int | slice | list | tuple | None
+            Selection for the 'siglay' dimension. None → keep all.
+        reduce    : dict | None
+            Mapping of {"time": "mean"|"sum"|None, "siglay": "mean"|"sum"|None}.
+
+        Returns
+        -------
+        uc, vc : DataArray
+            1-D velocity components defined on 'nele' (cell centres).
+        """
+        # 1) slicing -----------------------------------------------------
+        if time_sel is not None:
+            u3d = self._apply_indexer(u3d, "time", time_sel)
+            v3d = self._apply_indexer(v3d, "time", time_sel)
+
+        if siglay_sel is not None:
+            u3d = self._apply_indexer(u3d, "siglay", siglay_sel)
+            v3d = self._apply_indexer(v3d, "siglay", siglay_sel)
+
+        # 2) reduction ---------------------------------------------------
+        reduce = reduce or {}
+        for dim in ("time", "siglay"):
+            op = reduce.get(dim)
+
+            # skip if this dimension is already absent (e.g., single-index slice)
+            if dim not in u3d.dims:
+                continue
+
+            if op == "mean":
+                u3d = u3d.mean(dim)
+                v3d = v3d.mean(dim)
+            elif op == "sum":
+                u3d = u3d.sum(dim)
+                v3d = v3d.sum(dim)
+            # op is None → no reduction
+
+        # 3) remove singleton dims, keep only spatial --------------------
+        u1 = u3d.squeeze(drop=True)
+        v1 = v3d.squeeze(drop=True)
+
+        # 4) sanity check ------------------------------------------------
+        if {"node", "nele"}.isdisjoint(u1.dims):
+            raise ValueError(
+                f"Unexpected dims after reduction: {u1.dims}. "
+                "Expect 'node' or 'nele' to remain."
+            )
+
+        # 5) interpolate to cell centres --------------------------------
+        uc, vc = self._interp_uv_to_centers(u1, v1)
+
+        return uc, vc
+
+    def _auto_skip(self, nele, base=3000):
+        """
+        Return suitable skip value so that plotted arrows ≈ nele/base.
+        """
+        import math
+        return max(1, int(math.sqrt(nele / base)))
+
+    def _apply_indexer(self, da: xr.DataArray, dim: str, idx):
+        """
+        Apply idx to dim, choosing isel (positional) or sel (label) automatically.
+        If idx is an integer, keep the dimension (drop=False) so that later
+        reductions like .mean(dim) still work.
+        """
+        is_positional = False
+        if isinstance(idx, (int, np.integer)):
+            is_positional = True
+        elif isinstance(idx, slice):
+            is_positional = (
+                (idx.start is None or isinstance(idx.start, (int, np.integer))) and
+                (idx.stop  is None or isinstance(idx.stop,  (int, np.integer)))
+            )
+        elif isinstance(idx, Sequence):
+            is_positional = all(isinstance(i, (int, np.integer)) for i in idx)
+
+        if is_positional:
+            # keep the sliced dimension (drop=False) to avoid losing it
+            return da.isel({dim: idx}, drop=False)
+        else:
+            return da.sel({dim: idx})
 
 # Example usage
 if __name__ == "__main__":

@@ -93,6 +93,8 @@ class FvcomPlotOptions:
     vec_legend_speed     : float | None     = None   # None → 0.3*max
     vec_legend_loc       : Tuple[float, float]       = (0.85, 0.1)
     with_magnitude       : bool             = True
+    vec_skip             : int   | str | None = None # sampling interval for quiver arrows
+    vec_zorder           : int              = 2      # z-order between contour and annotations
 
     # ------------------------------------------------------------
     # 9. ts_contourf / ts_contourf_z
