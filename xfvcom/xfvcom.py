@@ -89,7 +89,7 @@ class FvcomDataLoader:
             #self.ds['nv_zero'].attrs['long_name'] = 'nodes surrounding element in zero-based for matplotlib'
             self._setup_nv_ccw()
 
-        if "siglay_width" not in self.ds:
+        if "siglay" in self.ds and "siglay_width" not in self.ds:
             if "siglev" in self.ds:
                 # use first node; all nodes are identical in sigma space
                 d_sigma = -self.ds["siglev"].isel(node=0).diff("siglev")
