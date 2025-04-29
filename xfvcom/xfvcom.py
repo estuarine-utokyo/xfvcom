@@ -1575,15 +1575,27 @@ class FvcomPlotter(PlotHelperMixin):
             node_bc = self.ds.node_bc.values
             ax.plot(x[node_bc[:]], y[node_bc[:]], color=obcline_color, linewidth=1, transform=transform)
         
+        # -------- vector-overlay hook inside plot_2d -----------------
         if opts.plot_vec2d:
+            # 1) derive time from the scalar DataArray 'da'
+            da_time = None
+            if da is not None and "time" in da.coords:
+                if da.time.ndim == 0:                 # scalar coordinate (drop=True case)
+                    da_time = da.time.values          # numpy.datetime64 or int
+                elif da.time.ndim == 1 and da.time.size == 1:
+                    da_time = da.time.values[0]
+
+            # 2) priority: opts.vec_time > derived da_time
+            time_for_vector = opts.vec_time if opts.vec_time is not None else da_time
+
+            # 3) call vector plotting routine
             self.plot_vector2d(
-                time   = opts.vec_time   if opts.vec_time   is not None else time_idx_from_da,
-                siglay = opts.vec_siglay if opts.vec_siglay is not None else 0,
+                time   = time_for_vector,
+                siglay = opts.vec_siglay,
                 reduce = opts.vec_reduce,
                 skip   = opts.skip,
                 ax     = ax,
                 color  = opts.arrow_color,
-                scale  = opts.scale,
                 opts   = opts
             )
 
