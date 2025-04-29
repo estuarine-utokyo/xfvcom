@@ -1352,7 +1352,10 @@ class FvcomPlotter(PlotHelperMixin):
         # unify option source --------------------------------
         assert opts is not None          # for safety; can be omitted
         extra = opts.extra
-                
+
+        # Flag for "scalar field is already drawn" so vector map can skip |U|
+        opts.da_is_scalar = da is not None
+
         projection    = opts.projection        # map projection
         use_latlon    = opts.use_latlon        # lon/lat or Cartesian
         self.use_latlon = use_latlon
@@ -1577,18 +1580,26 @@ class FvcomPlotter(PlotHelperMixin):
         
         # -------- vector-overlay hook inside plot_2d -----------------
         if opts.plot_vec2d:
-            # 1) derive time from the scalar DataArray 'da'
-            da_time = None
+            # --- 1) derive positional index from scalar DataArray -----
+            da_time_idx = None
             if da is not None and "time" in da.coords:
-                if da.time.ndim == 0:                 # scalar coordinate (drop=True case)
-                    da_time = da.time.values          # numpy.datetime64 or int
-                elif da.time.ndim == 1 and da.time.size == 1:
-                    da_time = da.time.values[0]
+                # works for both scalar (0-D) and length-1 1-D coordinates
+                label = da.coords["time"].values.item()
+                da_time_idx = self._label_to_index(label)   # helper you added
 
-            # 2) priority: opts.vec_time > derived da_time
-            time_for_vector = opts.vec_time if opts.vec_time is not None else da_time
+            # --- 2) decide final time for vector plot -----------------
+            if opts.vec_time is not None:
+                time_for_vector = opts.vec_time            # explicit override
+            elif da_time_idx is not None:
+                time_for_vector = da_time_idx              # derived from scalar
+            else:
+                raise ValueError(
+                    "plot_vec2d is True but vec_time is not specified and "
+                    "the scalar DataArray provides no matching time index. "
+                    "Set opts.vec_time explicitly."
+                )
 
-            # 3) call vector plotting routine
+            # --- 3) call vector plot ----------------------------------
             self.plot_vector2d(
                 time   = time_for_vector,
                 siglay = opts.vec_siglay,
@@ -1703,6 +1714,12 @@ class FvcomPlotter(PlotHelperMixin):
             opts = FvcomPlotOptions()
         opts.extra.update(kwargs)
 
+        # ----------------------------------------------------------
+        # Sanitize kwargs: remove internal flags before quiver call
+        # ----------------------------------------------------------
+        if "with_magnitude" in kwargs:          # user passed as kw-arg
+            opts.with_magnitude = bool(kwargs.pop("with_magnitude"))
+
         if skip == "auto" and opts.skip != "auto":
             skip = opts.skip
         
@@ -1746,7 +1763,30 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             arrow_kwargs["scale"] = float(scale_val)
 
-        # 5) quiver plot --------------------------------------------
+        # 5) draw magnitude ------------------------------------
+        draw_mag = opts.with_magnitude and not getattr(opts, "da_is_scalar", False)
+
+        if draw_mag:
+            import matplotlib.tri as mtri
+            lon_n = self.ds["lon"].values
+            lat_n = self.ds["lat"].values
+            tri_nv = self.ds["nv_zero"].values
+            triang = mtri.Triangulation(lon_n, lat_n, triangles=tri_nv)
+
+            mag = np.hypot(uc, vc)           # (nele,) element-centre magnitude
+            cf = ax.tripcolor(
+                triang,
+                facecolors=mag,
+                cmap=opts.cmap,
+                transform=ccrs.PlateCarree(),
+                shading="flat",
+                zorder=opts.vec_zorder - 1
+            )
+
+            # -------- move colorbar INSIDE the draw_mag block ----------
+            self._make_colorbar(ax, cf, label="|U| (m/s)", opts=opts)
+
+        # 6) quiver plot --------------------------------------------
         q = ax.quiver(
             self.ds["lonc"][::skip_val], self.ds["latc"][::skip_val],
             uc[::skip_val], vc[::skip_val],
@@ -1755,7 +1795,7 @@ class FvcomPlotter(PlotHelperMixin):
             **arrow_kwargs
         )
 
-        # 6) add quiverkey ---------------------------------------------
+        # 7) add quiverkey ---------------------------------------------
         if opts.show_vec_legend:
             # automatic reference speed = 30 % of max |u,v|
             ref_speed = (np.hypot(uc,vc).max()*0.3
@@ -2606,9 +2646,14 @@ class FvcomPlotter(PlotHelperMixin):
     def _apply_indexer(self, da: xr.DataArray, dim: str, idx):
         """
         Apply idx to dim, choosing isel (positional) or sel (label) automatically.
-        If idx is an integer, keep the dimension (drop=False) so that later
-        reductions like .mean(dim) still work.
+        * Positional types → .isel(drop=False)
+        * Fallback to .sel() if positional fails (IndexError) or if idx is non-positional.
+        * If .sel() fails (KeyError), raise a clear ValueError for the user.
         """
+        from collections.abc import Sequence
+        import numpy as np
+
+        # --- 1) decide whether idx looks positional ------------------
         is_positional = False
         if isinstance(idx, (int, np.integer)):
             is_positional = True
@@ -2620,11 +2665,54 @@ class FvcomPlotter(PlotHelperMixin):
         elif isinstance(idx, Sequence):
             is_positional = all(isinstance(i, (int, np.integer)) for i in idx)
 
+        # --- 2) try positional isel ---------------------------------
         if is_positional:
-            # keep the sliced dimension (drop=False) to avoid losing it
-            return da.isel({dim: idx}, drop=False)
-        else:
+            try:
+                return da.isel({dim: idx}, drop=False)
+            except IndexError:
+                # positional failed → fall back to label-based sel()
+                pass
+
+        # --- 3) label-based sel() with error capture ----------------
+        try:
             return da.sel({dim: idx})
+        except KeyError as e:
+            raise ValueError(
+                f"{dim!r} coordinate does not contain label/index {idx!r}. "
+                "Specify a valid label or use opts.vec_time (positional index)."
+            ) from e
+
+    def _label_to_index(self, label) -> int | None:
+        """
+        Return the positional index of *label* along self.ds.time.
+        Works for integer labels as well as numpy.datetime64 / pandas.Timestamp.
+        Returns None if label not found or time coord missing.
+        """
+        if "time" not in self.ds.coords:
+            return None
+
+        arr = self.ds["time"].values  # 1-D array of coordinate values
+        dtype_kind = arr.dtype.kind   # 'M' for datetime64, 'i'/'u' for int
+
+        # --- A. numeric coordinate (integer or float) -----------------
+        if dtype_kind in ("i", "u", "f"):
+            # compare directly; no conversion needed
+            idx = np.where(arr == label)[0]
+            return int(idx[0]) if idx.size else None
+
+        # --- B. datetime-like coordinate ------------------------------
+        if dtype_kind == "M":
+            # ensure label is datetime64 for safe comparison
+            if np.asarray(label).dtype.kind == "M":
+                label_dt = label
+            else:
+                # fallback: attempt nanosecond resolution
+                label_dt = np.datetime64(label, "ns")
+            idx = np.where(arr == label_dt)[0]
+            return int(idx[0]) if idx.size else None
+
+        # --- C. unsupported coordinate type ---------------------------
+        return None
 
 # Example usage
 if __name__ == "__main__":
