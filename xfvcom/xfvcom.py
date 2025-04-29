@@ -88,7 +88,22 @@ class FvcomDataLoader:
             #self.ds['nv_zero'] = xr.DataArray(self.ds['nv'].values.T - 1)
             #self.ds['nv_zero'].attrs['long_name'] = 'nodes surrounding element in zero-based for matplotlib'
             self._setup_nv_ccw()
-        
+
+        if "siglay_width" not in self.ds:
+            if "siglev" in self.ds:
+                # use first node; all nodes are identical in sigma space
+                d_sigma = -self.ds["siglev"].isel(node=0).diff("siglev")
+                d_sigma = d_sigma.rename({"siglev": "siglay"})    # dims: ('siglay')
+            else:
+                nl = self.ds.dims["siglay"]
+                d_sigma = xr.DataArray(np.ones(nl) / nl, dims="siglay")
+
+            d_sigma.attrs.update({
+                "long_name": "sigma layer thickness (positive)",
+                "units": "1"
+            })
+            self.ds["siglay_width"] = d_sigma      # only ('siglay'), no 'node'
+
         # ERSEM O2 concentration conversion to mg/L
         if "O2_o" in self.ds.data_vars:
             # Keep the attributes before conversion, or the attributes will be lost.
@@ -2587,7 +2602,7 @@ class FvcomPlotter(PlotHelperMixin):
         siglay_sel: int | slice | list | tuple | None
             Selection for the 'siglay' dimension. None → keep all.
         reduce    : dict | None
-            Mapping of {"time": "mean"|"sum"|None, "siglay": "mean"|"sum"|None}.
+            Mapping of {"time": "mean"|"sum"|None, "siglay": "mean"|"sum"|"thickness"|None}.
 
         Returns
         -------
@@ -2605,20 +2620,33 @@ class FvcomPlotter(PlotHelperMixin):
 
         # 2) reduction ---------------------------------------------------
         reduce = reduce or {}
-        for dim in ("time", "siglay"):
-            op = reduce.get(dim)
 
-            # skip if this dimension is already absent (e.g., single-index slice)
-            if dim not in u3d.dims:
-                continue
+        # -- vertical reduction first ------------------------------------
+        op_vert = reduce.get("siglay")
+        if "siglay" in u3d.dims:                 # remain only if not sliced away
+            if op_vert == "thickness":
+                # weighted average using physical layer thickness
+                w = self._layer_thickness(siglay=siglay_sel, time_sel=time_sel)
+                u3d = (u3d * w).sum("siglay") / w.sum("siglay")
+                v3d = (v3d * w).sum("siglay") / w.sum("siglay")
+            elif op_vert == "mean":
+                u3d = u3d.mean("siglay")
+                v3d = v3d.mean("siglay")
+            elif op_vert == "sum":
+                u3d = u3d.sum("siglay")
+                v3d = v3d.sum("siglay")
+            # if op_vert is None: no vertical reduction
 
-            if op == "mean":
-                u3d = u3d.mean(dim)
-                v3d = v3d.mean(dim)
-            elif op == "sum":
-                u3d = u3d.sum(dim)
-                v3d = v3d.sum(dim)
-            # op is None → no reduction
+        # -- temporal reduction second -----------------------------------
+        op_time = reduce.get("time")
+        if "time" in u3d.dims:                   # remain only if not sliced away
+            if op_time == "mean":
+                u3d = u3d.mean("time")
+                v3d = v3d.mean("time")
+            elif op_time == "sum":
+                u3d = u3d.sum("time")
+                v3d = v3d.sum("time")
+            # if op_time is None: no temporal reduction
 
         # 3) remove singleton dims, keep only spatial --------------------
         u1 = u3d.squeeze(drop=True)
@@ -2713,6 +2741,50 @@ class FvcomPlotter(PlotHelperMixin):
 
         # --- C. unsupported coordinate type ---------------------------
         return None
+
+    def _layer_thickness(self, *, siglay=None, time_sel=None):
+        """
+        Return physical layer thickness (m) on cell centres.
+        Dimensions → ('time', 'siglay', 'nele')
+        """
+        # 1) depth and sea level on node points
+        H_node   = self.ds["h"]                   # (node)
+        zeta_node = self.ds["zeta"]               # (time, node)
+        if time_sel is not None:
+            zeta_node = self._apply_indexer(zeta_node, "time", time_sel)
+
+        # 2) sigma-layer width Δσ  (siglay)
+        if "siglay_width" in self.ds:
+            d_sigma = self.ds["siglay_width"]
+        elif "siglev" in self.ds:
+            d_sigma = self.ds["siglev"].diff("siglev").rename({"siglev": "siglay"})
+        else:
+            n = self.ds.dims["siglay"]
+            d_sigma = xr.DataArray(np.ones(n) / n, dims="siglay")
+
+        if siglay is not None:
+            d_sigma = self._apply_indexer(d_sigma, "siglay", siglay)
+
+        # 3) physical thickness on node points  → broadcast (time, siglay, node)
+        thick_node = (H_node + zeta_node) * d_sigma
+
+        # 4) convert node → cell-centre (nele) by arithmetic mean
+        nv = self.ds["nv_zero"].values  # (nele, 3) node indices (0-based)
+        thick_cell = (
+            thick_node.isel(node=xr.DataArray(nv[:, 0], dims="nele")) +
+            thick_node.isel(node=xr.DataArray(nv[:, 1], dims="nele")) +
+            thick_node.isel(node=xr.DataArray(nv[:, 2], dims="nele"))
+        ) / 3.0                         # dims now ('time','siglay','nele')
+
+        return thick_cell
+
+    def _node2cell_mean(self, da_node):
+        nv = self.ds["nv_zero"].values        # (nele, 3) node indices
+        return (
+            da_node.isel(node=xr.DataArray(nv[:, 0], dims="nele")) +
+            da_node.isel(node=xr.DataArray(nv[:, 1], dims="nele")) +
+            da_node.isel(node=xr.DataArray(nv[:, 2], dims="nele"))
+        ) / 3.0
 
 # Example usage
 if __name__ == "__main__":

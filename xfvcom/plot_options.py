@@ -101,7 +101,7 @@ class FvcomPlotOptions:
     plot_vec2d     : bool        = False           # call vector-map in plot_2d
     vec_time       : int | slice | list | tuple | None = None
     vec_siglay     : int | slice | list | tuple | None = None
-    vec_reduce     : Dict[str, str] | None = None  # e.g. {"time":"mean","siglay":"mean"}
+    vec_reduce     : Dict[str, str] | None = None  # e.g. {"time":"mean","siglay":"mean"|"thickness"}
     #vec_scale      : float | str = None          # custom quiver scale 
     # ------------------------------------------------------------
     # 9. ts_contourf / ts_contourf_z
