@@ -1574,6 +1574,18 @@ class FvcomPlotter(PlotHelperMixin):
                                  " obcfile must be read in FvcomDataLoader.")    
             node_bc = self.ds.node_bc.values
             ax.plot(x[node_bc[:]], y[node_bc[:]], color=obcline_color, linewidth=1, transform=transform)
+        
+        if opts.plot_vec2d:
+            self.plot_vector2d(
+                time   = opts.vec_time   if opts.vec_time   is not None else time_idx_from_da,
+                siglay = opts.vec_siglay if opts.vec_siglay is not None else 0,
+                reduce = opts.vec_reduce,
+                skip   = opts.skip,
+                ax     = ax,
+                color  = opts.arrow_color,
+                scale  = opts.scale,
+                opts   = opts
+            )
 
         # --- user post-processing -----------------------------------------
         if post_process_func:
@@ -1679,8 +1691,8 @@ class FvcomPlotter(PlotHelperMixin):
             opts = FvcomPlotOptions()
         opts.extra.update(kwargs)
 
-        if skip == "auto" and opts.vec_skip != "auto":
-            skip = opts.vec_skip
+        if skip == "auto" and opts.skip != "auto":
+            skip = opts.skip
         
         # 1) determine skip
         nele_total = self.ds.sizes.get("nele", len(self.ds["lonc"]))
@@ -1692,7 +1704,7 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             skip_val = int(skip)
 
-        # 2) slice & reduce u,v   ← ここが大きな変更
+        # 2) slice & reduce u,v
         uc, vc = self._select_and_reduce_uv(
             self.ds[var_u], self.ds[var_v],
             time_sel=time, siglay_sel=siglay, reduce=reduce
@@ -1702,15 +1714,49 @@ class FvcomPlotter(PlotHelperMixin):
         if ax is None:
             ax = self.plot_2d(da=None, opts=FvcomPlotOptions(with_mesh=True))
 
-        # 4) quiver plot
+        # 4) build quiver kwargs ------------------------------------
+        arrow_kwargs = {
+            "scale_units": "xy",
+            "angles": "xy",
+            "color": kwargs.get("color", opts.arrow_color),
+            "alpha": opts.arrow_alpha,
+            "width": opts.arrow_width,
+            # 'scale' will be injected later only if needed
+        }
+        arrow_kwargs.update(kwargs)        # allow user override
+
+        # ---- decide scale -------------------------------------------
+        # priority: explicit **kwargs > opts.scale
+        scale_val = kwargs.get("scale", opts.scale)
+
+        if scale_val is None:
+            arrow_kwargs.pop("scale", None)     # 自動
+        else:
+            arrow_kwargs["scale"] = float(scale_val)
+
+        # 5) quiver plot --------------------------------------------
         q = ax.quiver(
             self.ds["lonc"][::skip_val], self.ds["latc"][::skip_val],
             uc[::skip_val], vc[::skip_val],
             transform=ccrs.PlateCarree(),
             zorder=opts.vec_zorder,
-            scale_units="xy", angles="xy",
-            **kwargs
+            **arrow_kwargs
         )
+
+        # 6) add quiverkey ---------------------------------------------
+        if opts.show_vec_legend:
+            # automatic reference speed = 30 % of max |u,v|
+            ref_speed = (np.hypot(uc,vc).max()*0.3
+                        if opts.vec_legend_speed is None
+                        else opts.vec_legend_speed)
+            ax.quiverkey(
+                q, *opts.vec_legend_loc, ref_speed,
+                f"{ref_speed:.2f} m/s",
+                labelpos='E', coordinates='axes',
+                color=kwargs.get("color", opts.arrow_color),
+                fontproperties={'size': self.cfg.fontsize_legend}
+            )
+
         return ax
 
     def ts_contourf(self, da: xr.DataArray, index: int = None, x='time', y='siglay', xlim=None, ylim=None,

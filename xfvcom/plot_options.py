@@ -81,21 +81,28 @@ class FvcomPlotOptions:
     # 8. Vector (ts_vector) options
     # ------------------------------------------------------------
     arrow_width          : float            = 0.002
-    arrow_color          : str              = "blue"
+    arrow_color          : str              = "k"
     arrow_alpha          : float            = 0.7
     arrow_angles         : str              = "uv"
     arrow_headlength     : int              = 5
     arrow_headwidth      : int              = 3
     arrow_headaxislength : float            = 4.5
-    scale                : float | str      = "auto"
+    scale                : float | str      = None
     scale_units          : str              = "y"
     show_vec_legend      : bool             = True
     vec_legend_speed     : float | None     = None   # None → 0.3*max
-    vec_legend_loc       : Tuple[float, float]       = (0.85, 0.1)
+    vec_legend_loc       : Tuple[float, float]       = (0.75, 0.1)
     with_magnitude       : bool             = True
-    vec_skip             : int   | str | None = None # sampling interval for quiver arrows
+    skip                 : int   | str | None = None # sampling interval for quiver arrows
     vec_zorder           : int              = 2      # z-order between contour and annotations
-
+    # ------------------------------------------------------------
+    # 8-B. Vector-map specific parameters (added)
+    # ------------------------------------------------------------
+    plot_vec2d     : bool        = False           # call vector-map in plot_2d
+    vec_time       : int | slice | list | tuple | None = None
+    vec_siglay     : int | slice | list | tuple | None = None
+    vec_reduce     : Dict[str, str] | None = None  # e.g. {"time":"mean","siglay":"mean"}
+    #vec_scale      : float | str = None          # custom quiver scale 
     # ------------------------------------------------------------
     # 9. ts_contourf / ts_contourf_z
     # ------------------------------------------------------------
