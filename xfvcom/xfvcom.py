@@ -564,65 +564,6 @@ class FvcomPlotConfig:
         self.date_format = kwargs.get('date_format', '%Y-%m-%d')
         self.plot_color = kwargs.get("plot_color", "red")
 
-        '''
-        # Default font sizes for various plot elements
-        #default_fontsize = {
-        #    'xticks': 11, 'yticks': 11, 'xlabel': 12, 'ylabel': 12, 'title': 14,
-        #    'legend': 12, 'annotation': 12, 'colorbar': 11, 'tick_params': 11,
-        #    'text': 12, 'legend_title': 12, 'cbar_title': 14, 'cbar_label': 14
-        #}
-        default_fontsize = {
-            'xticks':       11,   # size of x-axis tick labels
-            'yticks':       11,   # size of y-axis tick labels
-            'xlabel':       12,   # size of x-axis label
-            'ylabel':       12,   # size of y-axis label
-            'title':        14,   # size of axes title
-            'suptitle':     14,   # size of figure suptitle
-            'legend':       12,   # size of legend text
-            'legend_title': 12,   # size of legend title
-            'annotation':   12,   # size of annotation text
-            'text':         12,   # size of generic text
-            'colorbar':     11,   # size of colorbar tick labels
-            'cbar_label':   12,   # size of colorbar axis label
-            'cbar_title':   14,   # size of colorbar title
-            'tick_params':  11    # size applied when using ax.tick_params
-        }
-        self.fontsize = {**default_fontsize, **(fontsize or {})}
-        # Line width settings
-        default_linewidth = {
-            'plot':        1.5,   # linewidth for ax.plot
-            'contour':     1.0,   # linewidths for ax.contour
-            'grid':        0.8,   # linewidth for ax.grid
-            'axes':        1.2,   # overall axes line width (spines & ticks)
-            'spines':      1.2,   # line width for each spine
-            'tick_params': 0.8,   # width parameter in ax.tick_params
-            'legend':      1.0,   # frame line width for legend
-            'colorbar':    1.0,   # outline line width for colorbar
-            'errorbar':    1.0,   # elinewidth for ax.errorbar
-            'hist':        1.0,   # edge line width for ax.hist
-            'bar':         1.0,   # edge line width for ax.bar
-            'boxplot':     1.0,   # line width for ax.boxplot
-            'scatter':     0.5,   # edge width for ax.scatter markers
-            'annotation':  0.8    # bbox line width for ax.annotate
-        }
-        self.linewidth = {**default_linewidth, **(linewidth or {})}        
-        self.plot_color = kwargs.get("plot_color", "red")
-        self.date_format = kwargs.get('date_format', '%Y-%m-%d')
-        # Arrow configuration with defaults provided dynamically
-        defaults = {
-            "arrow_scale": 1.0,
-            "arrow_scale": 1.0,
-            "arrow_width": 0.002,
-            "arrow_color": "blue",
-            "arrow_alpha": 0.7,
-            "arrow_angles": "uv",
-            "arrow_headlength": 5,
-            "arrow_headwidth": 3,
-            "arrow_headaxislength": 4.5
-        }
-        for key, value in defaults.items():
-            setattr(self, key, kwargs.get(key, value))
-        '''
 
 class FvcomPlotter(PlotHelperMixin):
     """
