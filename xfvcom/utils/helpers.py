@@ -7,7 +7,7 @@ import imageio.v2 as imageio
 from moviepy.editor import ImageSequenceClip
 import multiprocessing
 from multiprocessing import Pool
-from ..helpers_utils import clean_kwargs, unpack_plot_kwargs
+from ..utils.helpers_utils import clean_kwargs, unpack_plot_kwargs
 import inspect
 import subprocess
 import cartopy.crs as ccrs

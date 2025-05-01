@@ -19,7 +19,7 @@ from .utils.helpers import (
     PlotHelperMixin, FrameGenerator,
     create_gif, create_gif_from_frames,
 )
-from .helpers_utils import (
+from .utils.helpers_utils import (
     apply_xlim_ylim, evaluate_model_scores, generate_test_data,
 )
 
