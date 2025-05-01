@@ -1,7 +1,7 @@
 # xfvcom/decorators.py
 from functools import wraps
 from typing import Any, Callable
-from .plot_options import FvcomPlotOptions
+from ..plot_options import FvcomPlotOptions
 
 def precedence(*keys: str) -> Callable:
     def decorator(func: Callable) -> Callable:
