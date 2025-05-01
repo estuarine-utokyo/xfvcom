@@ -1,50 +1,36 @@
 # xfvcom.py: A Python module for loading, analyzing, and plotting FVCOM model output data in xfvcom package.
 # Author: Jun Sasaki
-import os
+from datetime import datetime
 import numpy as np
 import xarray as xr
-import pandas as pd
-from sklearn.neighbors import NearestNeighbors
 import matplotlib.pyplot as plt
 from matplotlib.colorbar import Colorbar
-from datetime import datetime
 from matplotlib.dates import DateFormatter
 import matplotlib.cm as cm
-from matplotlib.colors import Normalize, BoundaryNorm
-import matplotlib.colors as mcolors
+from matplotlib.colors import BoundaryNorm
 import matplotlib.axes as maxes
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.ticker import LogLocator, LogFormatter
 import cartopy.crs as ccrs
-import cartopy.feature as cfeature
-#from cartopy.io.img_tiles import StadiaMapsTiles
-#from cartopy.io.img_tiles import Stamen
 import cartopy.io.img_tiles as cimgt
 from cartopy.io.img_tiles import GoogleTiles
-
 from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
 from cartopy.mpl.geoaxes import GeoAxes
 import inspect
 import matplotlib.tri as mtri
 from scipy.spatial import KDTree
 import pyproj
-#from .helpers import PlotHelperMixin, pick_first
-#from .plot_utils import prepare_contourf_args, add_colorbar
-#from .decorators import precedence
-#from .plot_options import FvcomPlotOptions
 from ..io import FvcomDataLoader
 from .config import FvcomPlotConfig
 from ..analysis import FvcomAnalyzer
 from ..helpers import PlotHelperMixin, pick_first
-from ..plot_utils import prepare_contourf_args, add_colorbar
+from ..plot_utils import add_colorbar
 from ..plot_options import FvcomPlotOptions
 from ..decorators import precedence
 from typing import Any, Callable, Dict, Tuple
 from collections.abc import Sequence
 _TRICF_SIG = set(inspect.signature(maxes.Axes.tricontourf).parameters)
-
-
 
 class FvcomPlotter(PlotHelperMixin):
     """
