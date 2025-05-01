@@ -78,7 +78,12 @@ class FvcomDataLoader:
         if "siglay" in self.ds and "siglay_width" not in self.ds:
             if "siglev" in self.ds:
                 # use first node; all nodes are identical in sigma space
-                d_sigma = -self.ds["siglev"].isel(node=0).diff("siglev")
+                # d_sigma = -self.ds["siglev"].isel(node=0).diff("siglev")
+                # take first index along *any* extra dimension(s) other than 'siglev'
+                siglev_da = self.ds["siglev"]
+                extra_dims = {dim: 0 for dim in siglev_da.dims if dim != "siglev"}
+                # NOTE: e.g. dims could be ('siglev', 'node')  or  ('siglev', 'nobc')
+                d_sigma = -siglev_da.isel(**extra_dims).diff("siglev")
                 d_sigma = d_sigma.rename({"siglev": "siglay"})  # dims: ('siglay')
             else:
                 nl = self.ds.dims["siglay"]
