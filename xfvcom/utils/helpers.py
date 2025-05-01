@@ -1,9 +1,11 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any
-
+from typing import TYPE_CHECKING
+from typing import Callable, Any
+from typing import Optional
 if TYPE_CHECKING:
-    # Forward-reference only for static type-checking; avoids import cycle
-    from xfvcom.plot.core import FvcomPlotter
+# Forward-reference only for static type-checking; avoids import cycle
+    from ..plot.core import FvcomPlotter
+
 import pandas as pd
 import matplotlib.pyplot as plt
 from math import ceil
@@ -19,7 +21,6 @@ import subprocess
 import cartopy.crs as ccrs
 from tqdm import tqdm
 import xarray as xr
-from typing import Callable, Optional, Any
 from ..plot_options import FvcomPlotOptions
 # import dask
 # from dask.delayed import delayed
@@ -281,9 +282,9 @@ class FrameGenerator:
                   time: int | None = None,
                   plotter: "FvcomPlotter",
                   save_path: str | None = None,
-                   post_process_func: Callable[[plt.Axes], None] | None = None,
-                   opts: FvcomPlotOptions | None = None,
-                   **plot_kwargs):
+                  post_process_func: Callable[..., None] | None = None,
+                  opts: FvcomPlotOptions | None = None,
+                  **plot_kwargs):
 
         """
         Generate a single frame with the given parameters.
@@ -375,6 +376,9 @@ class PlotHelperMixin:
     """
     A mixin class to provide helper methods for batch plotting and other common operations.
     """
+    ds: Any   # added for static-type checkers
+    cfg: Any
+    ts_river: Callable[..., Any]
 
     def ts_plot_in_batches(self, varnames, index, batch_size=4, k=None, png_prefix="plot", **kwargs):
         """
@@ -439,7 +443,7 @@ class PlotHelperMixin:
                     f"Time-Series Batch {b + 1}/{num_batches}",
                     fontsize=self.cfg.fontsize_suptitle
                 )
-            fig.tight_layout(rect=[0, 0, 1, 0.95])
+            fig.tight_layout(rect=(0, 0, 1, 0.95))
             save_path = f"{png_prefix}_batch_{b + 1}.png"
             fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
             plt.close(fig)
@@ -499,7 +503,7 @@ class PlotHelperMixin:
 
             # ---- 4) Plot each river -----------------------------------------
             for idx, ax in zip(river_idxs, axes):
-                _, ax = self.ts_river(varname=varname, river_index=idx, ax=ax, **kwargs)
+                _, ax = self.ts_river(varname=varname, river_index=idx, ax=ax, **kwargs)  # type: ignore[attr-defined]
                 # Plot legend
                 if legend:
                     ax.legend(fontsize=self.cfg.fontsize_legend)
@@ -510,7 +514,7 @@ class PlotHelperMixin:
                     f"(batch {b+1}/{num_batches})",
                     fontsize=self.cfg.fontsize_suptitle
                 )
-            fig.tight_layout(rect=[0, 0, 1, 0.95])
+            fig.tight_layout(rect=(0, 0, 1, 0.95))
 
             save_path = f"{png_prefix}_batch_{b+1}.png"
             fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
@@ -563,7 +567,7 @@ class PlotHelperMixin:
 
             # 図全体の調整
             fig.suptitle(f"Time Series of {var_name} (Batch {batch_num + 1})", fontsize=16)
-            fig.tight_layout(rect=[0, 0, 1, 0.95])  # タイトルとプロット間のスペース調整
+            fig.tight_layout(rect=(0, 0, 1, 0.95))  # タイトルとプロット間のスペース調整
 
             # 保存または表示
             save_path = f"{save_prefix}_batch_{batch_num + 1}.png"

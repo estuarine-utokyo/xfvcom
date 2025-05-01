@@ -29,6 +29,7 @@ from .utils import add_colorbar
 from ..plot_options import FvcomPlotOptions
 from ..decorators import precedence
 from typing import Any, Callable, Dict, Tuple
+from typing import Hashable
 from collections.abc import Sequence
 _TRICF_SIG = set(inspect.signature(maxes.Axes.tricontourf).parameters)
 
@@ -396,6 +397,10 @@ class FvcomPlotter(PlotHelperMixin):
             da_x = self.ds[varname_x]
             da_y = self.ds[varname_y]
 
+        # ---- after this point da_x / da_y are definitely DataArray ----
+        assert da_x is not None and da_y is not None, \
+            "da_x and da_y must be DataArray after validation"
+
         # ------------------------------------------------------------
         # 3. Slice by index or use full 1-D series
         # ------------------------------------------------------------
@@ -508,7 +513,7 @@ class FvcomPlotter(PlotHelperMixin):
     def ts_contourf_z(self, da: xr.DataArray, index: int = None, 
                       xlim: tuple = None, ylim: tuple = None,
                       xlabel: str = "Time", ylabel: str = "Depth (m)", title: str = None,
-                      rolling_window: int = None, ax=None, cmap=None, label=None,
+                      rolling_window: int | None = None, ax=None, cmap=None, label=None,
                       contourf_kwargs: dict = None, colorbar_kwargs: dict = None,
                       plot_surface: bool = False,
                       surface_kwargs: dict | None = None,
@@ -523,7 +528,7 @@ class FvcomPlotter(PlotHelperMixin):
         - ylim (tuple): Depth range for the y-axis (e.g., (0, 100)) in meters.
         - xlabel, ylabel (str): Axis labels for time and depth.
         - title (str): Plot title. If None, a default title is generated.
-        - rolling_window (int): Window size (in time steps) for centered rolling mean smoothing.
+        - rolling_window (int | None): Window size (in time steps) for centered rolling mean smoothing.
         - ax (matplotlib.axes.Axes): Axis to plot on. If None, a new figure and axis are created.
         - cmap: Colormap for the contour. Uses default from config if None.
         - label (str): Label for the colorbar (overrides variable long_name/units if provided).
@@ -545,13 +550,23 @@ class FvcomPlotter(PlotHelperMixin):
             if index is None:
                 raise ValueError(f"Index must be provided for spatial dimension '{spatial_dim}'.")
             da = da.isel({spatial_dim: index})
+        #elif index is not None:
+        #    raise ValueError(f"No spatial dimension in '{var_name}', but index was provided.")
         elif index is not None:
-            raise ValueError(f"No spatial dimension in '{var_name}', but index was provided.")
+            raise ValueError(
+                f"No spatial dimension in '{da.name}', but index was provided."
+            )
 
         # 3. Verify vertical (sigma) dimension is present (required for depth plot)
         vertical_dim = "siglay" if "siglay" in da.dims else ("siglev" if "siglev" in da.dims else None)
+        #if vertical_dim is None:
+        #    raise ValueError(f"Variable '{var_name}' has no sigma layer dimension ('siglay' or 'siglev'), cannot plot depth profile.")
         if vertical_dim is None:
-            raise ValueError(f"Variable '{var_name}' has no sigma layer dimension ('siglay' or 'siglev'), cannot plot depth profile.")
+            raise ValueError(
+                f"Variable '{da.name}' has no sigma layer dimension "
+                "('siglay' or 'siglev'); cannot plot depth profile."
+            )
+
 
         # 4. Apply rolling mean on time axis if specified
         da = self._apply_rolling(da, rolling_window)  # uses centered rolling mean&#8203;:contentReference[oaicite:0]{index=0}
@@ -911,7 +926,7 @@ class FvcomPlotter(PlotHelperMixin):
                 raise ValueError("Tile provider is not set. Please provide a valid tile provider, \
                                  e.g., GoogleTiles(style='satellite')")
             else:
-                ax.add_image(tile_provider, tile_zoom)
+                ax.add_image(tile_provider, tile_zoom)  # type: ignore[call-arg]
             #ax.add_image(tile_provider, 8)  # Zoom level 8 is suitable for regional plots
 
         # Argument treatment to avoid conflicts with **kwargs
@@ -995,7 +1010,7 @@ class FvcomPlotter(PlotHelperMixin):
                 # Always use PlateCarree here.
                 ax.triplot(triang, color=color, lw=lw, transform=ccrs.PlateCarree())
             # Use set_extent for lat/lon ranges
-            ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())
+            ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())  # type: ignore[union-attr]
             #ax.set_extent([xmin, xmax, ymin, ymax], crs=projection)
             ax.set_title(title, fontsize=self.cfg.fontsize["title"])
             xlabel  = extra.get("xlabel",  "Longitude")
@@ -1006,13 +1021,15 @@ class FvcomPlotter(PlotHelperMixin):
 
             # Add gridlines for lat/lon. Always use PlateCarree here.
             if plot_grid:
-                gl = ax.gridlines(draw_labels=True, crs=ccrs.PlateCarree(), linestyle=linestyle, lw=lw)
+                gl = ax.gridlines(  # type: ignore[attr-defined,union-attr]
+                    draw_labels=True, crs=ccrs.PlateCarree(), linestyle=linestyle, lw=lw)
                 gl.top_labels = False
                 gl.right_labels = False
                 gl.xlabel_style = {'size': 11}
                 gl.ylabel_style = {'size': 11}
             else:
-                gl = ax.gridlines(draw_labels=False, crs=ccrs.PlateCarree(), linestyle=linestyle, lw=0)
+                gl = ax.gridlines(  # type: ignore[attr-defined,union-attr]
+                    draw_labels=False, crs=ccrs.PlateCarree(), linestyle=linestyle, lw=0)
                 lon_ticks = gl.xlocator.tick_values(xmin, xmax)
                 lat_ticks = gl.ylocator.tick_values(ymin, ymax)
                 ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())
@@ -1872,7 +1889,7 @@ class FvcomPlotter(PlotHelperMixin):
         return da.sel(time=slice(start_sel, end_sel))
 
     def _slice_time_series(self, da: xr.DataArray, index: int = None,
-                           k: int = None) -> tuple[xr.DataArray, str | None, str | None]:
+                           k: int = None) -> tuple[xr.DataArray, Hashable | None, str | None]:
         """
         Slice a DataArray for 1D or vertical time series.
 
@@ -1907,7 +1924,7 @@ class FvcomPlotter(PlotHelperMixin):
 
         return sliced, spatial_dim, layer_dim
 
-    def _prepare_ts_labels(self, data: xr.DataArray, spatial_dim: str | None, layer_dim: str | None,
+    def _prepare_ts_labels(self, data: xr.DataArray, spatial_dim: Hashable | None, layer_dim: str | None,
         index: int | None, k: int | None, rolling_window: int | None,
         xlabel: str | bool | None, ylabel: str | bool | None, title: str | bool | None) -> tuple[str, str, str]:
         """
@@ -1991,7 +2008,7 @@ class FvcomPlotter(PlotHelperMixin):
         ax.yaxis.set_major_locator(LogLocator(base=10))
         ax.yaxis.set_major_formatter(LogFormatter())
 
-    def _apply_rolling(self, da: xr.DataArray, window: int, min_periods: int | None=None) -> xr.DataArray:
+    def _apply_rolling(self, da: xr.DataArray, window: int | None = None, min_periods: int | None=None) -> xr.DataArray:
         """
         Apply centered rolling mean on time axis with optional min_periods.
         """
@@ -2237,17 +2254,7 @@ class FvcomPlotter(PlotHelperMixin):
             da_node.isel(node=xr.DataArray(nv[:, 2], dims="nele"))
         ) / 3.0
 
-# Example usage
-if __name__ == "__main__":
-    # Load data
-    loader = FvcomDataLoader(base_path="/path/to/data", ncfile="sample.nc")
-    
-    # Analyze
-    analyzer = FvcomAnalyzer(loader.ds)
-    nearest_node = analyzer.nearest_neighbor(lon=140.0, lat=35.0)
-
-    # Plot
-    plot_config = FvcomPlotConfig(width=1000, height=400)
-    plotter = FvcomPlotter(loader.ds, plot_config)
-    plot = plotter.plot_time_series("z", siglay=0, node=nearest_node)
-    print(plot)
+# ------------------------------------------------------------------
+# Backward-compat API alias (old notebook examples expect this name)
+# ------------------------------------------------------------------
+FvcomPlotter.plot_time_series = FvcomPlotter.plot_timeseries  # type: ignore[attr-defined]

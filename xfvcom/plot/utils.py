@@ -3,11 +3,25 @@ import os
 import shutil
 import pandas as pd
 import re
+from pathlib import Path
 import time
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 import numpy as np
 from ..utils.helpers import FrameGenerator, create_gif, convert_gif_to_mp4
+from ..plot_options import FvcomPlotOptions
+
+# compile once
+_FRAME_RE = re.compile(r"_(\d+)\.png$")
+
+def _extract_index(path: str) -> int:
+    """
+    Return numeric frame index parsed from file name.
+    If the pattern is not found, return -1 so that such
+    files are sorted to the beginning and can be skipped.
+    """
+    m = _FRAME_RE.search(path)
+    return int(m.group(1)) if m else -1
 
 def prepare_contourf_args(
     data, *, vmin=None, vmax=None, levels=None, cmap="viridis"
@@ -124,7 +138,12 @@ def create_anim_2d_plot(plotter, processes, var_name, *, siglay=None, fps=10, ge
     
     # `frames/` 内のフレームを収集
     #all_frames = sorted(glob.glob(f"{output_dir}/{base_name}_*.png"))
-    all_frames = sorted(glob.glob(f"{output_dir}/{base_name}_*.png"), key=lambda x: int(re.search(r'_(\d+)\.png$', x).group(1)))
+    #all_frames = sorted(glob.glob(f"{output_dir}/{base_name}_*.png"), key=lambda x: int(re.search(r'_(\d+)\.png$', x).group(1)))
+    all_frames = sorted(
+        (p for p in glob.glob(f"{output_dir}/{base_name}_*.png") if _FRAME_RE.search(p)),
+        key=_extract_index,
+    )    
+    
     # **デバッグ用: `all_frames` の中身を確認**
     #print(f"Collected {len(all_frames)} frames for GIF animation.")
 
