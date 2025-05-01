@@ -1,9 +1,11 @@
 import inspect
+
 import cartopy.crs as ccrs
 import numpy as np
 import xarray as xr
-from sklearn.metrics import mean_squared_error, r2_score
 from scipy.stats import pearsonr
+from sklearn.metrics import mean_squared_error, r2_score
+
 
 def clean_kwargs(func, kwargs):
     """
@@ -25,7 +27,8 @@ def clean_kwargs(func, kwargs):
     func_args = inspect.signature(func).parameters
     # Keep keys that appear in the callee's signature
     return {k: v for k, v in kwargs.items() if k in func_args}
-    
+
+
 def unpack_plot_kwargs(kwargs):
     """
     Unpack nested 'plot_kwargs' dictionary if present.
@@ -37,14 +40,18 @@ def unpack_plot_kwargs(kwargs):
     - A flat dictionary with 'plot_kwargs' unpacked.
     """
 
-    if 'plot_kwargs' in kwargs and isinstance(kwargs['plot_kwargs'], dict):
-        return {**kwargs['plot_kwargs'], **{k: v for k, v in kwargs.items() if k != 'plot_kwargs'}}
+    if "plot_kwargs" in kwargs and isinstance(kwargs["plot_kwargs"], dict):
+        return {
+            **kwargs["plot_kwargs"],
+            **{k: v for k, v in kwargs.items() if k != "plot_kwargs"},
+        }
     return kwargs
+
 
 def parse_coordinate(coord):
     """
     Convert a coordinate in degrees:minutes:seconds or degrees:minutes format to a float (decimal degrees).
-    
+
     Parameters:
     - coord (str or float): Coordinate as a string in degrees:minutes:seconds (e.g., "139:30:25")
       or degrees:minutes (e.g., "139:30"), or a float.
@@ -54,7 +61,7 @@ def parse_coordinate(coord):
     """
     if isinstance(coord, (int, float)):
         return float(coord)
-    
+
     parts = coord.split(":")
     if len(parts) == 3:  # degrees:minutes:seconds format
         degrees, minutes, seconds = map(float, parts)
@@ -65,16 +72,17 @@ def parse_coordinate(coord):
     else:
         raise ValueError(f"Invalid coordinate format: {coord}")
 
+
 def apply_xlim_ylim(ax, xlim, ylim, is_cartesian=False):
     """
     Apply xlim and ylim to a Matplotlib axis, supporting both Cartesian and geographic (lon/lat) coordinates.
-    
+
     Parameters:
     - ax (matplotlib.axes._subplots.AxesSubplot): Matplotlib axis object.
     - xlim (tuple): Range for the x-axis, in longitude/Cartesian x as (min, max).
     - ylim (tuple): Range for the y-axis, in latitude/Cartesian y as (min, max).
     - is_cartesian (bool): If True, the input is Cartesian coordinates and no CRS transformation is applied.
-    
+
     Returns:
     - None
     """
@@ -83,7 +91,7 @@ def apply_xlim_ylim(ax, xlim, ylim, is_cartesian=False):
         # Cartesian coordinates: use xlim and ylim directly
         x_min, x_max = xlim
         y_min, y_max = ylim
-        #if ax is not None:
+        # if ax is not None:
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(y_min, y_max)
     else:
@@ -91,13 +99,14 @@ def apply_xlim_ylim(ax, xlim, ylim, is_cartesian=False):
         src_crs = ccrs.PlateCarree()
         x_min, x_max = map(parse_coordinate, xlim)
         y_min, y_max = map(parse_coordinate, ylim)
-        #if ax is not None:
+        # if ax is not None:
         ax.set_extent([x_min, x_max, y_min, y_max], crs=src_crs)
-        xlim=(x_min, x_max)
-        ylim=(y_min, y_max)
+        xlim = (x_min, x_max)
+        ylim = (y_min, y_max)
 
     print(f"Set extent: x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}")
-    #return xlim, ylim
+    # return xlim, ylim
+
 
 def evaluate_model_scores(sim_list, obs_list):
     """
@@ -117,6 +126,7 @@ def evaluate_model_scores(sim_list, obs_list):
     sim_list, obs_list = generate_test_data()
     ```
     """
+
     def to_numpy(data):
         if isinstance(data, xr.DataArray):
             return data.values
@@ -135,9 +145,11 @@ def evaluate_model_scores(sim_list, obs_list):
         sim, obs = sim[mask], obs[mask]
 
         if len(sim) == 0 or len(obs) == 0:
-            raise ValueError("Simulation and observation data contain no valid values after removing NaNs.\n"
-                             "Maybe observed data corresponding to the siglay depths does not exist \n"
-                             "because the total depth of observed is less than that of simulated.")
+            raise ValueError(
+                "Simulation and observation data contain no valid values after removing NaNs.\n"
+                "Maybe observed data corresponding to the siglay depths does not exist \n"
+                "because the total depth of observed is less than that of simulated."
+            )
 
         # Calculate metrics
         r2 = r2_score(obs, sim)
@@ -145,30 +157,38 @@ def evaluate_model_scores(sim_list, obs_list):
         rmse = np.sqrt(mean_squared_error(obs, sim))
         bias = np.mean(sim - obs)
 
-        individual_scores.append({"R²": r2, "r": r.item(), "RMSE": rmse.item(), "Bias": bias.item()})
+        individual_scores.append(
+            {"R²": r2, "r": r.item(), "RMSE": rmse.item(), "Bias": bias.item()}
+        )
 
     # Normalize scores for Combined Score calculation
     normalized_scores = []
     for score in individual_scores:
         normalized_r2 = max(0, score["R²"])  # Clamp R² to [0, 1]
         normalized_r = (score["r"] + 1) / 2  # Convert r from [-1, 1] to [0, 1]
-        normalized_rmse = 1 / (1 + score["RMSE"])  # Smaller RMSE is better, normalize to (0, 1]
-        normalized_bias = 1 / (1 + abs(score["Bias"]))  # Smaller bias is better, normalize to (0, 1]
-        
-        normalized_scores.append({
-            "R²": normalized_r2,
-            "r": normalized_r,
-            "RMSE": normalized_rmse,
-            "Bias": normalized_bias
-        })
+        normalized_rmse = 1 / (
+            1 + score["RMSE"]
+        )  # Smaller RMSE is better, normalize to (0, 1]
+        normalized_bias = 1 / (
+            1 + abs(score["Bias"])
+        )  # Smaller bias is better, normalize to (0, 1]
+
+        normalized_scores.append(
+            {
+                "R²": normalized_r2,
+                "r": normalized_r,
+                "RMSE": normalized_rmse,
+                "Bias": normalized_bias,
+            }
+        )
 
     # Combine scores into a single score using weights
     weights = {"R²": 0.4, "r": 0.4, "RMSE": 0.1, "Bias": 0.1}
     combined_score = sum(
-        weights["R²"] * score["R²"] +
-        weights["r"] * score["r"] +
-        weights["RMSE"] * score["RMSE"] +
-        weights["Bias"] * score["Bias"]
+        weights["R²"] * score["R²"]
+        + weights["r"] * score["r"]
+        + weights["RMSE"] * score["RMSE"]
+        + weights["Bias"] * score["Bias"]
         for score in normalized_scores
     ) / len(normalized_scores)
 
@@ -181,16 +201,31 @@ def generate_test_data():
     Generate an ideal test data (perfect) for evaluate_model_scores().
     """
 
-    time = np.arange("2023-01-01", "2023-01-11", dtype="datetime64[h]").astype("datetime64[ns]")  # Ensure nanosecond precision
+    time = np.arange("2023-01-01", "2023-01-11", dtype="datetime64[h]").astype(
+        "datetime64[ns]"
+    )  # Ensure nanosecond precision
     sim_list = [
-        xr.DataArray(np.sin(np.linspace(0, 10, len(time))) + np.random.normal(0, 1, len(time)), dims="time", coords={"time": time}),
-        xr.DataArray(np.cos(np.linspace(0, 10, len(time))) + np.random.normal(0, 1, len(time)), dims="time", coords={"time": time}),
+        xr.DataArray(
+            np.sin(np.linspace(0, 10, len(time))) + np.random.normal(0, 1, len(time)),
+            dims="time",
+            coords={"time": time},
+        ),
+        xr.DataArray(
+            np.cos(np.linspace(0, 10, len(time))) + np.random.normal(0, 1, len(time)),
+            dims="time",
+            coords={"time": time},
+        ),
     ]
     obs_list = [
-        xr.DataArray(np.sin(np.linspace(0, 10, len(time))), dims="time", coords={"time": time}),
-        xr.DataArray(np.cos(np.linspace(0, 10, len(time))), dims="time", coords={"time": time}),
+        xr.DataArray(
+            np.sin(np.linspace(0, 10, len(time))), dims="time", coords={"time": time}
+        ),
+        xr.DataArray(
+            np.cos(np.linspace(0, 10, len(time))), dims="time", coords={"time": time}
+        ),
     ]
     return sim_list, obs_list
+
 
 def ensure_time_index(ds: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArray:
     """
@@ -198,9 +233,7 @@ def ensure_time_index(ds: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArra
     If already ok, just return the original object.
     """
     if "time" not in ds.coords:
-        return ds                               # time 軸が無ければ何もしない
-    if ds.time.dtype.kind != "M":               # not datetime64
-        ds = ds.assign_coords(
-            time = ds.time.values.astype("datetime64[ns]")
-        )
+        return ds  # time 軸が無ければ何もしない
+    if ds.time.dtype.kind != "M":  # not datetime64
+        ds = ds.assign_coords(time=ds.time.values.astype("datetime64[ns]"))
     return ds

@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 setup(
     name="xfvcom",
@@ -7,13 +7,6 @@ setup(
     author="Jun SASAKI",
     author_email="jsasaki.ece@gmail.com",
     packages=find_packages(),
-    install_requires=[
-        "numpy",
-        "xarray",
-        "matplotlib",
-        "pyproj",
-        "scikit-learn"
-    ],
+    install_requires=["numpy", "xarray", "matplotlib", "pyproj", "scikit-learn"],
     python_requires=">=3.11",
 )
-

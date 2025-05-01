@@ -1,42 +1,46 @@
 # xfvcom.py: A Python module for loading, analyzing, and plotting FVCOM model output data in xfvcom package.
 # Author: Jun Sasaki
+import inspect
+from collections.abc import Sequence
 from datetime import datetime
-import numpy as np
-import xarray as xr
-import matplotlib.pyplot as plt
-from matplotlib.colorbar import Colorbar
-from matplotlib.dates import DateFormatter
-import matplotlib.cm as cm
-from matplotlib.colors import BoundaryNorm
-import matplotlib.axes as maxes
-from matplotlib.gridspec import GridSpec
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from matplotlib.ticker import LogLocator, LogFormatter
+from typing import Any, Callable, Dict, Hashable, Tuple
+
 import cartopy.crs as ccrs
 import cartopy.io.img_tiles as cimgt
-from cartopy.io.img_tiles import GoogleTiles
-from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
-from cartopy.mpl.geoaxes import GeoAxes
-import inspect
+import matplotlib.axes as maxes
+import matplotlib.cm as cm
+import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
-from scipy.spatial import KDTree
+import numpy as np
 import pyproj
-from ..io import FvcomDataLoader
-from .config import FvcomPlotConfig
+import xarray as xr
+from cartopy.io.img_tiles import GoogleTiles
+from cartopy.mpl.geoaxes import GeoAxes
+from cartopy.mpl.ticker import LatitudeFormatter, LongitudeFormatter
+from matplotlib.colorbar import Colorbar
+from matplotlib.colors import BoundaryNorm
+from matplotlib.dates import DateFormatter
+from matplotlib.gridspec import GridSpec
+from matplotlib.ticker import LogFormatter, LogLocator
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from scipy.spatial import KDTree
+
 from ..analysis import FvcomAnalyzer
-from ..utils.helpers import PlotHelperMixin, pick_first
-from .utils import add_colorbar
-from ..plot_options import FvcomPlotOptions
 from ..decorators import precedence
-from typing import Any, Callable, Dict, Tuple
-from typing import Hashable
-from collections.abc import Sequence
+from ..io import FvcomDataLoader
+from ..plot_options import FvcomPlotOptions
+from ..utils.helpers import PlotHelperMixin, pick_first
+from .config import FvcomPlotConfig
+from .utils import add_colorbar
+
 _TRICF_SIG = set(inspect.signature(maxes.Axes.tricontourf).parameters)
+
 
 class FvcomPlotter(PlotHelperMixin):
     """
     Creates plots from FVCOM datasets.
     """
+
     def __init__(self, dataset, plot_config):
         """
         Initialize the FvcomPlotter instance.
@@ -48,8 +52,19 @@ class FvcomPlotter(PlotHelperMixin):
         self.ds = dataset
         self.cfg = plot_config
 
-    def plot_timeseries(self, var_name, index, log=False, k=None, start=None, end=None, rolling_window=None,
-                         ax=None, save_path=None, **kwargs):
+    def plot_timeseries(
+        self,
+        var_name,
+        index,
+        log=False,
+        k=None,
+        start=None,
+        end=None,
+        rolling_window=None,
+        ax=None,
+        save_path=None,
+        **kwargs,
+    ):
         """
         Plot a time series for a specified variable at a given node or element index.
 
@@ -68,7 +83,7 @@ class FvcomPlotter(PlotHelperMixin):
         if var_name not in self.ds:
             print(f"Error: the variable '{var_name}' is not found in the dataset.")
             return None
-    
+
         # Validate the dimension
         variable_dims = self.ds[var_name].dims
         if "node" in variable_dims:
@@ -78,8 +93,10 @@ class FvcomPlotter(PlotHelperMixin):
         elif "nobc" in variable_dims:
             dim = "nobc"
         else:
-            raise ValueError(f"Variable {var_name} does not have 'node' or 'nele' as a dimension.")
-        
+            raise ValueError(
+                f"Variable {var_name} does not have 'node' or 'nele' as a dimension."
+            )
+
         variable_dims = self.ds[var_name].dims
         if "siglay" in variable_dims:
             dimk = "siglay"
@@ -87,8 +104,10 @@ class FvcomPlotter(PlotHelperMixin):
             dimk = "siglev"
         else:
             if k is not None:
-                raise ValueError(f"Variable {var_name} does not have 'siglay' or 'siglev' as a dimension.")
-        
+                raise ValueError(
+                    f"Variable {var_name} does not have 'siglay' or 'siglev' as a dimension."
+                )
+
         # Select the data
         if k is not None:
             data = self.ds[var_name].isel({dim: index, dimk: k})
@@ -109,9 +128,11 @@ class FvcomPlotter(PlotHelperMixin):
         data = data.isel(time=time_mask)
         time = time[time_mask]
 
-        if log: # Check if log scale is requested
+        if log:  # Check if log scale is requested
             if data.min() <= 0:
-                print("Warning: Logarithmic scale cannot be used with non-positive values.")
+                print(
+                    "Warning: Logarithmic scale cannot be used with non-positive values."
+                )
                 print("Switching to linear scale.")
                 log = False
 
@@ -122,25 +143,29 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             fig = ax.figure  # Get the figure from the provided axis
         # Plotting
-        color = kwargs.pop('color', self.cfg.plot_color)
+        color = kwargs.pop("color", self.cfg.plot_color)
         if k is not None:
             label = f"{var_name} ({dim}={index}, {dimk}={k})"
         else:
             label = f"{var_name} ({dim}={index})"
         ax.plot(time, data, label=label, color=color, **kwargs)
-        if log: # Set log scale if specified
-            ax.set_yscale('log')
+        if log:  # Set log scale if specified
+            ax.set_yscale("log")
 
         # Formatting
-        rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+        rolling_text = (
+            f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+        )
         if k is not None:
-            title = f"Time Series of {var_name} ({dim}={index}, {dimk}={k}){rolling_text}"
+            title = (
+                f"Time Series of {var_name} ({dim}={index}, {dimk}={k}){rolling_text}"
+            )
         else:
             title = f"Time Series of {var_name} ({dim}={index}){rolling_text}"
-        ax.set_title(title, fontsize=self.cfg.fontsize['title'])
-        ax.set_xlabel("Time", fontsize=self.cfg.fontsize['xlabel'])
-        ax.set_ylabel(var_name, fontsize=self.cfg.fontsize['ylabel'])
-        date_format = kwargs.get('date_format', self.cfg.date_format)
+        ax.set_title(title, fontsize=self.cfg.fontsize["title"])
+        ax.set_xlabel("Time", fontsize=self.cfg.fontsize["xlabel"])
+        ax.set_ylabel(var_name, fontsize=self.cfg.fontsize["ylabel"])
+        date_format = kwargs.get("date_format", self.cfg.date_format)
         ax.xaxis.set_major_formatter(DateFormatter(date_format))
         fig.autofmt_xdate()
         ax.grid(True)
@@ -150,9 +175,8 @@ class FvcomPlotter(PlotHelperMixin):
         if save_path:
             dpi = kwargs.get("dpi", self.cfg.dpi)
             fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
-        
-        return ax
 
+        return ax
 
     def hvplot_time_series(self, var, siglay=None, node=None, **kwargs):
         """
@@ -164,10 +188,20 @@ class FvcomPlotter(PlotHelperMixin):
             width=self.cfg.width,
             height=self.cfg.height,
             fontsize=self.cfg.fontsize,
-            **kwargs
+            **kwargs,
         )
 
-    def ts_river(self, da: xr.DataArray = None, varname: str =None, river_index: int =None, rolling_window: int = None, title=None, verbose=False, ax=None, **kwargs):
+    def ts_river(
+        self,
+        da: xr.DataArray = None,
+        varname: str = None,
+        river_index: int = None,
+        rolling_window: int = None,
+        title=None,
+        verbose=False,
+        ax=None,
+        **kwargs,
+    ):
         """
         Plot a river variable time-series by delegating to self.ts_plot().
 
@@ -212,27 +246,29 @@ class FvcomPlotter(PlotHelperMixin):
         if "river_names" in self.ds:
             raw = self.ds["river_names"].isel(rivers=river_index).values
             river_name = raw.item() if isinstance(raw, np.ndarray) else raw
-            #river_name = raw.decode("utf-8").strip() if isinstance(raw, (bytes, bytearray)) else str(raw)
+            # river_name = raw.decode("utf-8").strip() if isinstance(raw, (bytes, bytearray)) else str(raw)
         else:
             river_name = f"river {river_index}"
 
-        river_name = river_name.decode('utf-8').strip() 
+        river_name = river_name.decode("utf-8").strip()
 
         # 4) Default title / xlabel / ylabel
         if isinstance(title, str):
-            title = title.strip()        # explicit string
-        elif title:                       # Truthy but not str (e.g. True, 1)
-            roll_txt = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+            title = title.strip()  # explicit string
+        elif title:  # Truthy but not str (e.g. True, 1)
+            roll_txt = (
+                f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+            )
             title = f"Time Series of {varname} for {river_name} (river={river_index}){roll_txt}"
-        else:                              # None, False, "", 0 …
-            title = ""                   # no label
+        else:  # None, False, "", 0 …
+            title = ""  # no label
 
         xlabel = kwargs.pop("xlabel", None)
         ylabel = kwargs.pop("ylabel", True)
         if verbose:
-            default_label  = f"{river_name} (index={river_index})"
+            default_label = f"{river_name} (index={river_index})"
         else:
-            default_label  = f"{river_name}"
+            default_label = f"{river_name}"
         label = kwargs.pop("label", default_label)
 
         # 5) Ensure we have an axis (create if None)
@@ -242,14 +278,30 @@ class FvcomPlotter(PlotHelperMixin):
             fig = ax.figure
 
         # 6) Delegate to ts_plot (ax provided so it draws on same axis)
-        fig, ax = self.ts_plot(da=da, rolling_window=rolling_window, xlabel=xlabel, ylabel=ylabel,
-                               title=title, label=label, ax=ax, **kwargs)
+        fig, ax = self.ts_plot(
+            da=da,
+            rolling_window=rolling_window,
+            xlabel=xlabel,
+            ylabel=ylabel,
+            title=title,
+            label=label,
+            ax=ax,
+            **kwargs,
+        )
 
         return fig, ax
 
-
-    def ts_discharge2(self, varname, river_index, start=None, end=None, rolling_window=None,
-                                   ax=None, save_path=None, **kwargs):
+    def ts_discharge2(
+        self,
+        varname,
+        river_index,
+        start=None,
+        end=None,
+        rolling_window=None,
+        ax=None,
+        save_path=None,
+        **kwargs,
+    ):
         """
         Plot a time series for a specified variable at a given discharge index.
 
@@ -270,16 +322,19 @@ class FvcomPlotter(PlotHelperMixin):
         # Validate the dimensions of the variable
         variable_dims = self.ds[varname].dims
         if "rivers" not in variable_dims or "time" not in variable_dims:
-            raise ValueError(f"Variable {varname} does not have 'rivers' and 'time' as dimensions.")
+            raise ValueError(
+                f"Variable {varname} does not have 'rivers' and 'time' as dimensions."
+            )
 
         # Retrieve and clean river name
         if "river_names" not in self.ds:
-            raise ValueError("Dataset does not contain 'river_names' variable for labeling rivers.")
+            raise ValueError(
+                "Dataset does not contain 'river_names' variable for labeling rivers."
+            )
         river_name = self.ds["river_names"].isel(rivers=river_index).values
         if isinstance(river_name, np.ndarray):
             river_name = river_name.item()  # 単一値を取得
-        river_name = river_name.decode('utf-8').strip() 
-
+        river_name = river_name.decode("utf-8").strip()
 
         # Select the data
         data = self.ds[varname].isel(rivers=river_index)
@@ -305,17 +360,21 @@ class FvcomPlotter(PlotHelperMixin):
             fig = ax.figure  # Get the figure from the provided axis
 
         # Plotting
-        #color = kwargs.get('color', self.cfg.plot_color)
-        color = kwargs.pop('color', self.cfg.plot_color)
-        ax.plot(time, data, label=f"{varname} (river={river_index})", color=color, **kwargs)
+        # color = kwargs.get('color', self.cfg.plot_color)
+        color = kwargs.pop("color", self.cfg.plot_color)
+        ax.plot(
+            time, data, label=f"{varname} (river={river_index})", color=color, **kwargs
+        )
 
         # Formatting
-        rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+        rolling_text = (
+            f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+        )
         title = f"Time Series of {varname} for {river_name} (river={river_index}){rolling_text}"
-        ax.set_title(title, fontsize=self.cfg.fontsize['title'])
-        ax.set_xlabel("Time", fontsize=self.cfg.fontsize['xlabel'])
-        ax.set_ylabel(varname, fontsize=self.cfg.fontsize['ylabel'])
-        date_format = kwargs.get('date_format', self.cfg.date_format)
+        ax.set_title(title, fontsize=self.cfg.fontsize["title"])
+        ax.set_xlabel("Time", fontsize=self.cfg.fontsize["xlabel"])
+        ax.set_ylabel(varname, fontsize=self.cfg.fontsize["ylabel"])
+        date_format = kwargs.get("date_format", self.cfg.date_format)
         ax.xaxis.set_major_formatter(DateFormatter(date_format))
         fig.autofmt_xdate()
         ax.grid(True)
@@ -328,11 +387,26 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def ts_vector(self, da_x: xr.DataArray =None, da_y: xr.DataArray =None, varname_x: str =None, varname_y: str =None,
-                  index: int =None, xlabel: str ="", ylabel: str ="Wind speed (m/s)", title: str =None,
-                  rolling_window: int =None, show_legend: bool =True, with_magnitude: bool =True, 
-                  show_vec_legend: bool =True, vec_legend_speed: float =10, vec_legend_loc: tuple =(0.85,0.1),
-                  ax=None, opts: FvcomPlotOptions | None = None, **kwargs):
+    def ts_vector(
+        self,
+        da_x: xr.DataArray = None,
+        da_y: xr.DataArray = None,
+        varname_x: str = None,
+        varname_y: str = None,
+        index: int = None,
+        xlabel: str = "",
+        ylabel: str = "Wind speed (m/s)",
+        title: str = None,
+        rolling_window: int = None,
+        show_legend: bool = True,
+        with_magnitude: bool = True,
+        show_vec_legend: bool = True,
+        vec_legend_speed: float = 10,
+        vec_legend_loc: tuple = (0.85, 0.1),
+        ax=None,
+        opts: FvcomPlotOptions | None = None,
+        **kwargs,
+    ):
         """
         Plot time-series of vector components (u, v) and optionally their magnitude.
         Accept either (da_x, da_y) or (varname_x, varname_y) exclusively.
@@ -353,10 +427,10 @@ class FvcomPlotter(PlotHelperMixin):
         with_magnitude (bool): If True, plot the magnitude of the vector.
         show_vec_legend (bool): If True, show the vector legend.
         vec_legend_speed (float): Speed for the vector legend.
-        vec_legend_loc (tuple): Location of the vector legend in axes coordinates. 
+        vec_legend_loc (tuple): Location of the vector legend in axes coordinates.
         ax: matplotlib axis object. If None, a new figure and axis will be created.
         **kwargs: Additional keyword arguments for customization.
-    
+
         Returns:
         --------
         fig: The matplotlib figure object.
@@ -371,7 +445,7 @@ class FvcomPlotter(PlotHelperMixin):
         # ------------------------------------------------------------
         # 1. Validate the input combination
         # ------------------------------------------------------------
-        has_da      = (da_x is not None) or (da_y is not None)
+        has_da = (da_x is not None) or (da_y is not None)
         has_varname = (varname_x is not None) or (varname_y is not None)
 
         # Both groups specified or neither → error
@@ -398,8 +472,9 @@ class FvcomPlotter(PlotHelperMixin):
             da_y = self.ds[varname_y]
 
         # ---- after this point da_x / da_y are definitely DataArray ----
-        assert da_x is not None and da_y is not None, \
-            "da_x and da_y must be DataArray after validation"
+        assert (
+            da_x is not None and da_y is not None
+        ), "da_x and da_y must be DataArray after validation"
 
         # ------------------------------------------------------------
         # 3. Slice by index or use full 1-D series
@@ -415,16 +490,18 @@ class FvcomPlotter(PlotHelperMixin):
             v = da_y
             index_name = None
         else:
-            raise ValueError(f"Both da_x and da_y must be 2‑D or 1-D; "
-                            f"got shapes {da_x.shape} and {da_y.shape}.")
+            raise ValueError(
+                f"Both da_x and da_y must be 2‑D or 1-D; "
+                f"got shapes {da_x.shape} and {da_y.shape}."
+            )
 
         # Apply rolling mean if specified
         if rolling_window:
-            #u = u.rolling(time=rolling_window, center=True).mean().dropna(dim="time")
-            #v = v.rolling(time=rolling_window, center=True).mean().dropna(dim="time")
+            # u = u.rolling(time=rolling_window, center=True).mean().dropna(dim="time")
+            # v = v.rolling(time=rolling_window, center=True).mean().dropna(dim="time")
             # Ensure time alignment after rolling and dropna
             uv = xr.Dataset({"u": u, "v": v})
-            uv = (uv.rolling(time=rolling_window, center=True).mean().dropna(dim="time"))
+            uv = uv.rolling(time=rolling_window, center=True).mean().dropna(dim="time")
             u = uv["u"]
             v = uv["v"]
 
@@ -435,16 +512,22 @@ class FvcomPlotter(PlotHelperMixin):
 
         # Adjust scale for quiver plot
         max_speed = float(np.max(speed)) if speed.size else 0.0
-        #scale_factor = max_speed / 10  # Adjust to fit arrows within the plot
+        # scale_factor = max_speed / 10  # Adjust to fit arrows within the plot
 
-        figsize = kwargs.get('figsize', self.cfg.figsize)
+        figsize = kwargs.get("figsize", self.cfg.figsize)
         if ax is None:
             fig, ax = plt.subplots(figsize=figsize, dpi=self.cfg.dpi)
         else:
             fig = ax.figure
         # Plot wind speed magnitude
         if with_magnitude:
-            ax.plot(time, speed, label="Wind Speed (m/s)", color=self.cfg.plot_color, alpha=0.5)
+            ax.plot(
+                time,
+                speed,
+                label="Wind Speed (m/s)",
+                color=self.cfg.plot_color,
+                alpha=0.5,
+            )
 
         # Quiver plot for wind vectors
         # Prepare quiver keyword arguments
@@ -457,67 +540,89 @@ class FvcomPlotter(PlotHelperMixin):
             scale = scale_kwarg
 
         quiver_opts = dict(
-            angles   = kwargs.get("angles",    self.cfg.arrow_angles),
-            headlength     = kwargs.get("headlength",     self.cfg.arrow_headlength),
-            headwidth      = kwargs.get("headwidth",      self.cfg.arrow_headwidth),
-            headaxislength = kwargs.get("headaxislength", self.cfg.arrow_headaxislength),
-            width   = kwargs.get("width",     self.cfg.arrow_width),
-            color   = kwargs.get("color",     self.cfg.arrow_color),
-            alpha   = kwargs.get("alpha",     self.cfg.arrow_alpha),
-            scale_units = "y",
-            scale   = scale
+            angles=kwargs.get("angles", self.cfg.arrow_angles),
+            headlength=kwargs.get("headlength", self.cfg.arrow_headlength),
+            headwidth=kwargs.get("headwidth", self.cfg.arrow_headwidth),
+            headaxislength=kwargs.get("headaxislength", self.cfg.arrow_headaxislength),
+            width=kwargs.get("width", self.cfg.arrow_width),
+            color=kwargs.get("color", self.cfg.arrow_color),
+            alpha=kwargs.get("alpha", self.cfg.arrow_alpha),
+            scale_units="y",
+            scale=scale,
         )
 
         Q = ax.quiver(time, np.zeros(len(time)), u, v, **quiver_opts)
 
         # Add quiverkey
         if show_vec_legend:
-            ref_speed = (max_speed * 0.3) if vec_legend_speed is None else vec_legend_speed
-            ax.quiverkey(Q, *vec_legend_loc, ref_speed,
-                        f"{ref_speed:.1f} m/s",
-                        labelpos='E', coordinates='axes',
-                        color=quiver_opts["color"],
-                        alpha=quiver_opts["alpha"],
-                        fontproperties={'size': self.cfg.fontsize_legend})
+            ref_speed = (
+                (max_speed * 0.3) if vec_legend_speed is None else vec_legend_speed
+            )
+            ax.quiverkey(
+                Q,
+                *vec_legend_loc,
+                ref_speed,
+                f"{ref_speed:.1f} m/s",
+                labelpos="E",
+                coordinates="axes",
+                color=quiver_opts["color"],
+                alpha=quiver_opts["alpha"],
+                fontproperties={"size": self.cfg.fontsize_legend},
+            )
 
         # Format y-axis to accommodate negative and positive values
         max_v = np.max(np.abs(max_speed))
         ax.set_ylim(-max_v, max_v)
 
         # Format axes
-        rolling_text = f" with {rolling_window}-hour rolling mean" if rolling_window else ""
+        rolling_text = (
+            f" with {rolling_window}-hour rolling mean" if rolling_window else ""
+        )
         index_text = f"({index_name}={index})" if index_name is not None else ""
         if title is None:
             title = f"Wind vector time series {index_text}{rolling_text}"
-        ax.set_title(title, fontsize=self.cfg.fontsize['title'])
-        ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize['xlabel'])
-        ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize['ylabel'])
-        date_format = kwargs.get('date_format', self.cfg.date_format)
+        ax.set_title(title, fontsize=self.cfg.fontsize["title"])
+        ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize["xlabel"])
+        ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize["ylabel"])
+        date_format = kwargs.get("date_format", self.cfg.date_format)
         ax.xaxis.set_major_formatter(DateFormatter(date_format))
         fig.autofmt_xdate()
 
         # Add y=0 line
-        frame_color = ax.spines["left"].get_edgecolor()  # Retrieve the color of the left spine
+        frame_color = ax.spines[
+            "left"
+        ].get_edgecolor()  # Retrieve the color of the left spine
         ax.axhline(
-            0.0,                       # y = 0
-            color=frame_color,         # Use the same color as the frame
+            0.0,  # y = 0
+            color=frame_color,  # Use the same color as the frame
             linewidth=self.cfg.linewidth_axes * 0.3,  # Make it thinner
-            zorder=5                   # Ensure it is above the quiver arrows and other elements
+            zorder=5,  # Ensure it is above the quiver arrows and other elements
         )
-        
+
         if show_legend and with_magnitude:
-            ax.legend(fontsize=self.cfg.fontsize['legend'])
-        
+            ax.legend(fontsize=self.cfg.fontsize["legend"])
+
         return fig, ax
 
-    def ts_contourf_z(self, da: xr.DataArray, index: int = None, 
-                      xlim: tuple = None, ylim: tuple = None,
-                      xlabel: str = "Time", ylabel: str = "Depth (m)", title: str = None,
-                      rolling_window: int | None = None, ax=None, cmap=None, label=None,
-                      contourf_kwargs: dict = None, colorbar_kwargs: dict = None,
-                      plot_surface: bool = False,
-                      surface_kwargs: dict | None = None,
-                      **kwargs) -> tuple[plt.Figure, plt.Axes, Colorbar]:
+    def ts_contourf_z(
+        self,
+        da: xr.DataArray,
+        index: int = None,
+        xlim: tuple = None,
+        ylim: tuple = None,
+        xlabel: str = "Time",
+        ylabel: str = "Depth (m)",
+        title: str = None,
+        rolling_window: int | None = None,
+        ax=None,
+        cmap=None,
+        label=None,
+        contourf_kwargs: dict = None,
+        colorbar_kwargs: dict = None,
+        plot_surface: bool = False,
+        surface_kwargs: dict | None = None,
+        **kwargs,
+    ) -> tuple[plt.Figure, plt.Axes, Colorbar]:
         """
         Plot a 2D time-series contour (time vs depth) for the specified variable.
         This method is specialized for z-coordinate (depth) data and does not support sigma coordinates.
@@ -548,9 +653,11 @@ class FvcomPlotter(PlotHelperMixin):
         spatial_dim = next((d for d in ("node", "nele") if d in da.dims), None)
         if spatial_dim:
             if index is None:
-                raise ValueError(f"Index must be provided for spatial dimension '{spatial_dim}'.")
+                raise ValueError(
+                    f"Index must be provided for spatial dimension '{spatial_dim}'."
+                )
             da = da.isel({spatial_dim: index})
-        #elif index is not None:
+        # elif index is not None:
         #    raise ValueError(f"No spatial dimension in '{var_name}', but index was provided.")
         elif index is not None:
             raise ValueError(
@@ -558,8 +665,12 @@ class FvcomPlotter(PlotHelperMixin):
             )
 
         # 3. Verify vertical (sigma) dimension is present (required for depth plot)
-        vertical_dim = "siglay" if "siglay" in da.dims else ("siglev" if "siglev" in da.dims else None)
-        #if vertical_dim is None:
+        vertical_dim = (
+            "siglay"
+            if "siglay" in da.dims
+            else ("siglev" if "siglev" in da.dims else None)
+        )
+        # if vertical_dim is None:
         #    raise ValueError(f"Variable '{var_name}' has no sigma layer dimension ('siglay' or 'siglev'), cannot plot depth profile.")
         if vertical_dim is None:
             raise ValueError(
@@ -567,12 +678,15 @@ class FvcomPlotter(PlotHelperMixin):
                 "('siglay' or 'siglev'); cannot plot depth profile."
             )
 
-
         # 4. Apply rolling mean on time axis if specified
-        da = self._apply_rolling(da, rolling_window)  # uses centered rolling mean&#8203;:contentReference[oaicite:0]{index=0}
+        da = self._apply_rolling(
+            da, rolling_window
+        )  # uses centered rolling mean&#8203;:contentReference[oaicite:0]{index=0}
 
         # 5. Filter data by time range (xlim) if provided
-        da = self._apply_time_filter(da, xlim)        # uses start/end from xlim to slice time&#8203;:contentReference[oaicite:1]{index=1}
+        da = self._apply_time_filter(
+            da, xlim
+        )  # uses start/end from xlim to slice time&#8203;:contentReference[oaicite:1]{index=1}
 
         # 6. Prepare depth (z) values for the selected location and times
         #    We assume the dataset contains 'z' (depth) with same dims (time, vertical, spatial)
@@ -583,10 +697,10 @@ class FvcomPlotter(PlotHelperMixin):
         z_da = self._apply_time_filter(z_da, xlim)
         # Align dimensions ordering for consistent (time, vertical) shape
         z_da = z_da.transpose("time", vertical_dim)
-        da   = da.transpose("time", vertical_dim)
+        da = da.transpose("time", vertical_dim)
         # Assign depth values as a 2D coordinate for the DataArray (for plotting)
         da.coords["Depth"] = (("time", vertical_dim), z_da.values)
-        
+
         # 7. Create figure and axis if not provided
         if ax is None:
             fig = plt.figure(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
@@ -594,17 +708,27 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             fig = ax.figure
 
-        # 8. Determine contourf parameters (levels, cmap, etc.), merging **kwargs 
+        # 8. Determine contourf parameters (levels, cmap, etc.), merging **kwargs
         #    and using defaults from config when not specified
         if cmap is not None:
             kwargs["cmap"] = cmap
-        merged_cf_kwargs, levels, cmap_used, vmin, vmax, extend = \
-            self._prepare_contourf_args(da, None, kwargs)  # unify contour args&#8203;:contentReference[oaicite:2]{index=2}
+        merged_cf_kwargs, levels, cmap_used, vmin, vmax, extend = (
+            self._prepare_contourf_args(da, None, kwargs)
+        )  # unify contour args&#8203;:contentReference[oaicite:2]{index=2}
 
         # 9. Plot the filled contour using time vs depth
-        contour = da.plot.contourf(x="time", y="Depth", levels=levels, cmap=cmap_used,
-                                vmin=vmin, vmax=vmax, extend=extend, ax=ax,
-                                add_colorbar=False, **merged_cf_kwargs)
+        contour = da.plot.contourf(
+            x="time",
+            y="Depth",
+            levels=levels,
+            cmap=cmap_used,
+            vmin=vmin,
+            vmax=vmax,
+            extend=extend,
+            ax=ax,
+            add_colorbar=False,
+            **merged_cf_kwargs,
+        )
 
         # Optionally add contour lines on top (if desired, similar to original add_contour logic)
         # Example:
@@ -634,10 +758,14 @@ class FvcomPlotter(PlotHelperMixin):
         # Construct default title if none provided
         if title is None:
             long_name = da.attrs.get("long_name", da.name)
-            rolling_text = f" with {rolling_window}-step Rolling Mean" if rolling_window else ""
-            title = (f"Time Series of {long_name}" +
-                    (f" ({spatial_dim}={index})" if spatial_dim else "") +
-                    f"{rolling_text}")
+            rolling_text = (
+                f" with {rolling_window}-step Rolling Mean" if rolling_window else ""
+            )
+            title = (
+                f"Time Series of {long_name}"
+                + (f" ({spatial_dim}={index})" if spatial_dim else "")
+                + f"{rolling_text}"
+            )
         self._format_time_axis(ax, title, xlabel, ylabel, self.cfg.date_format)
 
         # Apply depth limits if provided
@@ -647,16 +775,34 @@ class FvcomPlotter(PlotHelperMixin):
         # 13. Create and attach colorbar
         # Determine colorbar label from variable metadata or provided `label`
         units = da.attrs.get("units", "")
-        cbar_label = label if label is not None else (
-            f"{long_name} ({units})" if units else long_name
+        cbar_label = (
+            label
+            if label is not None
+            else (f"{long_name} ({units})" if units else long_name)
         )
         cbar = self._make_colorbar(ax, contour, cbar_label, colorbar_kwargs or {})
         return fig, ax, cbar
 
-
-    def plot_timeseries_2d(self, var_name, index=None, start=None, end=None, depth=False, rolling_window=None, ax=None, 
-                                   ylim=None, levels=20, vmin=None, vmax=None, cmap=None, save_path=None, method='contourf',
-                                   add_contour=False, label_contours=False, **kwargs):
+    def plot_timeseries_2d(
+        self,
+        var_name,
+        index=None,
+        start=None,
+        end=None,
+        depth=False,
+        rolling_window=None,
+        ax=None,
+        ylim=None,
+        levels=20,
+        vmin=None,
+        vmax=None,
+        cmap=None,
+        save_path=None,
+        method="contourf",
+        add_contour=False,
+        label_contours=False,
+        **kwargs,
+    ):
         """
         Obsolete. Remove this method in future versions. Use ts_contourf_z instead.
         Plot a 2D time series for a specified variable as a contour map with time on the x-axis and a vertical coordinate (siglay/siglev) on the y-axis.
@@ -690,11 +836,15 @@ class FvcomPlotter(PlotHelperMixin):
         elif "siglev" in self.ds[var_name].dims:
             y_coord = "siglev"
         else:
-            raise ValueError(f"Variable {var_name} does not have 'siglay' or 'siglev' as a vertical coordinate.")
+            raise ValueError(
+                f"Variable {var_name} does not have 'siglay' or 'siglev' as a vertical coordinate."
+            )
 
         # Validate the variable's dimensions
         if "time" not in self.ds[var_name].dims:
-            raise ValueError(f"Variable {var_name} does not have 'time' as a dimension.")
+            raise ValueError(
+                f"Variable {var_name} does not have 'time' as a dimension."
+            )
 
         # Select the data for the specified index
         # Validate the dimension
@@ -704,7 +854,9 @@ class FvcomPlotter(PlotHelperMixin):
         elif "nele" in variable_dims:
             dim = "nele"
         else:
-            raise ValueError(f"Variable {var_name} does not have 'node' or 'nele' as a dimension.")
+            raise ValueError(
+                f"Variable {var_name} does not have 'node' or 'nele' as a dimension."
+            )
 
         data = self.ds[var_name]
         if index is not None:
@@ -715,7 +867,7 @@ class FvcomPlotter(PlotHelperMixin):
         # Apply rolling mean if specified
         if rolling_window:
             data = data.rolling(time=rolling_window, center=True).mean()
-        
+
         # Time range filtering
         time = data["time"]
         if start:
@@ -741,7 +893,7 @@ class FvcomPlotter(PlotHelperMixin):
         # Create 2D grid for time and vertical coordinate
         time_grid, y_grid = np.meshgrid(time_vals, y_vals, indexing="xy")
         if depth:
-            z = self.ds.z.isel(time=time_mask)[:,:,index].T.values
+            z = self.ds.z.isel(time=time_mask)[:, :, index].T.values
             if z.shape != (len(y_vals), len(time_vals)):
                 raise ValueError(
                     f"Shape mismatch: depth={z.shape}, time={len(time_vals)}, vertical={len(y_vals)}"
@@ -756,7 +908,7 @@ class FvcomPlotter(PlotHelperMixin):
             fig, ax = plt.subplots(figsize=figsize)
 
         # Plot using contourf or pcolormesh
-        cmap = cmap or kwargs.pop("cmap", "viridis") 
+        cmap = cmap or kwargs.pop("cmap", "viridis")
         vmin = vmin or kwargs.pop("vmin", values.min())
         vmax = vmax or kwargs.pop("vmax", values.max())
         levels = levels or kwargs.get("levels", 20)  # Number of contour levels
@@ -765,10 +917,21 @@ class FvcomPlotter(PlotHelperMixin):
         elif isinstance(levels, (list, np.ndarray)):
             levels = np.array(levels)
         if method == "contourf":
-            cf = ax.contourf(time_grid, y_grid, values, levels=levels, cmap=cmap, norm=norm, extend='both', **kwargs)
-            cbar = plt.colorbar(cf, ax=ax, extend='both')
+            cf = ax.contourf(
+                time_grid,
+                y_grid,
+                values,
+                levels=levels,
+                cmap=cmap,
+                norm=norm,
+                extend="both",
+                **kwargs,
+            )
+            cbar = plt.colorbar(cf, ax=ax, extend="both")
             if add_contour:
-                cs = ax.contour(time_grid, y_grid, values, levels=levels, colors='k', linewidths=0.5)
+                cs = ax.contour(
+                    time_grid, y_grid, values, levels=levels, colors="k", linewidths=0.5
+                )
                 if label_contours:
                     plt.clabel(cs, inline=True, fontsize=8)
         elif method == "pcolormesh":
@@ -776,24 +939,25 @@ class FvcomPlotter(PlotHelperMixin):
             cbar = plt.colorbar(mesh, ax=ax)
         else:
             raise ValueError(f"Invalid method '{method}' for plotting 2D time series.")
-        
+
         # Format colorbar
-        cbar.set_label(var_name, fontsize=self.cfg.fontsize['ylabel'])
+        cbar.set_label(var_name, fontsize=self.cfg.fontsize["ylabel"])
         # Add contour labels if requested
-        
+
         # Format axes
         if ylim is not None:
             ax.set_ylim(ylim)
-        rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+        rolling_text = (
+            f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+        )
         title = f"Time Series of {var_name} ({dim}={index}){rolling_text}"
 
-        ax.set_title(title, fontsize=self.cfg.fontsize['title'])
-        ax.set_xlabel("Time", fontsize=self.cfg.fontsize['xlabel'])
-        ax.set_ylabel(y_coord, fontsize=self.cfg.fontsize['ylabel'])
-        date_format = kwargs.get('date_format', self.cfg.date_format)
+        ax.set_title(title, fontsize=self.cfg.fontsize["title"])
+        ax.set_xlabel("Time", fontsize=self.cfg.fontsize["xlabel"])
+        ax.set_ylabel(y_coord, fontsize=self.cfg.fontsize["ylabel"])
+        date_format = kwargs.get("date_format", self.cfg.date_format)
         ax.xaxis.set_major_formatter(DateFormatter(date_format))
         fig.autofmt_xdate()
-
 
         # Save or show the plot
         if save_path:
@@ -803,8 +967,16 @@ class FvcomPlotter(PlotHelperMixin):
         return ax
 
     @precedence("ax", "lw", "color", "linestyle")
-    def plot_2d(self, *, da: xr.DataArray | None =None, save_path=None, post_process_func=None,
-                opts: FvcomPlotOptions | None = None, local: dict[str, Any] | None =None, **_):
+    def plot_2d(
+        self,
+        *,
+        da: xr.DataArray | None = None,
+        save_path=None,
+        post_process_func=None,
+        opts: FvcomPlotOptions | None = None,
+        local: dict[str, Any] | None = None,
+        **_,
+    ):
         """
         Plot scalar field (DataArray) or mesh-only figure.
 
@@ -819,8 +991,8 @@ class FvcomPlotter(PlotHelperMixin):
         **kwargs :
             All legacy keywords (with_mesh, coastlines, obclines, vmin, vmax,
             levels, projection, plot_grid, add_tiles, tile_provider, tile_zoom,
-            verbose, xlim, ylim, ...) are still accepted.        
-        
+            verbose, xlim, ylim, ...) are still accepted.
+
         Note:
         -------
         projection in the following can be ccrs.Mercator(), which is the best in mid-latitudes.
@@ -831,28 +1003,28 @@ class FvcomPlotter(PlotHelperMixin):
         """
 
         # unify option source --------------------------------
-        assert opts is not None          # for safety; can be omitted
+        assert opts is not None  # for safety; can be omitted
         extra = opts.extra
 
         # Flag for "scalar field is already drawn" so vector map can skip |U|
         opts.da_is_scalar = da is not None
 
-        projection    = opts.projection        # map projection
-        use_latlon    = opts.use_latlon        # lon/lat or Cartesian
+        projection = opts.projection  # map projection
+        use_latlon = opts.use_latlon  # lon/lat or Cartesian
         self.use_latlon = use_latlon
-        transform     = ccrs.PlateCarree() if self.use_latlon else None
+        transform = ccrs.PlateCarree() if self.use_latlon else None
 
-        with_mesh     = opts.with_mesh         # draw mesh lines
-        coastlines    = opts.coastlines        # draw coastlines
-        obclines      = opts.obclines          # draw open-boundary lines
-        plot_grid     = opts.plot_grid         # lat/lon grid
-        add_tiles     = opts.add_tiles         # web tiles
+        with_mesh = opts.with_mesh  # draw mesh lines
+        coastlines = opts.coastlines  # draw coastlines
+        obclines = opts.obclines  # draw open-boundary lines
+        plot_grid = opts.plot_grid  # lat/lon grid
+        add_tiles = opts.add_tiles  # web tiles
         tile_provider = opts.tile_provider
-        tile_zoom     = opts.tile_zoom
+        tile_zoom = opts.tile_zoom
 
-        verbose       = opts.verbose           # console logging
-        xlim          = opts.xlim              # (xmin,xmax)
-        ylim          = opts.ylim              # (ymin,ymax)
+        verbose = opts.verbose  # console logging
+        xlim = opts.xlim  # (xmin,xmax)
+        ylim = opts.ylim  # (ymin,ymax)
 
         # Extract coordinates
         if self.use_latlon:
@@ -867,9 +1039,9 @@ class FvcomPlotter(PlotHelperMixin):
             default_cbar_label = f"{da.long_name} ({da.units})"
             cbar_label = extra.get("cbar_label", default_cbar_label)
         else:
-            with_mesh=True
+            with_mesh = True
         # Extract triangle connectivity
-        #nv = self.ds["nv"].values.T - 1  # Convert to 0-based indexing
+        # nv = self.ds["nv"].values.T - 1  # Convert to 0-based indexing
         nv = self.ds["nv_zero"]
         # Output ranges and connectivity
         if xlim is None:
@@ -883,7 +1055,9 @@ class FvcomPlotter(PlotHelperMixin):
         if verbose:
             print(f"x range: {xmin} to {xmax}")
             print(f"y range: {ymin} to {ymax}")
-            print(f"nv_ccw shape: {self.ds.nv_ccw.shape}, nv_ccw min: {self.ds.nv_ccw.min()}, nv_ccw max: {self.ds.nv_ccw.max()}")
+            print(
+                f"nv_ccw shape: {self.ds.nv_ccw.shape}, nv_ccw min: {self.ds.nv_ccw.min()}, nv_ccw max: {self.ds.nv_ccw.max()}"
+            )
 
         # Validate nv_ccw and coordinates
         if verbose:
@@ -892,10 +1066,12 @@ class FvcomPlotter(PlotHelperMixin):
             if np.isinf(x).any() or np.isinf(y).any():
                 raise ValueError("Infinite values found in node coordinates.")
             if (self.ds.nv_ccw < 0).any() or (self.ds.nv_ccw >= len(x)).any():
-                raise ValueError("Invalid indices in nv_ccw. Check if nv_ccw points to valid nodes.")
+                raise ValueError(
+                    "Invalid indices in nv_ccw. Check if nv_ccw points to valid nodes."
+                )
 
         # Reverse node order for counter-clockwise triangles that matplotlib expects.
-        #nv = nv[:, ::-1]
+        # nv = nv[:, ::-1]
 
         # Create Triangulation
         try:
@@ -907,27 +1083,31 @@ class FvcomPlotter(PlotHelperMixin):
             return None
 
         # Set up axis
-        ax = (local or {}).get("ax")           # pre-created Axes or None
+        ax = (local or {}).get("ax")  # pre-created Axes or None
         if ax is None:
             figsize = opts.figsize or self.cfg.figsize
             if self.use_latlon:
-                fig, ax = plt.subplots(figsize=figsize, subplot_kw={'projection': projection})
+                fig, ax = plt.subplots(
+                    figsize=figsize, subplot_kw={"projection": projection}
+                )
             else:
                 fig, ax = plt.subplots(figsize=figsize)  # No projection for Cartesian
         else:
             fig = ax.figure
-        
+
         # Add map tiles if requested
         if add_tiles and self.use_latlon:
-            #tile_provider = cimgt.OSM()
-            #tile_provider = cimgt.Stamen('terrain')
-            #tile_provider = GoogleTiles(style="satellite")
+            # tile_provider = cimgt.OSM()
+            # tile_provider = cimgt.Stamen('terrain')
+            # tile_provider = GoogleTiles(style="satellite")
             if tile_provider is None:
-                raise ValueError("Tile provider is not set. Please provide a valid tile provider, \
-                                 e.g., GoogleTiles(style='satellite')")
+                raise ValueError(
+                    "Tile provider is not set. Please provide a valid tile provider, \
+                                 e.g., GoogleTiles(style='satellite')"
+                )
             else:
                 ax.add_image(tile_provider, tile_zoom)  # type: ignore[call-arg]
-            #ax.add_image(tile_provider, 8)  # Zoom level 8 is suitable for regional plots
+            # ax.add_image(tile_provider, 8)  # Zoom level 8 is suitable for regional plots
 
         # Argument treatment to avoid conflicts with **kwargs
         # with_mesh = opts.with_mesh  # Remove with_mesh from kwargs
@@ -937,12 +1117,18 @@ class FvcomPlotter(PlotHelperMixin):
         # --------------------------------------------
         lw = pick_first((local or {}).get("lw"), opts.mesh_linewidth, 0.5)
         color = pick_first((local or {}).get("color"), opts.mesh_color, "#36454F")
-        coastline_color = pick_first((local or {}).get("coastline_color"), opts.coastline_color, "gray")
-        obcline_color = pick_first((local or {}).get("obcline_color"), opts.obcline_color, "blue")
-        linestyle = pick_first((local or {}).get("linestyle"), opts.grid_linestyle, "--")        
+        coastline_color = pick_first(
+            (local or {}).get("coastline_color"), opts.coastline_color, "gray"
+        )
+        obcline_color = pick_first(
+            (local or {}).get("obcline_color"), opts.obcline_color, "blue"
+        )
+        linestyle = pick_first(
+            (local or {}).get("linestyle"), opts.grid_linestyle, "--"
+        )
         # Prepare color plot
         if da is not None:
-            cmap_raw = extra.get("cmap",  opts.cmap)
+            cmap_raw = extra.get("cmap", opts.cmap)
             cmap_obj = plt.get_cmap(cmap_raw) if isinstance(cmap_raw, str) else cmap_raw
 
             # --- build tc_kwargs -----------------------------------------
@@ -951,8 +1137,10 @@ class FvcomPlotter(PlotHelperMixin):
             # ---- range ---------------------------------------------------
             vmin = extra.get("vmin", opts.vmin)
             vmax = extra.get("vmax", opts.vmax)
-            if vmin is None: vmin = float(values.min())
-            if vmax is None: vmax = float(values.max())
+            if vmin is None:
+                vmin = float(values.min())
+            if vmax is None:
+                vmax = float(values.max())
 
             # ---- levels + norm ------------------------------------------
             levels = extra.get("levels", opts.levels)
@@ -960,7 +1148,7 @@ class FvcomPlotter(PlotHelperMixin):
             if isinstance(levels, int):
                 # int  -> 線形レベル配列（境界数 = levels）
                 levels_arr = np.linspace(vmin, vmax, levels)
-            else:                               # list / ndarray
+            else:  # list / ndarray
                 levels_arr = np.asarray(levels, float)
 
             # values: ndarray of the DataArray at this time step
@@ -975,92 +1163,132 @@ class FvcomPlotter(PlotHelperMixin):
             elif data_max > vmax:
                 extend_flag = "max"
 
-            tc_kwargs.update({
-                "vmin": vmin,
-                "vmax": vmax,
-                "levels": levels_arr,
-                "norm": BoundaryNorm(levels_arr, cmap_obj.N, clip=False)
-            })
+            tc_kwargs.update(
+                {
+                    "vmin": vmin,
+                    "vmax": vmax,
+                    "levels": levels_arr,
+                    "norm": BoundaryNorm(levels_arr, cmap_obj.N, clip=False),
+                }
+            )
         # Handle Cartesian coordinates
         if not self.use_latlon:
-            title   = extra.get("title", "FVCOM Mesh (Cartesian)")
+            title = extra.get("title", "FVCOM Mesh (Cartesian)")
             if da is not None:
-                cf = ax.tricontourf(triang, values, cmap=cmap_obj, transform=None, extend=extend_flag, **tc_kwargs)
+                cf = ax.tricontourf(
+                    triang,
+                    values,
+                    cmap=cmap_obj,
+                    transform=None,
+                    extend=extend_flag,
+                    **tc_kwargs,
+                )
                 cbar = self._make_colorbar(ax, cf, cbar_label, opts=opts)
             if with_mesh:
                 ax.triplot(triang, color=color, lw=lw)
             ax.set_xlim(xmin, xmax)
             ax.set_ylim(ymin, ymax)
             ax.set_title(title, fontsize=self.cfg.fontsize["title"])
-            xlabel = extra.get("xlabel",  "X (m)")
-            ylabel = extra.get("ylabel",  "Y (m)")
+            xlabel = extra.get("xlabel", "X (m)")
+            ylabel = extra.get("ylabel", "Y (m)")
             ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize["xlabel"])
             ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize["ylabel"])
             ax.set_aspect("equal")
         # Handle lat/lon coordinates
         else:
-            title   = extra.get("title", "")
+            title = extra.get("title", "")
             if da is not None:
-                cf = ax.tricontourf(triang, values, cmap=cmap_obj, transform=ccrs.PlateCarree(),
-                                    extend=extend_flag, **tc_kwargs)
-                #cbar = plt.colorbar(cf, ax=ax, extend=extend_flag, orientation='vertical', shrink=1.0)
+                cf = ax.tricontourf(
+                    triang,
+                    values,
+                    cmap=cmap_obj,
+                    transform=ccrs.PlateCarree(),
+                    extend=extend_flag,
+                    **tc_kwargs,
+                )
+                # cbar = plt.colorbar(cf, ax=ax, extend=extend_flag, orientation='vertical', shrink=1.0)
                 cbar = self._make_colorbar(ax, cf, cbar_label, opts=opts)
-                #cbar.set_label(cbar_label, fontsize=self.cfg.fontsize["cbar_label"], labelpad=10)
+                # cbar.set_label(cbar_label, fontsize=self.cfg.fontsize["cbar_label"], labelpad=10)
             if with_mesh:
                 # Always use PlateCarree here.
                 ax.triplot(triang, color=color, lw=lw, transform=ccrs.PlateCarree())
             # Use set_extent for lat/lon ranges
             ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())  # type: ignore[union-attr]
-            #ax.set_extent([xmin, xmax, ymin, ymax], crs=projection)
+            # ax.set_extent([xmin, xmax, ymin, ymax], crs=projection)
             ax.set_title(title, fontsize=self.cfg.fontsize["title"])
-            xlabel  = extra.get("xlabel",  "Longitude")
-            ylabel  = extra.get("ylabel",  "Latitude")        
+            xlabel = extra.get("xlabel", "Longitude")
+            ylabel = extra.get("ylabel", "Latitude")
             ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize["xlabel"])
             ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize["ylabel"])
-            ax.set_aspect('equal')
+            ax.set_aspect("equal")
 
             # Add gridlines for lat/lon. Always use PlateCarree here.
             if plot_grid:
                 gl = ax.gridlines(  # type: ignore[attr-defined,union-attr]
-                    draw_labels=True, crs=ccrs.PlateCarree(), linestyle=linestyle, lw=lw)
+                    draw_labels=True, crs=ccrs.PlateCarree(), linestyle=linestyle, lw=lw
+                )
                 gl.top_labels = False
                 gl.right_labels = False
-                gl.xlabel_style = {'size': 11}
-                gl.ylabel_style = {'size': 11}
+                gl.xlabel_style = {"size": 11}
+                gl.ylabel_style = {"size": 11}
             else:
                 gl = ax.gridlines(  # type: ignore[attr-defined,union-attr]
-                    draw_labels=False, crs=ccrs.PlateCarree(), linestyle=linestyle, lw=0)
+                    draw_labels=False, crs=ccrs.PlateCarree(), linestyle=linestyle, lw=0
+                )
                 lon_ticks = gl.xlocator.tick_values(xmin, xmax)
                 lat_ticks = gl.ylocator.tick_values(ymin, ymax)
                 ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())
                 ax.set_yticks(lat_ticks, crs=ccrs.PlateCarree())
                 ax.xaxis.set_major_formatter(LongitudeFormatter())
                 ax.yaxis.set_major_formatter(LatitudeFormatter())
-                x_min_proj, y_min_proj = projection.transform_point(xmin, ymin, src_crs=ccrs.PlateCarree())
-                x_max_proj, y_max_proj = projection.transform_point(xmax, ymax, src_crs=ccrs.PlateCarree())
+                x_min_proj, y_min_proj = projection.transform_point(
+                    xmin, ymin, src_crs=ccrs.PlateCarree()
+                )
+                x_max_proj, y_max_proj = projection.transform_point(
+                    xmax, ymax, src_crs=ccrs.PlateCarree()
+                )
                 ax.set_xlim(x_min_proj, x_max_proj)
                 ax.set_ylim(y_min_proj, y_max_proj)
-                ax.tick_params(labelsize=11, labelcolor='black')
+                ax.tick_params(labelsize=11, labelcolor="black")
 
         if coastlines:
             print("Plotting coastlines...")
             nv = self.ds.nv_ccw.values
-            nbe = np.array([[nv[n, j], nv[n, (j+2)%3]] for n in range(len(triang.neighbors))
-                           for j in range(3) if triang.neighbors[n,j] == -1])
+            nbe = np.array(
+                [
+                    [nv[n, j], nv[n, (j + 2) % 3]]
+                    for n in range(len(triang.neighbors))
+                    for j in range(3)
+                    if triang.neighbors[n, j] == -1
+                ]
+            )
             for m in range(len(nbe)):
-                #ax.plot(x[nbe[m,:]], y[nbe[m,:]], color='gray', linewidth=1, transform=transform)
-                ax.plot(x[nbe[m,:]], y[nbe[m,:]], color=coastline_color, linewidth=1, transform=transform)
-
+                # ax.plot(x[nbe[m,:]], y[nbe[m,:]], color='gray', linewidth=1, transform=transform)
+                ax.plot(
+                    x[nbe[m, :]],
+                    y[nbe[m, :]],
+                    color=coastline_color,
+                    linewidth=1,
+                    transform=transform,
+                )
 
         if obclines:
             # Plot open boundary lines
             print("Plotting open boundary lines...")
             if "node_bc" not in self.ds:
-                raise ValueError("Dataset does not contain 'node_bc' variable for open boundary lines."
-                                 " obcfile must be read in FvcomDataLoader.")    
+                raise ValueError(
+                    "Dataset does not contain 'node_bc' variable for open boundary lines."
+                    " obcfile must be read in FvcomDataLoader."
+                )
             node_bc = self.ds.node_bc.values
-            ax.plot(x[node_bc[:]], y[node_bc[:]], color=obcline_color, linewidth=1, transform=transform)
-        
+            ax.plot(
+                x[node_bc[:]],
+                y[node_bc[:]],
+                color=obcline_color,
+                linewidth=1,
+                transform=transform,
+            )
+
         # -------- vector-overlay hook inside plot_2d -----------------
         if opts.plot_vec2d:
             # --- 1) derive positional index from scalar DataArray -----
@@ -1068,13 +1296,13 @@ class FvcomPlotter(PlotHelperMixin):
             if da is not None and "time" in da.coords:
                 # works for both scalar (0-D) and length-1 1-D coordinates
                 label = da.coords["time"].values.item()
-                da_time_idx = self._label_to_index(label)   # helper you added
+                da_time_idx = self._label_to_index(label)  # helper you added
 
             # --- 2) decide final time for vector plot -----------------
             if opts.vec_time is not None:
-                time_for_vector = opts.vec_time            # explicit override
+                time_for_vector = opts.vec_time  # explicit override
             elif da_time_idx is not None:
-                time_for_vector = da_time_idx              # derived from scalar
+                time_for_vector = da_time_idx  # derived from scalar
             else:
                 raise ValueError(
                     "plot_vec2d is True but vec_time is not specified and "
@@ -1084,13 +1312,13 @@ class FvcomPlotter(PlotHelperMixin):
 
             # --- 3) call vector plot ----------------------------------
             self.plot_vector2d(
-                time   = time_for_vector,
-                siglay = opts.vec_siglay,
-                reduce = opts.vec_reduce,
-                skip   = opts.skip,
-                ax     = ax,
-                color  = opts.arrow_color,
-                opts   = opts
+                time=time_for_vector,
+                siglay=opts.vec_siglay,
+                reduce=opts.vec_reduce,
+                skip=opts.skip,
+                ax=ax,
+                color=opts.arrow_color,
+                opts=opts,
             )
 
         # --- user post-processing -----------------------------------------
@@ -1101,7 +1329,7 @@ class FvcomPlotter(PlotHelperMixin):
 
             # Build kwargs dynamically
             dyn_kwargs = {}
-            frame_locals  = locals()   # everything defined inside plot_2d
+            frame_locals = locals()  # everything defined inside plot_2d
             frame_globals = globals()  # module-level names
 
             for arg in valid_args:
@@ -1127,7 +1355,9 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def add_marker(self, ax=None, x=None, y=None, marker="o", color="red", size=20, **kwargs):
+    def add_marker(
+        self, ax=None, x=None, y=None, marker="o", color="red", size=20, **kwargs
+    ):
         """
         Add a marker to the existing plot (e.g., a mesh plot). Must be used with plot_2d.
 
@@ -1145,7 +1375,9 @@ class FvcomPlotter(PlotHelperMixin):
         """
         # Ensure ax is provided
         if ax is None:
-            raise ValueError("An axis object (ax) must be provided. Use plot_2d() first.")
+            raise ValueError(
+                "An axis object (ax) must be provided. Use plot_2d() first."
+            )
 
         # Ensure use_latlon is determined by plot_2d
         if not hasattr(self, "use_latlon"):
@@ -1156,7 +1388,9 @@ class FvcomPlotter(PlotHelperMixin):
             raise ValueError("Both x and y must be specified.")
 
         transform = ccrs.PlateCarree() if self.use_latlon else None
-        ax.scatter(x, y, transform=transform, marker=marker, color=color, s=size, **kwargs)
+        ax.scatter(
+            x, y, transform=transform, marker=marker, color=color, s=size, **kwargs
+        )
 
         return ax
 
@@ -1165,13 +1399,13 @@ class FvcomPlotter(PlotHelperMixin):
         *,
         time: int | slice | list | tuple,
         siglay: int | slice | list | tuple | None = None,
-         reduce: dict[str, str] | None = None,      # {"time": "mean", "siglay": "mean"}
-        skip: int | str | None = None, # "auto" or explicit integer
+        reduce: dict[str, str] | None = None,  # {"time": "mean", "siglay": "mean"}
+        skip: int | str | None = None,  # "auto" or explicit integer
         var_u: str = "u",
         var_v: str = "v",
         ax: plt.Axes | None = None,
         opts: FvcomPlotOptions | None = None,
-        **kwargs
+        **kwargs,
     ) -> plt.Axes:
         """
         Plot a 2-D current vector map for a single (time, siglay) slice.
@@ -1190,7 +1424,7 @@ class FvcomPlotter(PlotHelperMixin):
         skip : int | str, optional
             Arrow subsampling interval.  "auto" selects a reasonable value
             based on the mesh size (default "auto").
-        
+
         """
         # 0) option merge
         if opts is None:
@@ -1200,16 +1434,16 @@ class FvcomPlotter(PlotHelperMixin):
         # ----------------------------------------------------------
         # Sanitize kwargs: remove internal flags before quiver call
         # ----------------------------------------------------------
-        if "with_magnitude" in kwargs:          # user passed as kw-arg
+        if "with_magnitude" in kwargs:  # user passed as kw-arg
             opts.with_magnitude = bool(kwargs.pop("with_magnitude"))
 
         if skip == "auto" and opts.skip != "auto":
             skip = opts.skip
-        
+
         # 1) determine skip
         nele_total = self.ds.sizes.get("nele", len(self.ds["lonc"]))
 
-        if skip is None:                             # no thinning
+        if skip is None:  # no thinning
             skip_val = 1
         elif skip == "auto":
             skip_val = self._auto_skip(nele_total)
@@ -1218,8 +1452,11 @@ class FvcomPlotter(PlotHelperMixin):
 
         # 2) slice & reduce u,v
         uc, vc = self._select_and_reduce_uv(
-            self.ds[var_u], self.ds[var_v],
-            time_sel=time, siglay_sel=siglay, reduce=reduce
+            self.ds[var_u],
+            self.ds[var_v],
+            time_sel=time,
+            siglay_sel=siglay,
+            reduce=reduce,
         )
 
         # 3) prepare base map if ax is None (unchanged)
@@ -1235,14 +1472,14 @@ class FvcomPlotter(PlotHelperMixin):
             "width": opts.arrow_width,
             # 'scale' will be injected later only if needed
         }
-        arrow_kwargs.update(kwargs)        # allow user override
+        arrow_kwargs.update(kwargs)  # allow user override
 
         # ---- decide scale -------------------------------------------
         # priority: explicit **kwargs > opts.scale
         scale_val = kwargs.get("scale", opts.scale)
 
         if scale_val is None:
-            arrow_kwargs.pop("scale", None)     # 自動
+            arrow_kwargs.pop("scale", None)  # 自動
         else:
             arrow_kwargs["scale"] = float(scale_val)
 
@@ -1251,19 +1488,20 @@ class FvcomPlotter(PlotHelperMixin):
 
         if draw_mag:
             import matplotlib.tri as mtri
+
             lon_n = self.ds["lon"].values
             lat_n = self.ds["lat"].values
             tri_nv = self.ds["nv_zero"].values
             triang = mtri.Triangulation(lon_n, lat_n, triangles=tri_nv)
 
-            mag = np.hypot(uc, vc)           # (nele,) element-centre magnitude
+            mag = np.hypot(uc, vc)  # (nele,) element-centre magnitude
             cf = ax.tripcolor(
                 triang,
                 facecolors=mag,
                 cmap=opts.cmap,
                 transform=ccrs.PlateCarree(),
                 shading="flat",
-                zorder=opts.vec_zorder - 1
+                zorder=opts.vec_zorder - 1,
             )
 
             # -------- move colorbar INSIDE the draw_mag block ----------
@@ -1271,34 +1509,55 @@ class FvcomPlotter(PlotHelperMixin):
 
         # 6) quiver plot --------------------------------------------
         q = ax.quiver(
-            self.ds["lonc"][::skip_val], self.ds["latc"][::skip_val],
-            uc[::skip_val], vc[::skip_val],
+            self.ds["lonc"][::skip_val],
+            self.ds["latc"][::skip_val],
+            uc[::skip_val],
+            vc[::skip_val],
             transform=ccrs.PlateCarree(),
             zorder=opts.vec_zorder,
-            **arrow_kwargs
+            **arrow_kwargs,
         )
 
         # 7) add quiverkey ---------------------------------------------
         if opts.show_vec_legend:
             # automatic reference speed = 30 % of max |u,v|
-            ref_speed = (np.hypot(uc,vc).max()*0.3
-                        if opts.vec_legend_speed is None
-                        else opts.vec_legend_speed)
+            ref_speed = (
+                np.hypot(uc, vc).max() * 0.3
+                if opts.vec_legend_speed is None
+                else opts.vec_legend_speed
+            )
             ax.quiverkey(
-                q, *opts.vec_legend_loc, ref_speed,
+                q,
+                *opts.vec_legend_loc,
+                ref_speed,
                 f"{ref_speed:.2f} m/s",
-                labelpos='E', coordinates='axes',
+                labelpos="E",
+                coordinates="axes",
                 color=kwargs.get("color", opts.arrow_color),
-                fontproperties={'size': self.cfg.fontsize_legend}
+                fontproperties={"size": self.cfg.fontsize_legend},
             )
 
         return ax
 
-    def ts_contourf(self, da: xr.DataArray, index: int = None, x='time', y='siglay', xlim=None, ylim=None,
-                    xlabel='Time', ylabel='Sigma', title=None,
-                    rolling_window=None, min_periods=None, ax=None, date_format=None,
-                    contourf_kwargs: dict = None, colorbar_kwargs: dict = None, **kwargs
-                   ) -> tuple[plt.Figure, plt.Axes, Colorbar]: 
+    def ts_contourf(
+        self,
+        da: xr.DataArray,
+        index: int = None,
+        x="time",
+        y="siglay",
+        xlim=None,
+        ylim=None,
+        xlabel="Time",
+        ylabel="Sigma",
+        title=None,
+        rolling_window=None,
+        min_periods=None,
+        ax=None,
+        date_format=None,
+        contourf_kwargs: dict = None,
+        colorbar_kwargs: dict = None,
+        **kwargs,
+    ) -> tuple[plt.Figure, plt.Axes, Colorbar]:
         """
         Plot a contour map of vertical time-series DataArray.
         contourf_kwargs and **kwargs are combined to flexibly pass any contourf parameters; colorbar_kwargs is for colorbar settings.
@@ -1332,28 +1591,38 @@ class FvcomPlotter(PlotHelperMixin):
         colorbar_kwargs = colorbar_kwargs or {}
 
         # Automatically detect the spatial dimension ('node' or 'nele') and apply the given index
-        spatial_dim = next((d for d in ('node', 'nele') if d in da.dims), None)
+        spatial_dim = next((d for d in ("node", "nele") if d in da.dims), None)
         if spatial_dim:
             if index is None:
-                raise ValueError(f"Index must be provided for '{spatial_dim}' dimension")
+                raise ValueError(
+                    f"Index must be provided for '{spatial_dim}' dimension"
+                )
             da = da.isel({spatial_dim: index})
         elif index is not None:
-            raise ValueError(f"No 'node' or 'nele' dimension found in DataArray dims {da.dims}")
+            raise ValueError(
+                f"No 'node' or 'nele' dimension found in DataArray dims {da.dims}"
+            )
 
         # Apply rolling mean if specified
         if rolling_window:
             if min_periods is None:
                 min_periods = rolling_window // 2 + 1
-            da = da.rolling(time=rolling_window, center=True, min_periods=min_periods).mean()
+            da = da.rolling(
+                time=rolling_window, center=True, min_periods=min_periods
+            ).mean()
 
         # Extract metadata for labels
-        long_name = da.attrs.get('long_name', da.name)
-        units = da.attrs.get('units', '-')
+        long_name = da.attrs.get("long_name", da.name)
+        units = da.attrs.get("units", "-")
         cbar_label = f"{long_name} ({units})"
         if title is None:
-            rolling_text = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""  
+            rolling_text = (
+                f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+            )
             if spatial_dim is not None:
-                title = f"Time Series of {long_name} ({spatial_dim}={index}){rolling_text}"
+                title = (
+                    f"Time Series of {long_name} ({spatial_dim}={index}){rolling_text}"
+                )
             else:
                 title = f"Time Series of {long_name}{rolling_text}"
 
@@ -1371,29 +1640,35 @@ class FvcomPlotter(PlotHelperMixin):
             fig = ax.figure
 
         # Merge kwargs with contourf_kwargs
-        merged_contourf_kwargs, levels, cmap, vmin, vmax, extend = \
+        merged_contourf_kwargs, levels, cmap, vmin, vmax, extend = (
             self._prepare_contourf_args(da, contourf_kwargs, kwargs)
+        )
 
         # Plot the contour map
-        #plot = da.plot.contourf(x=x, y=y, ylim=ylim, levels=levels, cmap=cmap,
+        # plot = da.plot.contourf(x=x, y=y, ylim=ylim, levels=levels, cmap=cmap,
         #                        vmin=vmin, vmax=vmax, extend=extend, ax=ax,
         #                        add_colorbar=False, **merged_contourf_kwargs)
-        #if ylim is None:
+        # if ylim is None:
         #    ylim = (da[y].min().item(), da[y].max().item())
         #    ax.set_ylim(ylim)
         # Build kwargs for contourf
         plot_kwargs = {
-            "x": x, "y": y,
-            "levels": levels, "cmap": cmap,
-            "vmin": vmin, "vmax": vmax, "extend": extend,
-            "ax": ax, "add_colorbar": False
+            "x": x,
+            "y": y,
+            "levels": levels,
+            "cmap": cmap,
+            "vmin": vmin,
+            "vmax": vmax,
+            "extend": extend,
+            "ax": ax,
+            "add_colorbar": False,
         }
         # Only include ylim if explicitly set
         if ylim is not None:
             plot_kwargs["ylim"] = ylim
 
         # Call contourf
-        plot = da.plot.contourf(**plot_kwargs, **merged_contourf_kwargs)        
+        plot = da.plot.contourf(**plot_kwargs, **merged_contourf_kwargs)
 
         # Set axis formatting
         self._format_time_axis(ax, title, xlabel, ylabel, date_format)
@@ -1401,22 +1676,36 @@ class FvcomPlotter(PlotHelperMixin):
         # ax.invert_yaxis()
 
         # Add colorbar
-        cb_copy      = dict(colorbar_kwargs or {})
+        cb_copy = dict(colorbar_kwargs or {})
         label_to_use = cb_copy.pop("label", cbar_label)
-        cbar         = self._make_colorbar(ax, plot, label_to_use, cb_copy)
+        cbar = self._make_colorbar(ax, plot, label_to_use, cb_copy)
 
         return fig, ax, cbar
 
-    def ts_plot(self, da: xr.DataArray = None, varname: str =None, index: int = None, k: int = None, ax=None,
-                xlabel: str |bool| None = None, ylabel: str |bool| None = True, title: str |bool| None = None,
-                color: str = None, linestyle: str = None, date_format: str = None,
-                xlim: tuple = None, ylim: tuple = None, rolling_window=None, log=False,
-                **kwargs) -> tuple[plt.Figure, plt.Axes]:
+    def ts_plot(
+        self,
+        da: xr.DataArray = None,
+        varname: str = None,
+        index: int = None,
+        k: int = None,
+        ax=None,
+        xlabel: str | bool | None = None,
+        ylabel: str | bool | None = True,
+        title: str | bool | None = None,
+        color: str = None,
+        linestyle: str = None,
+        date_format: str = None,
+        xlim: tuple = None,
+        ylim: tuple = None,
+        rolling_window=None,
+        log=False,
+        **kwargs,
+    ) -> tuple[plt.Figure, plt.Axes]:
         """
         1-D time series plot. Provides a DataArray or variable name to extract from the dataset.
         Accept either da or varname exclusively.
         Passing the DataArray objects directly is effective when you need to avoid performance degradation in parallel processing.
-        
+
         Parameters:
         ----------
         da : xr.DataArray, optional
@@ -1451,7 +1740,7 @@ class FvcomPlotter(PlotHelperMixin):
             If True, use logarithmic scale. Default: False.
         **kwargs : dict
             Extra keyword args for ax.plot().
-        
+
         Returns:
         ----------
         tuple: (fig, ax)
@@ -1464,7 +1753,7 @@ class FvcomPlotter(PlotHelperMixin):
             da = self.ds[varname]
         elif varname is not None:
             raise ValueError("Only one of 'da' or 'varname' should be provided.")
-        
+
         data, spatial_dim, layer_dim = self._slice_time_series(da, index, k)
 
         # 2) Apply rolling mean before time filtering
@@ -1472,14 +1761,22 @@ class FvcomPlotter(PlotHelperMixin):
 
         # 3) Prepare labels and title
         xlabel, ylabel, title = self._prepare_ts_labels(
-            data, spatial_dim, layer_dim,
-            index, k, rolling_window, xlabel, ylabel, title)
-        
+            data,
+            spatial_dim,
+            layer_dim,
+            index,
+            k,
+            rolling_window,
+            xlabel,
+            ylabel,
+            title,
+        )
+
         # 4) Time filtering and formatting
         date_format = date_format or self.cfg.date_format
-        data        = self._apply_time_filter(data, xlim)
-        times       = data["time"].values
-        values      = data.values
+        data = self._apply_time_filter(data, xlim)
+        times = data["time"].values
+        values = data.values
 
         # 5) Prepare figure/axis
         if ax is None:
@@ -1488,24 +1785,24 @@ class FvcomPlotter(PlotHelperMixin):
             fig = ax.figure
 
         # 6) Plot
-        color     = color or self.cfg.plot_color
+        color = color or self.cfg.plot_color
         linestyle = linestyle or "-"
         ax.plot(times, values, color=color, linestyle=linestyle, **kwargs)
-        #if log:
+        # if log:
         #    ax.set_yscale("log")
         # Apply log scale via helper (handles warnings for non-positive data)
         self._apply_log_scale(ax, data, log)
 
         if xlabel:
-            ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize['xlabel'])
+            ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize["xlabel"])
         if ylabel:
-            ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize['ylabel'])
+            ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize["ylabel"])
         if title:
-            ax.set_title(title, fontsize=self.cfg.fontsize['title'])
-        
+            ax.set_title(title, fontsize=self.cfg.fontsize["title"])
+
         # 7) Y‑axis limits
         if ylim is not None:
-            ymin, ymax    = ylim
+            ymin, ymax = ylim
             curr_min, curr_max = ax.get_ylim()
             ymin = curr_min if ymin is None else ymin
             ymax = curr_max if ymax is None else ymax
@@ -1516,11 +1813,24 @@ class FvcomPlotter(PlotHelperMixin):
 
         return fig, ax
 
-    def section_contourf_z(self, da: xr.DataArray, lat: float = None, lon: float = None,
-        line: list[tuple[float, float]] = None, spacing: float = 100.0, xlim: tuple = None, ylim: tuple = None,
-        xlabel: str = "Distance (m)", ylabel: str = "Depth (m)", title: str = None,
-        ax=None, land_color: str = "#A0522D",  # Default seabed/land color (sienna)
-        contourf_kwargs: dict = None, colorbar_kwargs: dict = None, **kwargs):
+    def section_contourf_z(
+        self,
+        da: xr.DataArray,
+        lat: float = None,
+        lon: float = None,
+        line: list[tuple[float, float]] = None,
+        spacing: float = 100.0,
+        xlim: tuple = None,
+        ylim: tuple = None,
+        xlabel: str = "Distance (m)",
+        ylabel: str = "Depth (m)",
+        title: str = None,
+        ax=None,
+        land_color: str = "#A0522D",  # Default seabed/land color (sienna)
+        contourf_kwargs: dict = None,
+        colorbar_kwargs: dict = None,
+        **kwargs,
+    ):
         """
         Plot a vertical section of a 3D variable (da) on FVCOM mesh.
 
@@ -1541,25 +1851,29 @@ class FvcomPlotter(PlotHelperMixin):
         """
 
         # 0 Validate that requested lat/lon lie within the dataset domain
-        lon_vals = self.ds['lon'].values if 'lon' in self.ds else None
-        lat_vals = self.ds['lat'].values if 'lat' in self.ds else None
+        lon_vals = self.ds["lon"].values if "lon" in self.ds else None
+        lat_vals = self.ds["lat"].values if "lat" in self.ds else None
         if lat is not None and lat_vals is not None:
             lat_min, lat_max = float(lat_vals.min()), float(lat_vals.max())
             if not (lat_min <= lat <= lat_max):
-                raise ValueError(f"Latitude {lat} is outside domain bounds [{lat_min}, {lat_max}].")
+                raise ValueError(
+                    f"Latitude {lat} is outside domain bounds [{lat_min}, {lat_max}]."
+                )
         if lon is not None and lon_vals is not None:
             lon_min, lon_max = float(lon_vals.min()), float(lon_vals.max())
             if not (lon_min <= lon <= lon_max):
-                raise ValueError(f"Longitude {lon} is outside domain bounds [{lon_min}, {lon_max}].")
+                raise ValueError(
+                    f"Longitude {lon} is outside domain bounds [{lon_min}, {lon_max}]."
+                )
 
         # Determine vertical dimension
-        vert_dim = 'siglay' if 'siglay' in da.dims else 'siglev'
+        vert_dim = "siglay" if "siglay" in da.dims else "siglev"
 
         # Get depth array at same time
-        z_all = self.ds['z']
-        if 'time' in z_all.dims:
-            if 'time' in da.coords:
-                z_slice = z_all.sel(time=da['time'], method='nearest')
+        z_all = self.ds["z"]
+        if "time" in z_all.dims:
+            if "time" in da.coords:
+                z_slice = z_all.sel(time=da["time"], method="nearest")
             else:
                 z_slice = z_all.isel(time=0)
             z2d = z_slice.values  # (vertical, node)
@@ -1567,15 +1881,16 @@ class FvcomPlotter(PlotHelperMixin):
             z2d = z_all.values
 
         # Prepare mesh triangulation for domain test
-        lon_n = self.ds['lon'].values; lat_n = self.ds['lat'].values
-        tris = self.ds['nv'].values.T - 1
+        lon_n = self.ds["lon"].values
+        lat_n = self.ds["lat"].values
+        tris = self.ds["nv"].values.T - 1
         triang = mtri.Triangulation(lon_n, lat_n, triangles=tris)
         trifinder = triang.get_trifinder()
 
         # Build KDTree on projected nodes for nearest-node lookup
         mean_lon, mean_lat = lon_n.mean(), lat_n.mean()
-        zone = int((mean_lon + 180)//6) + 1
-        hemi = 'north' if mean_lat >= 0 else 'south'
+        zone = int((mean_lon + 180) // 6) + 1
+        hemi = "north" if mean_lat >= 0 else "south"
         proj = pyproj.Proj(f"+proj=utm +zone={zone} +{hemi} +datum=WGS84")
         x_n, y_n = proj(lon_n, lat_n)
         tree = KDTree(np.column_stack((x_n, y_n)))
@@ -1590,7 +1905,9 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             raise ValueError("Specify lat, lon, or line for section.")
 
-        lons, lats, distances = self._sample_transect(lat=lat, lon=lon, line=line, spacing=spacing)
+        lons, lats, distances = self._sample_transect(
+            lat=lat, lon=lon, line=line, spacing=spacing
+        )
         # Domain mask
         tri_idx = trifinder(lons, lats)
         inside = tri_idx != -1
@@ -1602,33 +1919,53 @@ class FvcomPlotter(PlotHelperMixin):
         # Extract variable and depth
         X, Y, V = self._extract_section_data(da, lons, lats, distances)
         # Plot
-        fig = ax.figure if ax else plt.figure(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
-        ax = ax or fig.add_subplot(1,1,1)
+        fig = (
+            ax.figure if ax else plt.figure(figsize=self.cfg.figsize, dpi=self.cfg.dpi)
+        )
+        ax = ax or fig.add_subplot(1, 1, 1)
 
-        # Build DataArray for section: 
+        # Build DataArray for section:
         # - dims: (siglay, distance)
         # - coords:
         #    * distance: 1D array of sampled distances
         #    * depth:    2D array of shape (siglay, distance)
-        sec_da = xr.DataArray(V, dims=("siglay", "distance"),
-            coords={"distance": distances, "depth": (("siglay","distance"), Y)})
-        
+        sec_da = xr.DataArray(
+            V,
+            dims=("siglay", "distance"),
+            coords={"distance": distances, "depth": (("siglay", "distance"), Y)},
+        )
+
         # 1 Prepare contourf args on section-DataArray
-        merged_cf_kwargs, levels, cmap_used, vmin, vmax, extend = \
+        merged_cf_kwargs, levels, cmap_used, vmin, vmax, extend = (
             self._prepare_contourf_args(sec_da, contourf_kwargs, kwargs)
+        )
 
         # 2 use xarray's contourf wrapper (same as ts_contourf)
-        cs = sec_da.plot.contourf(x="distance", y="depth", levels=levels, corner_mask=False, cmap=cmap_used,
-            vmin=vmin, vmax=vmax, extend=extend, linewidths=0, antialiased=False, ax=ax,
-            add_colorbar=False, **merged_cf_kwargs)
-        
-        ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
-        if title: ax.set_title(title)
+        cs = sec_da.plot.contourf(
+            x="distance",
+            y="depth",
+            levels=levels,
+            corner_mask=False,
+            cmap=cmap_used,
+            vmin=vmin,
+            vmax=vmax,
+            extend=extend,
+            linewidths=0,
+            antialiased=False,
+            ax=ax,
+            add_colorbar=False,
+            **merged_cf_kwargs,
+        )
+
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        if title:
+            ax.set_title(title)
         # Set x-axis to distance
         if xlim is not None:
             ax.set_xlim(*xlim)
         else:
-            ax.set_xlim(distances.min(), distances.max())     
+            ax.set_xlim(distances.min(), distances.max())
         # Set y-axis so shallow (near-zero) is at top and deep (large negative) at bottom
         if ylim is not None:
             ax.set_ylim(*ylim)
@@ -1636,25 +1973,53 @@ class FvcomPlotter(PlotHelperMixin):
             ax.set_ylim(np.nanmin(Y), np.nanmax(Y))
 
         # 3 Now that y-limits are fixed, fill seabed and mesh-missing regions
-        bottom_depth = np.nanmin(Y, axis=0)      # seabed profile (deepest mesh)
-        ymin_axis, ymax_axis = ax.get_ylim()     # current axis limits
-        fill_base = min(ymin_axis, ymax_axis)    # lower boundary in data coords
-        mask_land  = np.all(np.isnan(V), axis=0)
+        bottom_depth = np.nanmin(Y, axis=0)  # seabed profile (deepest mesh)
+        ymin_axis, ymax_axis = ax.get_ylim()  # current axis limits
+        fill_base = min(ymin_axis, ymax_axis)  # lower boundary in data coords
+        mask_land = np.all(np.isnan(V), axis=0)
         mask_water = ~mask_land
         # a) fill below seabed line (land patch under ocean)
-        ax.fill_between(distances, bottom_depth, fill_base, where=mask_water,
-            facecolor=land_color, edgecolor=None, zorder=cs.zorder - 0.5,  # between axes background and contourf
-            clip_on=True)
+        ax.fill_between(
+            distances,
+            bottom_depth,
+            fill_base,
+            where=mask_water,
+            facecolor=land_color,
+            edgecolor=None,
+            zorder=cs.zorder - 0.5,  # between axes background and contourf
+            clip_on=True,
+        )
         # b) fill entire vertical for land columns
-        #mask_nan = np.all(np.isnan(V), axis=0)
-        ax.fill_between(distances, fill_base, ymax_axis, where=mask_land,
-            facecolor=land_color, edgecolor=None, zorder=cs.zorder - 0.5, clip_on=True)
+        # mask_nan = np.all(np.isnan(V), axis=0)
+        ax.fill_between(
+            distances,
+            fill_base,
+            ymax_axis,
+            where=mask_land,
+            facecolor=land_color,
+            edgecolor=None,
+            zorder=cs.zorder - 0.5,
+            clip_on=True,
+        )
 
         # Plot the seabed line on top (use true bottom = deepest depth)
-        ax.plot(distances, bottom_depth, color='k', linestyle='-', linewidth=0.5, zorder=cs.zorder + 1)
+        ax.plot(
+            distances,
+            bottom_depth,
+            color="k",
+            linestyle="-",
+            linewidth=0.5,
+            zorder=cs.zorder + 1,
+        )
 
         # Add colorbar
-        cbar = self._make_colorbar(ax, cs, da.attrs.get('long_name', da.name) + (f" ({da.attrs.get('units','')})" if 'units' in da.attrs else ''), colorbar_kwargs or {})
+        cbar = self._make_colorbar(
+            ax,
+            cs,
+            da.attrs.get("long_name", da.name)
+            + (f" ({da.attrs.get('units','')})" if "units" in da.attrs else ""),
+            colorbar_kwargs or {},
+        )
 
         return fig, ax, cbar
 
@@ -1662,8 +2027,13 @@ class FvcomPlotter(PlotHelperMixin):
     # Private helper methods
     # --------------------------------
 
-    def _sample_transect(self, lat: float = None, lon: float = None, line: list[tuple[float, float]] = None,
-        spacing: float = 200.0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _sample_transect(
+        self,
+        lat: float = None,
+        lon: float = None,
+        line: list[tuple[float, float]] = None,
+        spacing: float = 200.0,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Generate evenly spaced sample points along a transect.
         Returns: lons, lats, cumulative distances (m).
@@ -1675,20 +2045,29 @@ class FvcomPlotter(PlotHelperMixin):
         if line:
             pts = line
         elif lat is not None:
-            pts = [(float(self.ds['lon'].min()), lat), (float(self.ds['lon'].max()), lat)]
+            pts = [
+                (float(self.ds["lon"].min()), lat),
+                (float(self.ds["lon"].max()), lat),
+            ]
         elif lon is not None:
-            pts = [(lon, float(self.ds['lat'].min())), (lon, float(self.ds['lat'].max()))]
+            pts = [
+                (lon, float(self.ds["lat"].min())),
+                (lon, float(self.ds["lat"].max())),
+            ]
         else:
             raise ValueError("Specify lat, lon, or line for section.")
 
-        geod = pyproj.Geod(ellps='WGS84')
+        geod = pyproj.Geod(ellps="WGS84")
         samples = [pts[0]]
         for p0, p1 in zip(pts[:-1], pts[1:]):
-            lon0, lat0 = p0; lon1, lat1 = p1
+            lon0, lat0 = p0
+            lon1, lat1 = p1
             _, _, dist = geod.inv(lon0, lat0, lon1, lat1)
             steps = int(dist // spacing)
-            for i in range(1, steps+1):
-                lon_i, lat_i, _ = geod.fwd(lon0, lat0, geod.inv(lon0, lat0, lon1, lat1)[0], i*spacing)
+            for i in range(1, steps + 1):
+                lon_i, lat_i, _ = geod.fwd(
+                    lon0, lat0, geod.inv(lon0, lat0, lon1, lat1)[0], i * spacing
+                )
                 samples.append((lon_i, lat_i))
             samples.append((lon1, lat1))
 
@@ -1696,28 +2075,31 @@ class FvcomPlotter(PlotHelperMixin):
         lats = np.array([p[1] for p in samples])
         dists = np.zeros(len(samples))
         for i in range(1, len(samples)):
-            _, _, seg = geod.inv(lons[i-1], lats[i-1], lons[i], lats[i])
-            dists[i] = dists[i-1] + seg
+            _, _, seg = geod.inv(lons[i - 1], lats[i - 1], lons[i], lats[i])
+            dists[i] = dists[i - 1] + seg
         return lons, lats, dists
 
-    def _extract_section_data(self, da: xr.DataArray, lons: np.ndarray, lats: np.ndarray,
-        dists: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _extract_section_data(
+        self, da: xr.DataArray, lons: np.ndarray, lats: np.ndarray, dists: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Build 2D grids X (distance), Y (depth), and V (values).
         """
         import numpy as np
-        from scipy.spatial import KDTree
         import pyproj
+        from scipy.spatial import KDTree
 
         # Triangulate mesh for domain test
-        lon_n = self.ds['lon'].values; lat_n = self.ds['lat'].values
-        triangles = self.ds['nv'].values.T - 1
+        lon_n = self.ds["lon"].values
+        lat_n = self.ds["lat"].values
+        triangles = self.ds["nv"].values.T - 1
         triang = mtri.Triangulation(lon_n, lat_n, triangles=triangles)
         trifinder = triang.get_trifinder()
 
         # Project nodes to UTM for KDTree
         mean_lon, mean_lat = lon_n.mean(), lat_n.mean()
-        zone = int((mean_lon+180)//6)+1; hemi = 'north' if mean_lat>=0 else 'south'
+        zone = int((mean_lon + 180) // 6) + 1
+        hemi = "north" if mean_lat >= 0 else "south"
         proj = pyproj.Proj(f"+proj=utm +zone={zone} +{hemi} +datum=WGS84")
         x_n, y_n = proj(lon_n, lat_n)
         tree = KDTree(np.column_stack((x_n, y_n)))
@@ -1735,9 +2117,9 @@ class FvcomPlotter(PlotHelperMixin):
         V[:, ~inside] = np.nan
 
         # Extract depth z and mask
-        z_all = self.ds['z']
-        if 'time' in z_all.dims and 'time' in da.coords:
-            z2d = z_all.sel(time=da['time'], method='nearest').values
+        z_all = self.ds["z"]
+        if "time" in z_all.dims and "time" in da.coords:
+            z2d = z_all.sel(time=da["time"], method="nearest").values
         else:
             z2d = z_all.values
         Y = z2d[:, idx_n]
@@ -1746,7 +2128,6 @@ class FvcomPlotter(PlotHelperMixin):
         # Build distance grid
         X = np.broadcast_to(dists[np.newaxis, :], Y.shape)
         return X, Y, V
-
 
     def _prepare_contourf_args(self, da, contourf_kwargs, extra_kwargs):
         """
@@ -1758,15 +2139,15 @@ class FvcomPlotter(PlotHelperMixin):
         merged = {**contourf_kwargs, **extra_kwargs}
 
         # Extract and handle contourf parameters with appropriate defaults
-        levels   = merged.pop("levels", getattr(self.cfg, "levels", None))
-        cmap     = merged.pop("cmap",   getattr(self.cfg, "cmap", None))
-        raw_vmin = merged.pop("vmin",   None)
-        raw_vmax = merged.pop("vmax",   None)
+        levels = merged.pop("levels", getattr(self.cfg, "levels", None))
+        cmap = merged.pop("cmap", getattr(self.cfg, "cmap", None))
+        raw_vmin = merged.pop("vmin", None)
+        raw_vmax = merged.pop("vmax", None)
 
         # Determine vmin and vmax from data if not explicitly provided
         vmin = raw_vmin if raw_vmin is not None else da.min().item()
         vmax = raw_vmax if raw_vmax is not None else da.max().item()
-        #print(f"vmin: {vmin}, vmax: {vmax}")
+        # print(f"vmin: {vmin}, vmax: {vmax}")
 
         # Convert levels if necessary:
         if levels is None:
@@ -1798,24 +2179,29 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             data_min = da.min().item()
             data_max = da.max().item()
-            #print(f"data_min: {data_min}, data_max: {data_max}")
-            #print(f"vmin: {vmin}, vmax: {vmax}")
+            # print(f"data_min: {data_min}, data_max: {data_max}")
+            # print(f"vmin: {vmin}, vmax: {vmax}")
             if vmin <= data_min and vmax >= data_max:
                 extend = "neither"
             elif vmin > data_min and vmax >= data_max:
                 extend = "min"
             elif vmax < data_max and vmin <= data_min:
                 extend = "max"
-                #print("Here")
+                # print("Here")
             else:
                 extend = "both"
-        #print(f"extend: {extend}")
+        # print(f"extend: {extend}")
 
         return merged, levels, cmap, vmin, vmax, extend
 
-    def _make_colorbar(self, ax, mappable, label,
-                       colorbar_kwargs: dict | None = None,
-                       opts: FvcomPlotOptions | None = None):
+    def _make_colorbar(
+        self,
+        ax,
+        mappable,
+        label,
+        colorbar_kwargs: dict | None = None,
+        opts: FvcomPlotOptions | None = None,
+    ):
         """
         Create and attach a colorbar to `ax` for the given mappable (QuadContourSet).
         Obeying priority:
@@ -1832,13 +2218,17 @@ class FvcomPlotter(PlotHelperMixin):
                         Override by opts.cbar_size / cbar_pad / cbar_kwargs
         """
 
-        if opts is not None and opts.colorbar is False:   # ← ここを追加
+        if opts is not None and opts.colorbar is False:  # ← ここを追加
             return None
 
-        size  = (opts.cbar_size if (opts and opts.cbar_size is not None)
-                else self.cfg.cbar_size)
-        pad   = (opts.cbar_pad  if (opts and opts.cbar_pad  is not None)
-                else self.cfg.cbar_pad)
+        size = (
+            opts.cbar_size
+            if (opts and opts.cbar_size is not None)
+            else self.cfg.cbar_size
+        )
+        pad = (
+            opts.cbar_pad if (opts and opts.cbar_pad is not None) else self.cfg.cbar_pad
+        )
 
         extra = dict(self.cfg.cbar_kwargs)
         if opts and opts.cbar_kwargs:
@@ -1847,6 +2237,7 @@ class FvcomPlotter(PlotHelperMixin):
             extra.update(colorbar_kwargs)
 
         from mpl_toolkits.axes_grid1 import make_axes_locatable
+
         divider = make_axes_locatable(ax)
         if isinstance(ax, GeoAxes):
             cax = divider.append_axes("right", size=size, pad=pad, axes_class=plt.Axes)
@@ -1858,23 +2249,26 @@ class FvcomPlotter(PlotHelperMixin):
 
         lb = opts.cbar_label if (opts and opts.cbar_label is not None) else label
         if lb:
-            cbar.set_label(lb,
-                        fontsize=self.cfg.fontsize['cbar_label'],
-                        labelpad=extra.pop("labelpad", 10))
+            cbar.set_label(
+                lb,
+                fontsize=self.cfg.fontsize["cbar_label"],
+                labelpad=extra.pop("labelpad", 10),
+            )
 
         return cbar
 
-    def _format_time_axis(self, ax: plt.Axes, title: str, xlabel: str, ylabel: str,
-                          date_format: str) -> None:
+    def _format_time_axis(
+        self, ax: plt.Axes, title: str, xlabel: str, ylabel: str, date_format: str
+    ) -> None:
         """
         Helper function to format the time axis for time series plots.
         """
-        ax.set_title(title,      fontsize=self.cfg.fontsize['title'])
-        ax.set_xlabel(xlabel,    fontsize=self.cfg.fontsize['xlabel'])
-        ax.set_ylabel(ylabel,    fontsize=self.cfg.fontsize['ylabel'])
+        ax.set_title(title, fontsize=self.cfg.fontsize["title"])
+        ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize["xlabel"])
+        ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize["ylabel"])
         ax.xaxis.set_major_formatter(DateFormatter(date_format))
         ax.figure.autofmt_xdate()
-    
+
     def _apply_time_filter(self, da: xr.DataArray, xlim: tuple | None) -> xr.DataArray:
         """
         Apply time filtering to da based on xlim=(start, end).
@@ -1885,11 +2279,12 @@ class FvcomPlotter(PlotHelperMixin):
 
         start, end = xlim
         start_sel = np.datetime64(start) if start is not None else None
-        end_sel   = np.datetime64(end)   if end   is not None else None
+        end_sel = np.datetime64(end) if end is not None else None
         return da.sel(time=slice(start_sel, end_sel))
 
-    def _slice_time_series(self, da: xr.DataArray, index: int = None,
-                           k: int = None) -> tuple[xr.DataArray, Hashable | None, str | None]:
+    def _slice_time_series(
+        self, da: xr.DataArray, index: int = None, k: int = None
+    ) -> tuple[xr.DataArray, Hashable | None, str | None]:
         """
         Slice a DataArray for 1D or vertical time series.
 
@@ -1900,7 +2295,7 @@ class FvcomPlotter(PlotHelperMixin):
 
         # 3D time series (time, layer, space)
         if "time" in dims and ("siglay" in dims or "siglev" in dims):
-            layer_dim   = "siglay" if "siglay" in dims else "siglev"
+            layer_dim = "siglay" if "siglay" in dims else "siglev"
             spatial_dim = next(d for d in dims if d not in ("time", layer_dim))
             if index is None or k is None:
                 raise ValueError(f"Both index and k are required for dims {dims}")
@@ -1908,7 +2303,7 @@ class FvcomPlotter(PlotHelperMixin):
 
         # 2D time series (time, space)
         elif "time" in dims and ("node" in dims or "nele" in dims):
-            layer_dim   = None
+            layer_dim = None
             spatial_dim = "node" if "node" in dims else "nele"
             if index is None:
                 raise ValueError(f"Index is required for dims {dims}")
@@ -1916,7 +2311,7 @@ class FvcomPlotter(PlotHelperMixin):
 
         # Pure 1D time series (time,)
         elif dims == ("time",):
-            sliced      = da
+            sliced = da
             spatial_dim = layer_dim = None
 
         else:
@@ -1924,9 +2319,18 @@ class FvcomPlotter(PlotHelperMixin):
 
         return sliced, spatial_dim, layer_dim
 
-    def _prepare_ts_labels(self, data: xr.DataArray, spatial_dim: Hashable | None, layer_dim: str | None,
-        index: int | None, k: int | None, rolling_window: int | None,
-        xlabel: str | bool | None, ylabel: str | bool | None, title: str | bool | None) -> tuple[str, str, str]:
+    def _prepare_ts_labels(
+        self,
+        data: xr.DataArray,
+        spatial_dim: Hashable | None,
+        layer_dim: str | None,
+        index: int | None,
+        k: int | None,
+        rolling_window: int | None,
+        xlabel: str | bool | None,
+        ylabel: str | bool | None,
+        title: str | bool | None,
+    ) -> tuple[str, str, str]:
         """
         Prepare and return xlabel, ylabel, title for ts_plot.
 
@@ -1934,38 +2338,42 @@ class FvcomPlotter(PlotHelperMixin):
         """
         # Use long_name or variable name for label base
         long_name = data.attrs.get("long_name", data.name)
-        units     = data.attrs.get("units", "")
+        units = data.attrs.get("units", "")
 
         # Set default xlabel only when None
         if isinstance(xlabel, str):
             xlabel = xlabel.strip()
-        elif xlabel:               # Truthy but not str → True
+        elif xlabel:  # Truthy but not str → True
             xlabel = "Time"
-        else:                      # None, False, "" → no label
+        else:  # None, False, "" → no label
             xlabel = ""
 
         # Set default ylabel only when None
         if isinstance(ylabel, str):
             ylabel = ylabel.strip()
-        elif ylabel:               # Truthy but not str → True
+        elif ylabel:  # Truthy but not str → True
             ylabel = f"{long_name} ({units})"
-        else:                      # None, False, "" → no label
+        else:  # None, False, "" → no label
             ylabel = ""
 
         # Set default title only when True
         if isinstance(title, str):
             title = title.strip()
-        elif title:               # Truthy but not str → True
+        elif title:  # Truthy but not str → True
             # add rolling text if requested
-            roll_txt = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+            roll_txt = (
+                f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+            )
             if spatial_dim:
                 if layer_dim:
                     title = f"Time Series of {long_name} ({spatial_dim}={index}, {layer_dim}={k}){roll_txt}"
                 else:
-                    title = f"Time Series of {long_name} ({spatial_dim}={index}){roll_txt}"
+                    title = (
+                        f"Time Series of {long_name} ({spatial_dim}={index}){roll_txt}"
+                    )
             else:
                 title = f"Time Series of {long_name}{roll_txt}"
-        else:                      # None, False, "" → no label
+        else:  # None, False, "" → no label
             xlabel = ""
 
         # Build title only when True
@@ -1975,20 +2383,26 @@ class FvcomPlotter(PlotHelperMixin):
             pass
         else:
 
-        #if title is None:
+            # if title is None:
             # add rolling text if requested
-            roll_txt = f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+            roll_txt = (
+                f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
+            )
             if spatial_dim:
                 if layer_dim:
                     title = f"Time Series of {long_name} ({spatial_dim}={index}, {layer_dim}={k}){roll_txt}"
                 else:
-                    title = f"Time Series of {long_name} ({spatial_dim}={index}){roll_txt}"
+                    title = (
+                        f"Time Series of {long_name} ({spatial_dim}={index}){roll_txt}"
+                    )
             else:
                 title = f"Time Series of {long_name}{roll_txt}"
 
         return xlabel, ylabel, title
 
-    def _apply_log_scale(self, ax: plt.Axes, data: xr.DataArray, log_flag: bool) -> None:
+    def _apply_log_scale(
+        self, ax: plt.Axes, data: xr.DataArray, log_flag: bool
+    ) -> None:
         """
         Apply logarithmic scale to the y-axis if requested, using proper locator and formatter.
         """
@@ -1998,6 +2412,7 @@ class FvcomPlotter(PlotHelperMixin):
         # Only positive values can be plotted on a log scale
         if data.min().item() <= 0:
             import warnings
+
             warnings.warn(
                 "Log scale requested but data contains non-positive values; skipping log scale."
             )
@@ -2008,19 +2423,22 @@ class FvcomPlotter(PlotHelperMixin):
         ax.yaxis.set_major_locator(LogLocator(base=10))
         ax.yaxis.set_major_formatter(LogFormatter())
 
-    def _apply_rolling(self, da: xr.DataArray, window: int | None = None, min_periods: int | None=None) -> xr.DataArray:
+    def _apply_rolling(
+        self,
+        da: xr.DataArray,
+        window: int | None = None,
+        min_periods: int | None = None,
+    ) -> xr.DataArray:
         """
         Apply centered rolling mean on time axis with optional min_periods.
         """
         if window is None:
             return da
-        mp = min_periods if min_periods is not None else window//2 + 1
+        mp = min_periods if min_periods is not None else window // 2 + 1
         return da.rolling(time=window, center=True, min_periods=mp).mean()
 
     def _interp_uv_to_centers(
-        self,
-        u: xr.DataArray,
-        v: xr.DataArray
+        self, u: xr.DataArray, v: xr.DataArray
     ) -> tuple[xr.DataArray, xr.DataArray]:
         """
         Return velocities located at cell centers.
@@ -2034,13 +2452,17 @@ class FvcomPlotter(PlotHelperMixin):
 
         # case 2: node-based -> average three surrounding nodes
         if "node" in u.dims and "node" in v.dims:
-            idx = self.ds["nv_zero"].values          # (nele, 3)
-            uc = (u.isel(node=xr.DataArray(idx[:, 0], dims="nele")) +
-                  u.isel(node=xr.DataArray(idx[:, 1], dims="nele")) +
-                  u.isel(node=xr.DataArray(idx[:, 2], dims="nele"))) / 3.0
-            vc = (v.isel(node=xr.DataArray(idx[:, 0], dims="nele")) +
-                  v.isel(node=xr.DataArray(idx[:, 1], dims="nele")) +
-                  v.isel(node=xr.DataArray(idx[:, 2], dims="nele"))) / 3.0
+            idx = self.ds["nv_zero"].values  # (nele, 3)
+            uc = (
+                u.isel(node=xr.DataArray(idx[:, 0], dims="nele"))
+                + u.isel(node=xr.DataArray(idx[:, 1], dims="nele"))
+                + u.isel(node=xr.DataArray(idx[:, 2], dims="nele"))
+            ) / 3.0
+            vc = (
+                v.isel(node=xr.DataArray(idx[:, 0], dims="nele"))
+                + v.isel(node=xr.DataArray(idx[:, 1], dims="nele"))
+                + v.isel(node=xr.DataArray(idx[:, 2], dims="nele"))
+            ) / 3.0
             return uc, vc
 
         # unsupported dimension set
@@ -2091,7 +2513,7 @@ class FvcomPlotter(PlotHelperMixin):
 
         # -- vertical reduction first ------------------------------------
         op_vert = reduce.get("siglay")
-        if "siglay" in u3d.dims:                 # remain only if not sliced away
+        if "siglay" in u3d.dims:  # remain only if not sliced away
             if op_vert == "thickness":
                 # weighted average using physical layer thickness
                 w = self._layer_thickness(siglay=siglay_sel, time_sel=time_sel)
@@ -2107,7 +2529,7 @@ class FvcomPlotter(PlotHelperMixin):
 
         # -- temporal reduction second -----------------------------------
         op_time = reduce.get("time")
-        if "time" in u3d.dims:                   # remain only if not sliced away
+        if "time" in u3d.dims:  # remain only if not sliced away
             if op_time == "mean":
                 u3d = u3d.mean("time")
                 v3d = v3d.mean("time")
@@ -2137,6 +2559,7 @@ class FvcomPlotter(PlotHelperMixin):
         Return suitable skip value so that plotted arrows ≈ nele/base.
         """
         import math
+
         return max(1, int(math.sqrt(nele / base)))
 
     def _apply_indexer(self, da: xr.DataArray, dim: str, idx):
@@ -2147,6 +2570,7 @@ class FvcomPlotter(PlotHelperMixin):
         * If .sel() fails (KeyError), raise a clear ValueError for the user.
         """
         from collections.abc import Sequence
+
         import numpy as np
 
         # --- 1) decide whether idx looks positional ------------------
@@ -2155,9 +2579,8 @@ class FvcomPlotter(PlotHelperMixin):
             is_positional = True
         elif isinstance(idx, slice):
             is_positional = (
-                (idx.start is None or isinstance(idx.start, (int, np.integer))) and
-                (idx.stop  is None or isinstance(idx.stop,  (int, np.integer)))
-            )
+                idx.start is None or isinstance(idx.start, (int, np.integer))
+            ) and (idx.stop is None or isinstance(idx.stop, (int, np.integer)))
         elif isinstance(idx, Sequence):
             is_positional = all(isinstance(i, (int, np.integer)) for i in idx)
 
@@ -2188,7 +2611,7 @@ class FvcomPlotter(PlotHelperMixin):
             return None
 
         arr = self.ds["time"].values  # 1-D array of coordinate values
-        dtype_kind = arr.dtype.kind   # 'M' for datetime64, 'i'/'u' for int
+        dtype_kind = arr.dtype.kind  # 'M' for datetime64, 'i'/'u' for int
 
         # --- A. numeric coordinate (integer or float) -----------------
         if dtype_kind in ("i", "u", "f"):
@@ -2216,8 +2639,8 @@ class FvcomPlotter(PlotHelperMixin):
         Dimensions → ('time', 'siglay', 'nele')
         """
         # 1) depth and sea level on node points
-        H_node   = self.ds["h"]                   # (node)
-        zeta_node = self.ds["zeta"]               # (time, node)
+        H_node = self.ds["h"]  # (node)
+        zeta_node = self.ds["zeta"]  # (time, node)
         if time_sel is not None:
             zeta_node = self._apply_indexer(zeta_node, "time", time_sel)
 
@@ -2239,20 +2662,21 @@ class FvcomPlotter(PlotHelperMixin):
         # 4) convert node → cell-centre (nele) by arithmetic mean
         nv = self.ds["nv_zero"].values  # (nele, 3) node indices (0-based)
         thick_cell = (
-            thick_node.isel(node=xr.DataArray(nv[:, 0], dims="nele")) +
-            thick_node.isel(node=xr.DataArray(nv[:, 1], dims="nele")) +
-            thick_node.isel(node=xr.DataArray(nv[:, 2], dims="nele"))
-        ) / 3.0                         # dims now ('time','siglay','nele')
+            thick_node.isel(node=xr.DataArray(nv[:, 0], dims="nele"))
+            + thick_node.isel(node=xr.DataArray(nv[:, 1], dims="nele"))
+            + thick_node.isel(node=xr.DataArray(nv[:, 2], dims="nele"))
+        ) / 3.0  # dims now ('time','siglay','nele')
 
         return thick_cell
 
     def _node2cell_mean(self, da_node):
-        nv = self.ds["nv_zero"].values        # (nele, 3) node indices
+        nv = self.ds["nv_zero"].values  # (nele, 3) node indices
         return (
-            da_node.isel(node=xr.DataArray(nv[:, 0], dims="nele")) +
-            da_node.isel(node=xr.DataArray(nv[:, 1], dims="nele")) +
-            da_node.isel(node=xr.DataArray(nv[:, 2], dims="nele"))
+            da_node.isel(node=xr.DataArray(nv[:, 0], dims="nele"))
+            + da_node.isel(node=xr.DataArray(nv[:, 1], dims="nele"))
+            + da_node.isel(node=xr.DataArray(nv[:, 2], dims="nele"))
         ) / 3.0
+
 
 # ------------------------------------------------------------------
 # Backward-compat API alias (old notebook examples expect this name)

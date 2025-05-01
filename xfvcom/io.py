@@ -5,31 +5,43 @@ from pathlib import Path
 # --- third-party ------------------------------------------------------
 import numpy as np
 import pandas as pd
-import xarray as xr
 import pyproj
+import xarray as xr
 
 # --- package internal -------------------------------------------------
 from .utils.helpers_utils import ensure_time_index
+
 
 class FvcomDataLoader:
     """
     Responsible for loading FVCOM output NetCDF files into an xarray.Dataset.
     """
+
     # def __init__(self, base_path=None, ncfile=None, obcfile_path=None,
-    def __init__(self, ncfile_path=None, obcfile_path=None,
-                 engine="netcdf4", chunks=None,
-                 utm2geo=True, zone=54, north=True,
-                 inverse=False, time_tolerance=None, verbose=False, **kwargs):
+    def __init__(
+        self,
+        ncfile_path=None,
+        obcfile_path=None,
+        engine="netcdf4",
+        chunks=None,
+        utm2geo=True,
+        zone=54,
+        north=True,
+        inverse=False,
+        time_tolerance=None,
+        verbose=False,
+        **kwargs,
+    ):
         """
         Initialize the FvcomDataLoader instance.
-        
+
         Parameters:
         #- base_path: Directory path where the NetCDF file is located.
         #- ncfile: Name of the NetCDF file to load.
         - ncfile_path: Netcdf file path
         - obcfile_path: Path to the open boundary node file.
         - engine: {"netcdf4", "scipy", "pydap", "h5netcdf", "zarr", None}, installed backend.
-        - chunks: Chunk size for dask array. Default is "auto".  
+        - chunks: Chunk size for dask array. Default is "auto".
         - utm2geo: Convert UTM coordinates to geographic (lon, lat).
         - zone: UTM zone number.
         - north: True if the UTM zone is in the northern hemisphere.
@@ -48,35 +60,34 @@ class FvcomDataLoader:
         self.zone = zone
         self.north = north
         self.inverse = inverse
-        #self.time_tolerence = time_tolerence
+        # self.time_tolerence = time_tolerence
         self.ds = self._load_dataset()
-        if 'time' in self.ds.dims:
+        if "time" in self.ds.dims:
             if time_tolerance:
                 self._time_tolerence(time_tolerance)
-        if all(var in self.ds for var in ['x', 'y', 'xc', 'yc']):
+        if all(var in self.ds for var in ["x", "y", "xc", "yc"]):
             if self.utm2geo:
                 self._convert_utm_to_geo()
-        if all(var in self.ds for var in ['zeta', 'siglay', 'h']):
+        if all(var in self.ds for var in ["zeta", "siglay", "h"]):
             self._add_depth_variables()
-        if 'nv' in self.ds:
-            #self.ds['nv_zero'] = xr.DataArray(self.ds['nv'].values.T - 1)
-            #self.ds['nv_zero'].attrs['long_name'] = 'nodes surrounding element in zero-based for matplotlib'
+        if "nv" in self.ds:
+            # self.ds['nv_zero'] = xr.DataArray(self.ds['nv'].values.T - 1)
+            # self.ds['nv_zero'].attrs['long_name'] = 'nodes surrounding element in zero-based for matplotlib'
             self._setup_nv_ccw()
 
         if "siglay" in self.ds and "siglay_width" not in self.ds:
             if "siglev" in self.ds:
                 # use first node; all nodes are identical in sigma space
                 d_sigma = -self.ds["siglev"].isel(node=0).diff("siglev")
-                d_sigma = d_sigma.rename({"siglev": "siglay"})    # dims: ('siglay')
+                d_sigma = d_sigma.rename({"siglev": "siglay"})  # dims: ('siglay')
             else:
                 nl = self.ds.dims["siglay"]
                 d_sigma = xr.DataArray(np.ones(nl) / nl, dims="siglay")
 
-            d_sigma.attrs.update({
-                "long_name": "sigma layer thickness (positive)",
-                "units": "1"
-            })
-            self.ds["siglay_width"] = d_sigma      # only ('siglay'), no 'node'
+            d_sigma.attrs.update(
+                {"long_name": "sigma layer thickness (positive)", "units": "1"}
+            )
+            self.ds["siglay_width"] = d_sigma  # only ('siglay'), no 'node'
 
         # ERSEM O2 concentration conversion to mg/L
         if "O2_o" in self.ds.data_vars:
@@ -87,34 +98,40 @@ class FvcomDataLoader:
             attrs["units"] = "mg/L"
             attrs["long_name"] = r"O$_2$"
             self.ds["O2_o"].attrs = attrs
-        
+
         # Load FVCOM open boundary node if provided
         if obcfile_path:
             if os.path.isfile(obcfile_path):
-                #print(f"Loading open boundary nodes from {obcfile_path}")
-                df = pd.read_csv(obcfile_path, header=None, skiprows=1, delim_whitespace=True)
-                node_bc = df.iloc[:,1].values - 1
+                # print(f"Loading open boundary nodes from {obcfile_path}")
+                df = pd.read_csv(
+                    obcfile_path, header=None, skiprows=1, delim_whitespace=True
+                )
+                node_bc = df.iloc[:, 1].values - 1
                 if verbose:
                     print(f"{node_bc}")
-                self.ds['node_bc'] = xr.DataArray(node_bc, dims=("obc_node"))
-                self.ds['node_bc'].attrs['long_name'] = 'open boundary nodes'
+                self.ds["node_bc"] = xr.DataArray(node_bc, dims=("obc_node"))
+                self.ds["node_bc"].attrs["long_name"] = "open boundary nodes"
                 print(f"Open boundary nodes loaded successfully from {obcfile_path}")
-                #print(self.ds.node_bc.values)
+                # print(self.ds.node_bc.values)
 
     def _setup_nv_ccw(self):
         """
         Set up the counterclockwise nv_ccw.
         """
-        self.ds['nv_zero'] = xr.DataArray(self.ds['nv'].values.T - 1)
-        self.ds['nv_zero'].attrs['long_name'] = 'nodes surrounding element in zero-based for matplotlib'
+        self.ds["nv_zero"] = xr.DataArray(self.ds["nv"].values.T - 1)
+        self.ds["nv_zero"].attrs[
+            "long_name"
+        ] = "nodes surrounding element in zero-based for matplotlib"
         # Extract triangle connectivity
         nv_ccw = self.ds["nv"].values.T - 1
-        nv_ccw = self.ds['nv_zero'].values
+        nv_ccw = self.ds["nv_zero"].values
         # Reverse node order for counter-clockwise triangles that matplotlib expects.
         nv_ccw = nv_ccw[:, ::-1]
         # print(nv_ccw.shape)
-        self.ds['nv_ccw'] = xr.DataArray(nv_ccw, dims=("nele", "three"))
-        self.ds['nv_ccw'].attrs['long_name'] = 'nodes surrounding element in unti-clockwise direction for matplotlib'
+        self.ds["nv_ccw"] = xr.DataArray(nv_ccw, dims=("nele", "three"))
+        self.ds["nv_ccw"].attrs[
+            "long_name"
+        ] = "nodes surrounding element in unti-clockwise direction for matplotlib"
 
     def slice_by_time(self, start, end, copy=False, reset_time=False):
         """
@@ -140,15 +157,19 @@ class FvcomDataLoader:
 
             # Check if start and end are valid
             if start > end:
-                print("Warning: Start time is later than end time. Swapping the values.")
+                print(
+                    "Warning: Start time is later than end time. Swapping the values."
+                )
                 start, end = end, start
 
             # Check if time range is within dataset bounds
             dataset_time_min = self.ds["time"].min().values
             dataset_time_max = self.ds["time"].max().values
             if start < dataset_time_min or end > dataset_time_max:
-                print(f"Warning: Specified time range ({start} to {end}) is out of dataset bounds "
-                      f"({dataset_time_min} to {dataset_time_max}).")
+                print(
+                    f"Warning: Specified time range ({start} to {end}) is out of dataset bounds "
+                    f"({dataset_time_min} to {dataset_time_max})."
+                )
 
             # Perform slicing
             sliced_ds = self.ds.sel(time=slice(start, end))
@@ -157,7 +178,9 @@ class FvcomDataLoader:
 
             # Reset time dimension if requested
             if reset_time:
-                sliced_ds["time"] = (sliced_ds["time"] - sliced_ds["time"].min()) / np.timedelta64(1, "s")
+                sliced_ds["time"] = (
+                    sliced_ds["time"] - sliced_ds["time"].min()
+                ) / np.timedelta64(1, "s")
                 sliced_ds["time"].attrs["units"] = "seconds since start of slice"
 
             print(f"Slicing successful: Dataset sliced from {start} to {end}.")
@@ -169,8 +192,13 @@ class FvcomDataLoader:
 
     def _load_dataset(self):
         try:
-            ds = xr.open_dataset(self.ncfile_path, engine=self.engine, chunks=self.chunks, decode_times=self.decode_times)
-            ds = ds.drop_vars('Itime2') if 'Itime2' in ds.variables else ds
+            ds = xr.open_dataset(
+                self.ncfile_path,
+                engine=self.engine,
+                chunks=self.chunks,
+                decode_times=self.decode_times,
+            )
+            ds = ds.drop_vars("Itime2") if "Itime2" in ds.variables else ds
             print(f"Dataset loaded successfully from {self.ncfile_path}")
             return xr.decode_cf(ds)
         except FileNotFoundError:
@@ -205,29 +233,35 @@ class FvcomDataLoader:
             # siglay を numpy 配列として取得し、形状を (siglay, 1, node) にブロードキャストしてから、(time, siglay, node) にリシェイプ
             # Obtain siglay as a numpy array and broadcast the shape (siglay, 1, node) and reshape to (time, siglay, node).
             siglay_np = self.ds.siglay.values[:, np.newaxis, :]
-            siglay_broadcasted = np.broadcast_to(siglay_np, (siglay_size, time_size, node_size)).transpose(1, 0, 2)
+            siglay_broadcasted = np.broadcast_to(
+                siglay_np, (siglay_size, time_size, node_size)
+            ).transpose(1, 0, 2)
             # zeta はすでに (time, node) の形状なので、そのまま使用
             # zeta is already in the shape of (time, node), so use it as is.
             zeta_np = self.ds.zeta.values
             # 計算実行: zeta + siglay * (h + zeta)、ここで適切にブロードキャストを使用
             # Execute the calculation: zeta + siglay * (h + zeta) using broadcasting appropriately.
-            result = zeta_np[:, np.newaxis, :] + siglay_broadcasted * (h_broadcasted + zeta_np[:, np.newaxis, :])
+            result = zeta_np[:, np.newaxis, :] + siglay_broadcasted * (
+                h_broadcasted + zeta_np[:, np.newaxis, :]
+            )
             # 新しい DataArray を作成
             # Create a new DataArray.
             # new_da_corrected = xr.DataArray(result, dims=("time", "siglay", "node"))
-            self.ds['z'] = xr.DataArray(result, dims=("time", "siglay", "node"))
-            self.ds['z_dfs'] = (self.ds.zeta - self.ds.z).transpose("time", "siglay", "node")
+            self.ds["z"] = xr.DataArray(result, dims=("time", "siglay", "node"))
+            self.ds["z_dfs"] = (self.ds.zeta - self.ds.z).transpose(
+                "time", "siglay", "node"
+            )
             ## Add attributes
-            self.ds['z'].attrs['long_name'] = 'Depth'
-            self.ds['z'].attrs['standard_name'] = 'Depth at siglay'
-            self.ds['z'].attrs['units'] = 'm'
-            self.ds['z'].attrs['positive'] = 'up'
-            self.ds['z'].attrs['origin'] = 'still water lavel'
-            self.ds['z_dfs'].attrs['long_name'] = 'Depth'
-            self.ds['z_dfs'].attrs['standard_name'] = 'Depth at siglay from the surface'
-            self.ds['z_dfs'].attrs['units'] = 'm'
-            self.ds['z_dfs'].attrs['positive'] = 'down'
-            self.ds['z_dfs'].attrs['origin'] = 'surface'
+            self.ds["z"].attrs["long_name"] = "Depth"
+            self.ds["z"].attrs["standard_name"] = "Depth at siglay"
+            self.ds["z"].attrs["units"] = "m"
+            self.ds["z"].attrs["positive"] = "up"
+            self.ds["z"].attrs["origin"] = "still water lavel"
+            self.ds["z_dfs"].attrs["long_name"] = "Depth"
+            self.ds["z_dfs"].attrs["standard_name"] = "Depth at siglay from the surface"
+            self.ds["z_dfs"].attrs["units"] = "m"
+            self.ds["z_dfs"].attrs["positive"] = "down"
+            self.ds["z_dfs"].attrs["origin"] = "surface"
         except Exception as e:
             raise ValueError(f"Error in adding depth variables: {e}")
 
@@ -239,26 +273,30 @@ class FvcomDataLoader:
         return transformer.transform(x, y)
 
     def _add_trailing_slash(self, directory_path):
-        '''
+        """
         Add slash ("/") if directory path does not end with slash.
-        '''
+        """
 
-        if not directory_path.endswith('/'):
-            directory_path += '/'
+        if not directory_path.endswith("/"):
+            directory_path += "/"
         return directory_path
-    
+
     def _time_tolerence(self, time_tolerance):
         is_positive_integer = isinstance(time_tolerance, int) and time_tolerance > 0
         if not is_positive_integer:
-            print("Error: time_tolerance must be a positive integer in minutes. Continuing without correction.")
+            print(
+                "Error: time_tolerance must be a positive integer in minutes. Continuing without correction."
+            )
             return None
-        tolerance = np.timedelta64(time_tolerance, 'm')
+        tolerance = np.timedelta64(time_tolerance, "m")
 
         # 時間を datetime64 に変換
         # Convert time to datetime64
-        time = self.ds['time'].values.astype('datetime64[s]')
-        #time = self.ds['time'].values
+        time = self.ds["time"].values.astype("datetime64[s]")
+        # time = self.ds['time'].values
         # 誤差範囲内で正時にスナップ
         # Snap to the nearest hour within the tolerance range
-        corrected_time = (time + tolerance // 2).astype('datetime64[h]').astype('datetime64[ns]')
-        self.ds['time'] = corrected_time
+        corrected_time = (
+            (time + tolerance // 2).astype("datetime64[h]").astype("datetime64[ns]")
+        )
+        self.ds["time"] = corrected_time

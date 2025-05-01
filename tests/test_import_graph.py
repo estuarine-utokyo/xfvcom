@@ -1,16 +1,19 @@
 # ~/Github/xfvcom/tests/test_import_graph.py
 import importlib
 import pkgutil
-import xfvcom
 from pathlib import Path
 
+import xfvcom
+
 PKG_ROOT = Path(xfvcom.__file__).parent
+
 
 def iter_submodules(pkg_name: str):
     """Yield all sub-modules of `pkg_name` (depth-first)."""
     pkg = importlib.import_module(pkg_name)
     for mod in pkgutil.walk_packages(pkg.__path__, f"{pkg_name}."):
         yield mod.name
+
 
 def test_no_circular_utils_dependency():
     """
@@ -28,4 +31,3 @@ def test_no_circular_utils_dependency():
             continue
         text = Path(source).read_text()
         assert bad_ref not in text, f"{mod_name} imports {bad_ref}"
-

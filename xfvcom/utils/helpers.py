@@ -1,29 +1,33 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING
-from typing import Callable, Any
-from typing import Optional
+
+from typing import TYPE_CHECKING, Any, Callable, Optional
+
 if TYPE_CHECKING:
-# Forward-reference only for static type-checking; avoids import cycle
+    # Forward-reference only for static type-checking; avoids import cycle
     from ..plot.core import FvcomPlotter
 
-import pandas as pd
-import matplotlib.pyplot as plt
-from math import ceil
-import os
-import numpy as np
-import imageio.v2 as imageio
-from moviepy.editor import ImageSequenceClip
-import multiprocessing
-from multiprocessing import Pool
-from ..utils.helpers_utils import clean_kwargs, unpack_plot_kwargs
 import inspect
+import multiprocessing
+import os
 import subprocess
+from math import ceil
+from multiprocessing import Pool
+
 import cartopy.crs as ccrs
-from tqdm import tqdm
+import imageio.v2 as imageio
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import xarray as xr
+from moviepy.editor import ImageSequenceClip
+from tqdm import tqdm
+
 from ..plot_options import FvcomPlotOptions
+from ..utils.helpers_utils import clean_kwargs, unpack_plot_kwargs
+
 # import dask
 # from dask.delayed import delayed
+
 
 def create_gif(frames, output_gif=None, fps=10, cleanup=False):
     """
@@ -55,7 +59,9 @@ def create_gif(frames, output_gif=None, fps=10, cleanup=False):
     print(f"GIF animation saved at: {output_gif}")
 
 
-def create_gif_with_batch(frames, output_gif=None, fps=10, batch_size=500, cleanup=False):
+def create_gif_with_batch(
+    frames, output_gif=None, fps=10, batch_size=500, cleanup=False
+):
     """
     Obsolete: This may not be superior to create_gif.
     Create a GIF animation from a list of frames with memory-efficient batch processing.
@@ -76,16 +82,20 @@ def create_gif_with_batch(frames, output_gif=None, fps=10, batch_size=500, clean
 
     # Temporary files for batched GIFs
     temp_gifs = []
-    total_batches = (len(frames) + batch_size - 1) // batch_size  # Calculate total number of batches
+    total_batches = (
+        len(frames) + batch_size - 1
+    ) // batch_size  # Calculate total number of batches
 
     # Process frames in batches
     for i, batch_start in enumerate(range(0, len(frames), batch_size), start=1):
-        batch_frames = frames[batch_start:batch_start + batch_size]
+        batch_frames = frames[batch_start : batch_start + batch_size]
         temp_gif = f"{output_gif}_batch_{i}.gif"
         temp_gifs.append(temp_gif)
 
         with imageio.get_writer(temp_gif, mode="I", fps=fps) as writer:
-            for frame in tqdm(batch_frames, desc=f"Batch {i}/{total_batches}", unit="frame"):
+            for frame in tqdm(
+                batch_frames, desc=f"Batch {i}/{total_batches}", unit="frame"
+            ):
                 writer.append_data(imageio.imread(frame))
 
     # Combine batched GIFs into final GIF
@@ -103,6 +113,7 @@ def create_gif_with_batch(frames, output_gif=None, fps=10, batch_size=500, clean
             os.remove(frame)
 
     print(f"GIF animation saved at: {output_gif}")
+
 
 def create_mp4(frames, output_mp4=None, fps=10, cleanup=True):
     """
@@ -129,7 +140,8 @@ def create_mp4(frames, output_mp4=None, fps=10, cleanup=True):
         for frame in frames:
             os.remove(frame)
 
-    #print(f"Saved the MP4 animation as '{output_mp4}'.")
+    # print(f"Saved the MP4 animation as '{output_mp4}'.")
+
 
 def convert_gif_to_mp4(input_gif, output_mp4):
     """
@@ -144,19 +156,27 @@ def convert_gif_to_mp4(input_gif, output_mp4):
     """
     command = [
         "ffmpeg",
-        "-y",                      # Skip overwrite confirmation
-        "-i", input_gif,           # Input GIF file
-        "-movflags", "+faststart", # Enable fast start for streaming
-        "-pix_fmt", "yuv420p",     # Pixel format for compatibility
-        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",  # Ensure even dimensions
-        output_mp4
+        "-y",  # Skip overwrite confirmation
+        "-i",
+        input_gif,  # Input GIF file
+        "-movflags",
+        "+faststart",  # Enable fast start for streaming
+        "-pix_fmt",
+        "yuv420p",  # Pixel format for compatibility
+        "-vf",
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2",  # Ensure even dimensions
+        output_mp4,
     ]
     # subprocess.run(command, check=True)
-    subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(
+        command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
     print(f"Converted from {input_gif} to {output_mp4}.")
 
 
-def create_gif_from_frames(frames_dir, output_gif, fps=10, prefix=None, batch_size=500, cleanup=False):
+def create_gif_from_frames(
+    frames_dir, output_gif, fps=10, prefix=None, batch_size=500, cleanup=False
+):
     """
     Revised this method
     Create a GIF animation from PNG frames in batches to handle memory constraints.
@@ -172,27 +192,32 @@ def create_gif_from_frames(frames_dir, output_gif, fps=10, prefix=None, batch_si
     Returns:
     - None
     """
-    frames = sorted([
-        os.path.join(frames_dir, f) for f in os.listdir(frames_dir)
-        if f.endswith('.png') and (prefix is None or f.startswith(prefix))
-    ])
-    #frames = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir) if f.endswith('.png')])
+    frames = sorted(
+        [
+            os.path.join(frames_dir, f)
+            for f in os.listdir(frames_dir)
+            if f.endswith(".png") and (prefix is None or f.startswith(prefix))
+        ]
+    )
+    # frames = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir) if f.endswith('.png')])
     temp_gifs = []  # Temporary GIFs for each batch
 
     total_batches = (len(frames) + batch_size - 1) // batch_size  # 総バッチ数を計算
 
     for i, batch_start in enumerate(range(0, len(frames), batch_size), start=1):
-        batch_frames = frames[batch_start:batch_start+batch_size]
+        batch_frames = frames[batch_start : batch_start + batch_size]
         temp_gif = f"{output_gif}_batch_{i}.gif"
         temp_gifs.append(temp_gif)
 
         with imageio.get_writer(temp_gif, mode="I", fps=fps) as writer:
-            for frame in tqdm(batch_frames, desc=f"Batch {i}/{total_batches}", unit="frame"):
+            for frame in tqdm(
+                batch_frames, desc=f"Batch {i}/{total_batches}", unit="frame"
+            ):
                 writer.append_data(imageio.imread(frame))
     print("Temporary GIFs created successfully.")
-    
+
     # Combine temporary GIFs into the final GIF
-    #with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
+    # with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
     #    for temp_gif in temp_gifs:
     #        gif_reader = imageio.get_reader(temp_gif)
     #        for frame in gif_reader:
@@ -200,7 +225,7 @@ def create_gif_from_frames(frames_dir, output_gif, fps=10, prefix=None, batch_si
     #        gif_reader.close()
     #        if cleanup:
     #            os.remove(temp_gif)
-    
+
     # Combine temporary GIFs into the final GIF
     # Robust version of the above code
     with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
@@ -222,8 +247,17 @@ class FrameGenerator:
         """
         Default frame generation logic.
         """
-        cls, time, da, plotter, output_dir, base_name, post_process_func, plot_kwargs = args
-        
+        (
+            cls,
+            time,
+            da,
+            plotter,
+            output_dir,
+            base_name,
+            post_process_func,
+            plot_kwargs,
+        ) = args
+
         # verbose flag (default: False)
         verbose = plot_kwargs.pop("verbose", False)
 
@@ -235,7 +269,14 @@ class FrameGenerator:
 
         save_path = os.path.join(output_dir, f"{base_name}_{time}.png")
 
-        cls.plot_data(da=da, time=time, plotter=plotter, save_path=save_path, post_process_func=post_process_func, **plot_kwargs)
+        cls.plot_data(
+            da=da,
+            time=time,
+            plotter=plotter,
+            save_path=save_path,
+            post_process_func=post_process_func,
+            **plot_kwargs,
+        )
         return save_path
 
     @staticmethod
@@ -243,49 +284,66 @@ class FrameGenerator:
         """
         各プロセスが `time_slices` に含まれる複数の time ステップを一括処理
         """
-        
-        cls, time_slice, da, plotter, output_dir, base_name, post_process_func, plot_kwargs = args
+
+        (
+            cls,
+            time_slice,
+            da,
+            plotter,
+            output_dir,
+            base_name,
+            post_process_func,
+            plot_kwargs,
+        ) = args
         verbose = plot_kwargs.pop("verbose", False)
 
         # Unpack and clean plot_kwargs
-        #print("Original plot_kwargs:", plot_kwargs)
+        # print("Original plot_kwargs:", plot_kwargs)
         plot_kwargs = unpack_plot_kwargs(plot_kwargs)
-        #print("Unpacked plot_kwargs:", plot_kwargs)
+        # print("Unpacked plot_kwargs:", plot_kwargs)
         plot_kwargs = clean_kwargs(plotter.plot_2d, plot_kwargs)
-        #print("Cleaned plot_kwargs:", plot_kwargs)
-        #save_path = os.path.join(output_dir, f"{base_name}_{time}.png")
+        # print("Cleaned plot_kwargs:", plot_kwargs)
+        # save_path = os.path.join(output_dir, f"{base_name}_{time}.png")
 
         # 各プロセス専用フォルダを作成（ディスク I/O 競争を防止）
         rank = multiprocessing.current_process()._identity[0]  # プロセスID
         proc_output_dir = os.path.join(output_dir, f"proc_{rank}")
         os.makedirs(proc_output_dir, exist_ok=True)
-        
+
         # メモリ上に確保（I/O オーバーヘッド削減）
         da = da.isel(time=time_slice).load()
 
         frames = []
-        class_label = cls.__name__   # e.g., "FrameGenerator"
+        class_label = cls.__name__  # e.g., "FrameGenerator"
         for i, t in enumerate(time_slice):
             if verbose:
                 print(f"[{class_label}] rank={rank}  time={t}")
             save_path = os.path.join(proc_output_dir, f"{base_name}_{t}.png")
-            frame_data = da.isel(time=i) if 'time' in da.dims else da
+            frame_data = da.isel(time=i) if "time" in da.dims else da
 
-            cls.plot_data(da=frame_data, time=t, plotter=plotter, save_path=save_path, post_process_func=post_process_func, **plot_kwargs)
+            cls.plot_data(
+                da=frame_data,
+                time=t,
+                plotter=plotter,
+                save_path=save_path,
+                post_process_func=post_process_func,
+                **plot_kwargs,
+            )
             frames.append(save_path)
 
         return frames
 
     @staticmethod
-    def plot_data(*,
-                  da: xr.DataArray | None = None,
-                  time: int | None = None,
-                  plotter: "FvcomPlotter",
-                  save_path: str | None = None,
-                  post_process_func: Callable[..., None] | None = None,
-                  opts: FvcomPlotOptions | None = None,
-                  **plot_kwargs):
-
+    def plot_data(
+        *,
+        da: xr.DataArray | None = None,
+        time: int | None = None,
+        plotter: "FvcomPlotter",
+        save_path: str | None = None,
+        post_process_func: Callable[..., None] | None = None,
+        opts: FvcomPlotOptions | None = None,
+        **plot_kwargs,
+    ):
         """
         Generate a single frame with the given parameters.
 
@@ -327,24 +385,39 @@ class FrameGenerator:
             if "time" in sig:
                 kw["time"] = time
             post_process_func(**kw)
-        
-        return plotter.plot_2d(da=da, save_path=save_path, post_process_func=_wrapped, opts=opts)
+
+        return plotter.plot_2d(
+            da=da, save_path=save_path, post_process_func=_wrapped, opts=opts
+        )
 
     @classmethod
-    def generate_frames(cls, da, output_dir, plotter, processes, base_name="frame", post_process_func=None, **plot_kwargs):
+    def generate_frames(
+        cls,
+        da,
+        output_dir,
+        plotter,
+        processes,
+        base_name="frame",
+        post_process_func=None,
+        **plot_kwargs,
+    ):
         """
         Generate frames using multiprocessing with the class's generate_frame method.
         """
         output_dir = os.path.expanduser(output_dir)
         os.makedirs(output_dir, exist_ok=True)
 
-        #time_indices = range(da.sizes["time"])
-        #args_list = [(cls, time, da, plotter, output_dir, base_name, post_process_func, plot_kwargs) for time in time_indices]
+        # time_indices = range(da.sizes["time"])
+        # args_list = [(cls, time, da, plotter, output_dir, base_name, post_process_func, plot_kwargs) for time in time_indices]
 
         # Check the number of available processes
         max_procs = multiprocessing.cpu_count()
         # スパコンのジョブ環境で設定されたプロセス数を取得（なければNone）
-        job_procs = os.environ.get("SLURM_CPUS_PER_TASK") or os.environ.get("PBS_NP") or os.environ.get("LSB_DJOB_NUMPROC")
+        job_procs = (
+            os.environ.get("SLURM_CPUS_PER_TASK")
+            or os.environ.get("PBS_NP")
+            or os.environ.get("LSB_DJOB_NUMPROC")
+        )
 
         # 取得した環境変数を整数に変換（環境変数が None の場合はデフォルトを max_procs に）
         if job_procs:
@@ -353,17 +426,31 @@ class FrameGenerator:
             job_procs = max_procs  # 環境変数がない場合は最大コア数を仮の値とする
 
         print(f"Total available cores: {job_procs}")
-        
+
         # 指定した processes をチェック
         if processes > job_procs:
-            raise ValueError(f"Error: The specified processes ({processes}) exceed the available job processes ({job_procs}).")
+            raise ValueError(
+                f"Error: The specified processes ({processes}) exceed the available job processes ({job_procs})."
+            )
 
         time_size = da.sizes["time"]
         time_slices = np.array_split(range(time_size), processes)
-        args_list = [(cls, time_slice, da, plotter, output_dir, base_name, post_process_func, plot_kwargs) for time_slice in time_slices]
+        args_list = [
+            (
+                cls,
+                time_slice,
+                da,
+                plotter,
+                output_dir,
+                base_name,
+                post_process_func,
+                plot_kwargs,
+            )
+            for time_slice in time_slices
+        ]
 
         # Use the class's generate_frame method
-        #with Pool(processes=processes) as pool:
+        # with Pool(processes=processes) as pool:
         #    frames = pool.map(cls.generate_frame, args_list)
 
         with Pool(processes=processes) as pool:
@@ -376,11 +463,14 @@ class PlotHelperMixin:
     """
     A mixin class to provide helper methods for batch plotting and other common operations.
     """
-    ds: Any   # added for static-type checkers
+
+    ds: Any  # added for static-type checkers
     cfg: Any
     ts_river: Callable[..., Any]
 
-    def ts_plot_in_batches(self, varnames, index, batch_size=4, k=None, png_prefix="plot", **kwargs):
+    def ts_plot_in_batches(
+        self, varnames, index, batch_size=4, k=None, png_prefix="plot", **kwargs
+    ):
         """
         Batch-plot multiple variables (time-series) in groups of `batch_size`,
         delegating each subplot to self.ts_plot().
@@ -398,7 +488,7 @@ class PlotHelperMixin:
         # ------------------------------------------------------------
         if not isinstance(varnames, list) or len(varnames) == 0:
             raise ValueError("'varnames' must be a non-empty list.")
-     
+
         # ------------------------------------------------------------
         # 1) Split into batches
         # ------------------------------------------------------------
@@ -407,26 +497,27 @@ class PlotHelperMixin:
         # ------------------------------------------------------------
         # 2) Pop plotting-specific kwargs
         # ------------------------------------------------------------
-        dpi    = kwargs.pop("dpi",    self.cfg.dpi)
+        dpi = kwargs.pop("dpi", self.cfg.dpi)
         sharex = kwargs.pop("sharex", True)
         legend = kwargs.pop("legend", True)
-        title  = kwargs.pop("title",  True)
+        title = kwargs.pop("title", True)
         suptitle = kwargs.pop("suptitle", True)
         # ------------------------------------------------------------
 
         for b in range(num_batches):
             # ---- 3-1) Variables in this batch ----------------------
-            batch_vars = varnames[b * batch_size:(b + 1) * batch_size]
+            batch_vars = varnames[b * batch_size : (b + 1) * batch_size]
 
             # ---- 3-2) Figure & axes --------------------------------
-            width, height = self.cfg.figsize              # e.g., (8, 2)
-            batch_figsize  = (width, height * len(batch_vars)) # scale height by n rows
-            #fig_height    = height * len(batch_vars)  # scale by rows
+            width, height = self.cfg.figsize  # e.g., (8, 2)
+            batch_figsize = (width, height * len(batch_vars))  # scale height by n rows
+            # fig_height    = height * len(batch_vars)  # scale by rows
             fig, axes = plt.subplots(
-                len(batch_vars), 1,
+                len(batch_vars),
+                1,
                 figsize=batch_figsize,
                 sharex=sharex,
-                dpi=self.cfg.dpi                      # Figure dpi follows config
+                dpi=self.cfg.dpi,  # Figure dpi follows config
             )
             if len(batch_vars) == 1:
                 axes = [axes]
@@ -434,14 +525,14 @@ class PlotHelperMixin:
             # ---- 3-3) Plot each variable ---------------------------
             for var, ax in zip(batch_vars, axes):
                 self.ts_plot(varname=var, index=index, k=k, label=var, ax=ax, **kwargs)
-                #ax.set_title(var, fontsize=self.cfg.fontsize_title)
+                # ax.set_title(var, fontsize=self.cfg.fontsize_title)
                 if legend:
                     ax.legend(fontsize=self.cfg.fontsize_legend)
             # ---- 3-4) Layout & save -------------------------------
             if title and suptitle:
                 fig.suptitle(
                     f"Time-Series Batch {b + 1}/{num_batches}",
-                    fontsize=self.cfg.fontsize_suptitle
+                    fontsize=self.cfg.fontsize_suptitle,
                 )
             fig.tight_layout(rect=(0, 0, 1, 0.95))
             save_path = f"{png_prefix}_batch_{b + 1}.png"
@@ -450,8 +541,13 @@ class PlotHelperMixin:
 
         print(f"Saved {num_batches} figure(s) as '{png_prefix}_batch_#.png'.")
 
-    def ts_river_in_batches(self, varname: str, batch_size: int = 4,
-            png_prefix: str = "river_plot", **kwargs):
+    def ts_river_in_batches(
+        self,
+        varname: str,
+        batch_size: int = 4,
+        png_prefix: str = "river_plot",
+        **kwargs,
+    ):
         """
         Plot one river variable for *all* rivers in batches, delegating to self.ts_river().
 
@@ -485,20 +581,21 @@ class PlotHelperMixin:
 
         for b in range(num_batches):
             start_i = b * batch_size
-            end_i   = min((b + 1) * batch_size, num_rivers)
+            end_i = min((b + 1) * batch_size, num_rivers)
             river_idxs = range(start_i, end_i)
 
             # ---- 3) Make one figure per batch --------------------------------
             # --- determine base figsize -----------------------------------
-            width, height = self.cfg.figsize              # e.g., (8, 2)
-            batch_figsize  = (width, height * len(river_idxs)) # scale height by n rows
+            width, height = self.cfg.figsize  # e.g., (8, 2)
+            batch_figsize = (width, height * len(river_idxs))  # scale height by n rows
 
             fig, axes = plt.subplots(
-                len(river_idxs), 1,
-                figsize=batch_figsize, #(10, 3 * len(river_idxs)),
-                sharex=sharex
+                len(river_idxs),
+                1,
+                figsize=batch_figsize,  # (10, 3 * len(river_idxs)),
+                sharex=sharex,
             )
-            if len(river_idxs) == 1:   # axes is Axes if n==1 → listify
+            if len(river_idxs) == 1:  # axes is Axes if n==1 → listify
                 axes = [axes]
 
             # ---- 4) Plot each river -----------------------------------------
@@ -512,7 +609,7 @@ class PlotHelperMixin:
                 fig.suptitle(
                     f"{varname} - Rivers {start_i}-{end_i-1} "
                     f"(batch {b+1}/{num_batches})",
-                    fontsize=self.cfg.fontsize_suptitle
+                    fontsize=self.cfg.fontsize_suptitle,
                 )
             fig.tight_layout(rect=(0, 0, 1, 0.95))
 
@@ -522,9 +619,16 @@ class PlotHelperMixin:
 
         print(f"Saved {num_batches} figure(s) as '{png_prefix}_batch_#.png'.")
 
-
-
-    def plot_timeseries_for_river_in_batches(self, plotter, var_name, batch_size=4, start=None, end=None, save_prefix="river_plot", **kwargs):
+    def plot_timeseries_for_river_in_batches(
+        self,
+        plotter,
+        var_name,
+        batch_size=4,
+        start=None,
+        end=None,
+        save_prefix="river_plot",
+        **kwargs,
+    ):
         """
         Plot a single variable for all rivers in batches.
 
@@ -554,19 +658,28 @@ class PlotHelperMixin:
             river_indices = range(start_idx, end_idx)
 
             # 図の作成
-            fig, axes = plt.subplots(len(river_indices), 1, figsize=(10, 3 * len(river_indices)), sharex=True)
+            fig, axes = plt.subplots(
+                len(river_indices), 1, figsize=(10, 3 * len(river_indices)), sharex=True
+            )
             if len(river_indices) == 1:
                 axes = [axes]  # rivers が1つの場合でもリスト化
 
             # 各 river のプロット
             for river_index, ax in zip(river_indices, axes):
                 plotter.plot_timeseries_for_river(
-                    var_name=var_name, river_index=river_index, start=start, end=end, ax=ax, **kwargs
+                    var_name=var_name,
+                    river_index=river_index,
+                    start=start,
+                    end=end,
+                    ax=ax,
+                    **kwargs,
                 )
-                #ax.set_title(f"{var_name} for river {river_index}", fontsize=14)
+                # ax.set_title(f"{var_name} for river {river_index}", fontsize=14)
 
             # 図全体の調整
-            fig.suptitle(f"Time Series of {var_name} (Batch {batch_num + 1})", fontsize=16)
+            fig.suptitle(
+                f"Time Series of {var_name} (Batch {batch_num + 1})", fontsize=16
+            )
             fig.tight_layout(rect=(0, 0, 1, 0.95))  # タイトルとプロット間のスペース調整
 
             # 保存または表示
@@ -576,7 +689,9 @@ class PlotHelperMixin:
 
         print(f"Saved {num_batches} figures as '{save_prefix}_batch_#.png'.")
 
+
 # Other helper functions can be added here as needed.
+
 
 def get_index_by_value(array, value):
     """
@@ -593,7 +708,7 @@ def get_index_by_value(array, value):
     Raises:
         ValueError: If the value is not found in the array.
         TypeError: If the provided array type is not supported.
-    
+
     Example:
         >>> lst = [10, 20, 30, 40]
         >>> get_index_by_value(lst, 30)
@@ -613,7 +728,7 @@ def get_index_by_value(array, value):
             return array.index(value)
         except ValueError:
             raise ValueError(f"{value} does not exist in the list.")
-    
+
     # If the array is a numpy array, use np.where to find the index.
     elif isinstance(array, np.ndarray):
         index_array = np.where(array == value)[0]
@@ -621,10 +736,12 @@ def get_index_by_value(array, value):
             return int(index_array[0])
         else:
             raise ValueError(f"{value} does not exist in the numpy array.")
-    
+
     # If the array is neither a list nor a numpy array, raise a TypeError.
     else:
-        raise TypeError(f"Unsupported type: {type(array)}. Expected list or numpy array.")
+        raise TypeError(
+            f"Unsupported type: {type(array)}. Expected list or numpy array."
+        )
 
 
 def pick_first(*values, default=None):
