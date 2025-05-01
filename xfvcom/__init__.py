@@ -1,6 +1,36 @@
-from .xfvcom import FvcomDataLoader, FvcomAnalyzer, FvcomPlotConfig, FvcomPlotter
-from .helpers import PlotHelperMixin, FrameGenerator, create_gif, create_gif_from_frames
-from .helpers_utils import apply_xlim_ylim, evaluate_model_scores, generate_test_data
+"""
+xfvcom top-level package
+Re-export public APIs after file split.
+"""
+
+# ------------------------------------------------------------------
+# 1) new canonical location  (xfvcom.plot.core)
+# ------------------------------------------------------------------
+from .plot.core import (
+    FvcomPlotter,
+    FvcomDataLoader,
+    FvcomAnalyzer,
+    FvcomPlotConfig,
+)
+
+# ------------------------------------------------------------------
+# 2) helpers / utilities (unchanged)
+# ------------------------------------------------------------------
+from .helpers import (
+    PlotHelperMixin, FrameGenerator,
+    create_gif, create_gif_from_frames,
+)
+from .helpers_utils import (
+    apply_xlim_ylim, evaluate_model_scores, generate_test_data,
+)
 from .plot_utils import create_anim_2d_plot
 from .plot_options import FvcomPlotOptions
 from .decorators import precedence
+
+__all__ = [
+    "FvcomPlotter", "FvcomDataLoader", "FvcomAnalyzer", "FvcomPlotConfig",
+    "PlotHelperMixin", "FrameGenerator",
+    "create_gif", "create_gif_from_frames",
+    "apply_xlim_ylim", "evaluate_model_scores", "generate_test_data",
+    "create_anim_2d_plot", "FvcomPlotOptions", "precedence",
+]
