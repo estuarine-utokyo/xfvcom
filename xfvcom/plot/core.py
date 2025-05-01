@@ -25,7 +25,7 @@ from ..io import FvcomDataLoader
 from .config import FvcomPlotConfig
 from ..analysis import FvcomAnalyzer
 from ..helpers import PlotHelperMixin, pick_first
-from ..plot_utils import add_colorbar
+from .utils import add_colorbar
 from ..plot_options import FvcomPlotOptions
 from ..decorators import precedence
 from typing import Any, Callable, Dict, Tuple
