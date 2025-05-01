@@ -228,3 +228,8 @@ class FvcomPlotConfig:
         self.tick_fontsize = tick_fontsize
         self.date_format = kwargs.get('date_format', '%Y-%m-%d')
         self.plot_color = kwargs.get("plot_color", "red")
+
+        # ------------------------------------------------------------
+        # Internal cache (dataclass default is skipped because we define __init__)
+        # ------------------------------------------------------------
+        self._private_cache: Dict[str, Any] = {}
