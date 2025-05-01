@@ -1,5 +1,9 @@
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Tuple
 from matplotlib.colorbar import Colorbar
 
+@dataclass
 class FvcomPlotConfig:
     """
     Stores plot configuration settings.
@@ -119,6 +123,9 @@ class FvcomPlotConfig:
         "headwidth": 3,
         "headaxislength": 4.5
     }
+
+    # ---- runtime, non-init fields ------------------------------------
+    _private_cache: dict = field(default_factory=dict, init=False, repr=False)
 
     def __init__(self, figsize=None, dpi=None, facecolor=None, width=800, height=200, 
                  cmap="jet", levels=21, title_fontsize=14, label_fontsize=12, tick_fontsize=11,
