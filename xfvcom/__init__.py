@@ -6,12 +6,9 @@ Re-export public APIs after file split.
 # ------------------------------------------------------------------
 # 1) new canonical location  (xfvcom.plot.core)
 # ------------------------------------------------------------------
-from .plot.core import (
-    FvcomPlotter,
-    FvcomDataLoader,
-    FvcomAnalyzer,
-    FvcomPlotConfig,
-)
+from .analysis    import FvcomAnalyzer
+from .io          import FvcomDataLoader
+from .plot.core   import FvcomPlotter, FvcomPlotConfig
 
 # ------------------------------------------------------------------
 # 2) helpers / utilities (unchanged)
