@@ -87,7 +87,7 @@ class FvcomPlotOptions:
     arrow_headlength     : int              = 5
     arrow_headwidth      : int              = 3
     arrow_headaxislength : float            = 4.5
-    scale                : float | str      = None
+    scale                : float | str | None = None
     scale_units          : str              = "y"
     show_vec_legend      : bool             = True
     vec_legend_speed     : float | None     = None   # None → 0.3*max
@@ -127,6 +127,8 @@ class FvcomPlotOptions:
     # 12. Future / rarely-used kwargs bucket
     # ------------------------------------------------------------
     extra            : Dict[str, Any]       = field(default_factory=dict, repr=False)
+
+    da_is_scalar: bool = False
 
     # ------------------------------------------------------------
     # Helper constructor to keep backward compatibility with **kwargs
