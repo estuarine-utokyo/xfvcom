@@ -1,0 +1,19 @@
+repos:
+  - repo: https://github.com/psf/black
+    rev: 24.2.0        # Black のバージョンタグ
+    hooks:
+      - id: black
+        args: [ "--line-length=88" ]   # お好みで
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: [ "--profile", "black" ]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.15.0
+    hooks:
+      - id: mypy
+        additional_dependencies: [ "types-tqdm" ]  # stub を追加で要求する場合
+        args: [ "--strict", "xfvcom" ]             # フォルダを指定
