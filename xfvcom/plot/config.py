@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Tuple
+from typing import Tuple, Dict, Any
 from matplotlib.colorbar import Colorbar
 
 @dataclass
@@ -124,8 +124,10 @@ class FvcomPlotConfig:
         "headaxislength": 4.5
     }
 
-    # ---- runtime, non-init fields ------------------------------------
-    _private_cache: dict = field(default_factory=dict, init=False, repr=False)
+    # ----- internal cache (not in __init__, not in repr) -------------
+    _private_cache: Dict[str, Any] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def __init__(self, figsize=None, dpi=None, facecolor=None, width=800, height=200, 
                  cmap="jet", levels=21, title_fontsize=14, label_fontsize=12, tick_fontsize=11,
