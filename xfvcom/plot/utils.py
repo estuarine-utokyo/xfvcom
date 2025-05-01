@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 import numpy as np
 
-from .helpers import FrameGenerator, create_gif, convert_gif_to_mp4
+from ..helpers import FrameGenerator, create_gif, convert_gif_to_mp4
 
 def prepare_contourf_args(
     data, *, vmin=None, vmax=None, levels=None, cmap="viridis"
