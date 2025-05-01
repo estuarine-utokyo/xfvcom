@@ -191,3 +191,16 @@ def generate_test_data():
         xr.DataArray(np.cos(np.linspace(0, 10, len(time))), dims="time", coords={"time": time}),
     ]
     return sim_list, obs_list
+
+def ensure_time_index(ds: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArray:
+    """
+    Guarantee datetime64 type in `time` coord.
+    If already ok, just return the original object.
+    """
+    if "time" not in ds.coords:
+        return ds                               # time 軸が無ければ何もしない
+    if ds.time.dtype.kind != "M":               # not datetime64
+        ds = ds.assign_coords(
+            time = ds.time.values.astype("datetime64[ns]")
+        )
+    return ds
