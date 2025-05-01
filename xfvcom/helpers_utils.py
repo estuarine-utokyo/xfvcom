@@ -113,7 +113,7 @@ def evaluate_model_scores(sim_list, obs_list):
 
     Usage:
     ```
-    from .helpers_utils import evaluate_model_scores, generate_test_data
+    from ..utils.helpers_utils import evaluate_model_scores, generate_test_data
     sim_list, obs_list = generate_test_data()
     ```
     """

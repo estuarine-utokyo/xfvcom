@@ -7,14 +7,14 @@ import imageio.v2 as imageio
 from moviepy.editor import ImageSequenceClip
 import multiprocessing
 from multiprocessing import Pool
-from .helpers_utils import clean_kwargs, unpack_plot_kwargs
+from ..helpers_utils import clean_kwargs, unpack_plot_kwargs
 import inspect
 import subprocess
 import cartopy.crs as ccrs
 from tqdm import tqdm
 import xarray as xr
 from typing import Callable, Optional, Any
-from .plot_options import FvcomPlotOptions 
+from ..plot_options import FvcomPlotOptions
 # import dask
 # from dask.delayed import delayed
 
