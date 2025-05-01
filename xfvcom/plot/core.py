@@ -29,10 +29,14 @@ import inspect
 import matplotlib.tri as mtri
 from scipy.spatial import KDTree
 import pyproj
-from .helpers import PlotHelperMixin, pick_first
-from .plot_utils import prepare_contourf_args, add_colorbar
-from .decorators import precedence
-from .plot_options import FvcomPlotOptions
+#from .helpers import PlotHelperMixin, pick_first
+#from .plot_utils import prepare_contourf_args, add_colorbar
+#from .decorators import precedence
+#from .plot_options import FvcomPlotOptions
+from ..helpers import PlotHelperMixin, pick_first
+from ..plot_utils import prepare_contourf_args, add_colorbar
+from ..plot_options import FvcomPlotOptions
+from ..decorators import precedence
 from typing import Any, Callable, Dict, Tuple
 from collections.abc import Sequence
 _TRICF_SIG = set(inspect.signature(maxes.Axes.tricontourf).parameters)
