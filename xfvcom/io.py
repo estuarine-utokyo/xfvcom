@@ -9,7 +9,7 @@ import xarray as xr
 import pyproj
 
 # --- package internal -------------------------------------------------
-from .helpers_utils  import ensure_time_index
+from .helpers_utils import ensure_time_index
 
 class FvcomDataLoader:
     """

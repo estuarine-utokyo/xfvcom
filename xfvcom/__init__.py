@@ -15,7 +15,7 @@ from .plot.config import FvcomPlotConfig
 # ------------------------------------------------------------------
 # 2) helpers / utilities (unchanged)
 # ------------------------------------------------------------------
-from .helpers import (
+from .utils.helpers import (
     PlotHelperMixin, FrameGenerator,
     create_gif, create_gif_from_frames,
 )
