@@ -1147,7 +1147,7 @@ class FvcomPlotter(PlotHelperMixin):
         self,
         *,
         time: int | slice | list | tuple,
-        siglay: int | slice | list | tuple, None = None,
+        siglay: int | slice | list | tuple | None = None,
          reduce: dict[str, str] | None = None,      # {"time": "mean", "siglay": "mean"}
         skip: int | str | None = None, # "auto" or explicit integer
         var_u: str = "u",

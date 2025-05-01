@@ -1,3 +1,9 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    # Forward-reference only for static type-checking; avoids import cycle
+    from xfvcom.plot.core import FvcomPlotter
 import pandas as pd
 import matplotlib.pyplot as plt
 from math import ceil
@@ -270,8 +276,15 @@ class FrameGenerator:
         return frames
 
     @staticmethod
-    def plot_data(*, da: xr.DataArray | None =None, time: int | None =None, plotter: "FvcomPlotter", save_path: str | None =None,
-                  post_process_func: Callable[[plt.Axes], None] | None = None, opts: FvcomPlotOptions | None = None,  **plot_kwargs):
+    def plot_data(*,
+                  da: xr.DataArray | None = None,
+                  time: int | None = None,
+                  plotter: "FvcomPlotter",
+                  save_path: str | None = None,
+                   post_process_func: Callable[[plt.Axes], None] | None = None,
+                   opts: FvcomPlotOptions | None = None,
+                   **plot_kwargs):
+
         """
         Generate a single frame with the given parameters.
 
