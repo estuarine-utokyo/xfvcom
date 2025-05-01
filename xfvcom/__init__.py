@@ -9,7 +9,8 @@ Re-export public APIs after file split.
 from .plot.config import FvcomPlotConfig
 from .analysis    import FvcomAnalyzer
 from .io          import FvcomDataLoader
-from .plot.core   import FvcomPlotter, FvcomPlotConfig
+from .plot.core   import FvcomPlotter
+from .plot.config import FvcomPlotConfig
 
 # ------------------------------------------------------------------
 # 2) helpers / utilities (unchanged)
@@ -21,7 +22,8 @@ from .helpers import (
 from .helpers_utils import (
     apply_xlim_ylim, evaluate_model_scores, generate_test_data,
 )
-from .plot_utils import create_anim_2d_plot
+
+from .plot.utils import create_anim_2d_plot
 from .plot_options import FvcomPlotOptions
 from .decorators import precedence
 
