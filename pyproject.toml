@@ -28,6 +28,7 @@ dependencies = [
   "pandas>=2.1",
   "matplotlib>=3.8",
   "cartopy>=0.22",
+  "pyproj>=3.6",
   "scipy>=1.11",
   "scikit-learn>=1.4",
   "imageio>=2.34",
@@ -41,7 +42,7 @@ dev = [
   "mypy>=1.7",
   "black>=24.2",
   "isort>=5.13",
-  "types-tqdm>=4.66"
+  "types-tqdm>=4.66",
   "pandas-stubs",
 ]
 
