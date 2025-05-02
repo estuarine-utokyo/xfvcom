@@ -38,6 +38,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+video = ["moviepy>=1.0.3", "imageio-ffmpeg>=0.4"]
 dev = [
   "pytest>=8.1",
   "mypy>=1.7",

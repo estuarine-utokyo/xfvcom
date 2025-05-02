@@ -19,7 +19,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
-from moviepy.editor import ImageSequenceClip
+
+# from moviepy.editor import ImageSequenceClip
 from tqdm import tqdm
 
 from ..plot_options import FvcomPlotOptions
@@ -129,12 +130,26 @@ def create_mp4(frames, output_mp4=None, fps=10, cleanup=True):
     Returns:
     - None
     """
-    if output_mp4 is None:
-        output_mp4 = "output.mp4"  # Default MP4 file name
+    # Lazy import – give clear guidance if moviepy is missing
+    try:
+        from moviepy.editor import ImageSequenceClip
+    except ModuleNotFoundError as e:  # pragma: no cover
+        raise ModuleNotFoundError(
+            "moviepy is required for MP4 generation.\n"
+            "Install with:  pip install 'xfvcom[video]'   または   pip install moviepy"
+        ) from e
 
-    # Generate MP4 using moviepy
     clip = ImageSequenceClip(frames, fps=fps)
-    clip.write_videofile(output_mp4, codec="libx264", fps=fps, pix_fmt="yuv420p")
+    clip.write_videofile(
+        output_mp4, codec="libx264", fps=fps, pix_fmt="yuv420p", logger=None
+    )
+
+    # if output_mp4 is None:
+    #     output_mp4 = "output.mp4"  # Default MP4 file name
+
+    # # Generate MP4 using moviepy
+    # clip = ImageSequenceClip(frames, fps=fps)
+    # clip.write_videofile(output_mp4, codec="libx264", fps=fps, pix_fmt="yuv420p")
 
     if cleanup:
         for frame in frames:
