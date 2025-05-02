@@ -1,39 +1,87 @@
-# pyproject.toml
+# ------------------------------------------
+# pyproject.toml – build & metadata config
+# ------------------------------------------
+
 [build-system]
+# Requirements for building the project (PEP 517)
 requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
-# --------------------------------------------------------------------------- #
-# Project metadata and dependencies
-# --------------------------------------------------------------------------- #
+# ------------------------------------------
+# Project metadata (PEP 621)
+# ------------------------------------------
 [project]
-name            = "xfvcom"
-version         = "0.1.0"
-description     = "Utilities for FVCOM post-processing / plotting"
-authors         = [{ name = "Your Name", email = "you@example.com" }]
-readme          = "README.md"
-license         = { text = "MIT" }
-requires-python = ">=3.9"
+name = "xfvcom"
+version = "0.1.0"            # ← bump when you release
+description = "FVCOM post-processing & visualisation toolkit"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Your Name", email = "you@example.com"}]
+requires-python = ">=3.10"
 
-# Hard runtime dependencies
+# Project URLs displayed on PyPI
+urls = { 
+  "Homepage" = "https://github.com/your-org/xfvcom",
+  "Issues"   = "https://github.com/your-org/xfvcom/issues"
+}
+
+# ------------------------------------------
+# *Runtime* dependencies – install with `pip install xfvcom`
+# ------------------------------------------
 dependencies = [
+  # core numerics / IO
   "numpy>=1.24",
   "xarray>=2024.1",
-  "imageio>=2",     # <── added
-  "cartopy>=0.22",  # <── already needed (was installed ad-hoc in CI)
+  "pandas>=2.2",
+  "scipy>=1.11",
+  "scikit-learn>=1.4",
+  "pyproj>=3.6",
+  "tqdm>=4.66",
+  # visualisation / media
+  "matplotlib>=3.8",
+  "cartopy>=0.22",
+  "imageio>=2",
+  "moviepy>=1.0"
 ]
 
-# Optional / development dependencies
+# ------------------------------------------
+# Optional extras (install with `pip install xfvcom[dev]`)
+# ------------------------------------------
 [project.optional-dependencies]
 dev = [
+  # formatting / lint
   "black>=24",
   "isort>=5",
+  # static type check
   "mypy>=1.15",
-  "pytest>=8",
-  "types-tqdm",     # stubs
+  "pandas-stubs",
+  "types-tqdm",
+  # testing
+  "pytest>=8"
 ]
 
+# ------------------------------------------
+# setuptools-specific settings
+# ------------------------------------------
 [tool.setuptools]
-# If you still have a setup.cfg / setup.py, setuptools will pick them up.
-# Otherwise list packages manually or use find-namespaces = true.
-packages = ["xfvcom", "xfvcom.utils", "xfvcom.plot"]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+# include every subpackage under xfvcom
+include = ["xfvcom*"]
+
+# ------------------------------------------
+# Tool configs (optional but handy)
+# ------------------------------------------
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+explicit_package_bases = true

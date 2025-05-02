@@ -8,28 +8,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Check-out repository
+      # 1) Checkout
       - uses: actions/checkout@v4
 
-      # 2) System libraries required by Cartopy / PROJ / GEOS
+      # 2) OS libs for Cartopy / PROJ / GEOS / GDAL
       - name: Install system packages
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libproj-dev proj-data proj-bin \
-            libgeos-dev
+            libgeos-dev libgdal-dev
 
-      # 3) Set up Python
+      # 3) Python
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
 
-      # 4) Install Python dependencies (incl. dev extras)
+      # 4) Dependencies
       - name: Install Python deps
         run: |
           python -m pip install -U pip
-          pip install -e .[dev]        # installs runtime + dev + stubs
+          pip install -e .[dev]
 
-      # 5) Run the tests
+      # 5) Static type check (optional)
+      - name: Type check
+        run: mypy xfvcom
+
+      # 6) Run tests
       - name: Run tests
         run: pytest -q
