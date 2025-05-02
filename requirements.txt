@@ -3,3 +3,4 @@ xarray
 matplotlib
 pyproj
 scikit-learn
+cartopy>=0.24
