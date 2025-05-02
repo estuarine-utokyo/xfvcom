@@ -1,13 +1,20 @@
+from __future__ import annotations
+
 import inspect
+from typing import Any, Callable, Mapping
 
 import cartopy.crs as ccrs
+import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from scipy.stats import pearsonr
 from sklearn.metrics import mean_squared_error, r2_score
 
 
-def clean_kwargs(func, kwargs):
+def clean_kwargs(
+    func: Callable[..., Any],
+    kwargs: Mapping[str, Any],
+) -> dict[str, Any]:
     """
     Filter kwargs so that only arguments accepted by *func* survive.
 
@@ -29,7 +36,7 @@ def clean_kwargs(func, kwargs):
     return {k: v for k, v in kwargs.items() if k in func_args}
 
 
-def unpack_plot_kwargs(kwargs):
+def unpack_plot_kwargs(kwargs: dict) -> dict:
     """
     Unpack nested 'plot_kwargs' dictionary if present.
 
@@ -48,7 +55,7 @@ def unpack_plot_kwargs(kwargs):
     return kwargs
 
 
-def parse_coordinate(coord):
+def parse_coordinate(coord: str | float) -> float:
     """
     Convert a coordinate in degrees:minutes:seconds or degrees:minutes format to a float (decimal degrees).
 
@@ -73,7 +80,12 @@ def parse_coordinate(coord):
         raise ValueError(f"Invalid coordinate format: {coord}")
 
 
-def apply_xlim_ylim(ax, xlim, ylim, is_cartesian=False):
+def apply_xlim_ylim(
+    ax: plt.Axes,
+    xlim: tuple[float, float] | tuple[str, str],
+    ylim: tuple[float, float] | tuple[str, str],
+    is_cartesian: bool = False,
+) -> None:
     """
     Apply xlim and ylim to a Matplotlib axis, supporting both Cartesian and geographic (lon/lat) coordinates.
 
@@ -108,7 +120,9 @@ def apply_xlim_ylim(ax, xlim, ylim, is_cartesian=False):
     # return xlim, ylim
 
 
-def evaluate_model_scores(sim_list, obs_list):
+def evaluate_model_scores(
+    sim_list: list[xr.DataArray | np.ndarray], obs_list: list[xr.DataArray | np.ndarray]
+) -> dict[str, Any]:
     """
     Evaluate model performance metrics including R², Pearson r, RMSE, and bias.
     Normalize Combined Score to 0-1, where 1 indicates perfect match and 0 indicates poor performance.
@@ -127,7 +141,11 @@ def evaluate_model_scores(sim_list, obs_list):
     ```
     """
 
-    def to_numpy(data):
+    def to_numpy(data: xr.DataArray | np.ndarray) -> np.ndarray:
+        """
+        Convert xarray DataArray to numpy array.
+        If the input is already a numpy array, return it as is.
+        """
         if isinstance(data, xr.DataArray):
             return data.values
         elif isinstance(data, np.ndarray):
@@ -196,7 +214,7 @@ def evaluate_model_scores(sim_list, obs_list):
 
 
 # Test Data
-def generate_test_data():
+def generate_test_data() -> tuple[list[xr.DataArray], list[xr.DataArray]]:
     """
     Generate an ideal test data (perfect) for evaluate_model_scores().
     """
@@ -233,7 +251,7 @@ def ensure_time_index(ds: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArra
     If already ok, just return the original object.
     """
     if "time" not in ds.coords:
-        return ds  # time 軸が無ければ何もしない
+        return ds  # do nothing if no 'time' coordinate
     if ds.time.dtype.kind != "M":  # not datetime64
         ds = ds.assign_coords(time=ds.time.values.astype("datetime64[ns]"))
     return ds
