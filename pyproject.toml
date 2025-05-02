@@ -1,3 +1,39 @@
+# pyproject.toml
 [build-system]
 requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
+
+# --------------------------------------------------------------------------- #
+# Project metadata and dependencies
+# --------------------------------------------------------------------------- #
+[project]
+name            = "xfvcom"
+version         = "0.1.0"
+description     = "Utilities for FVCOM post-processing / plotting"
+authors         = [{ name = "Your Name", email = "you@example.com" }]
+readme          = "README.md"
+license         = { text = "MIT" }
+requires-python = ">=3.9"
+
+# Hard runtime dependencies
+dependencies = [
+  "numpy>=1.24",
+  "xarray>=2024.1",
+  "imageio>=2",     # <── added
+  "cartopy>=0.22",  # <── already needed (was installed ad-hoc in CI)
+]
+
+# Optional / development dependencies
+[project.optional-dependencies]
+dev = [
+  "black>=24",
+  "isort>=5",
+  "mypy>=1.15",
+  "pytest>=8",
+  "types-tqdm",     # stubs
+]
+
+[tool.setuptools]
+# If you still have a setup.cfg / setup.py, setuptools will pick them up.
+# Otherwise list packages manually or use find-namespaces = true.
+packages = ["xfvcom", "xfvcom.utils", "xfvcom.plot"]

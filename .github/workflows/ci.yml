@@ -8,10 +8,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Check-out this repository
+      # 1) Check-out repository
       - uses: actions/checkout@v4
 
-      # 2) OS-level libraries that Cartopy (and friends) need
+      # 2) System libraries required by Cartopy / PROJ / GEOS
       - name: Install system packages
         run: |
           sudo apt-get update
@@ -19,28 +19,17 @@ jobs:
             libproj-dev proj-data proj-bin \
             libgeos-dev
 
-      # 3) Prepare Python
+      # 3) Set up Python
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      # 4) Install Python dependencies (+ dev / test extras if you have them)
+      # 4) Install Python dependencies (incl. dev extras)
       - name: Install Python deps
         run: |
           python -m pip install -U pip
-          # editable install with optional [dev] extras (falls back to bare install)
-          pip install -e .[dev] || pip install -e .
-          # make sure Cartopy is present in case extras do not include it
-          python - <<'PY'
-          import importlib, subprocess, sys
-          try:
-              importlib.import_module("cartopy")
-          except ImportError:
-              subprocess.check_call([sys.executable, "-m", "pip", "install", "cartopy"])
-          PY
-          # testing tools
-          pip install pytest
+          pip install -e .[dev]        # installs runtime + dev + stubs
 
-      # 5) Run the test suite
+      # 5) Run the tests
       - name: Run tests
         run: pytest -q
