@@ -31,6 +31,7 @@ dependencies = [
   "scipy>=1.11",
   "scikit-learn>=1.4",
   "imageio>=2.34",
+  "moviepy>=1.0.3", 
   "tqdm>=4.66"
 ]
 
@@ -41,6 +42,7 @@ dev = [
   "black>=24.2",
   "isort>=5.13",
   "types-tqdm>=4.66"
+  "pandas-stubs",
 ]
 
 [tool.setuptools.packages.find]
