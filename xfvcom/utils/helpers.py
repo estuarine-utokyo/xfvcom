@@ -9,9 +9,11 @@ if TYPE_CHECKING:
 import inspect
 import multiprocessing
 import os
+import shutil
 import subprocess
 from math import ceil
 from multiprocessing import Pool
+from pathlib import Path
 
 import cartopy.crs as ccrs
 import imageio.v2 as imageio
@@ -28,6 +30,70 @@ from ..utils.helpers_utils import clean_kwargs, unpack_plot_kwargs
 
 # import dask
 # from dask.delayed import delayed
+
+
+# -----------------------------------------------------------------------------
+# Directory Utility: ensure directory exists (with optional clean)
+# -----------------------------------------------------------------------------
+def ensure_dir(path: Path, clean: bool = False) -> None:
+    """
+    Create directory at `path`. If clean=True and it already exists, remove it first.
+    """
+    if clean and path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True, exist_ok=True)
+
+
+# -----------------------------------------------------------------------------
+# File/Directory Utilities
+# -----------------------------------------------------------------------------
+def list_png_files(frames_dir: Path, prefix: Optional[str] = None) -> list[Path]:
+    """
+    Return sorted list of PNG files in frames_dir.
+    If prefix is specified, only match files starting with '{prefix}_'.
+    """
+    if not frames_dir.exists():
+        raise FileNotFoundError(f"{frames_dir} does not exist")
+    pattern = f"{prefix}_*.png" if prefix else "*.png"
+    return sorted(frames_dir.glob(pattern))
+
+
+def generate_frames_and_collect(
+    plotter: FvcomPlotter,
+    processes: int,
+    var_name: str,
+    output_dir: Path,
+    siglay: Optional[int] = None,
+    post_process_func: Optional[Callable] = None,
+    opts: Any = None,
+    **plot_kwargs: Any,
+) -> list[Path]:
+    """
+    Wrapper that:
+      1) Cleans and prepares `output_dir`
+      2) Calls the existing FrameGenerator.parallel logic unchanged
+      3) Collects and returns a sorted list of generated PNG frame paths
+
+    This isolates I/O from the high-performance core.
+    """
+    # 1) prepare output directory (clean old frames)
+    ensure_dir(output_dir, clean=True)
+
+    # 2) invoke original parallel frame generation
+    #    (FrameGenerator.generate_frames returns list of file-path strings)
+    raw_frames = FrameGenerator.generate_frames(
+        plotter=plotter,
+        processes=processes,
+        var_name=var_name,
+        siglay=siglay,
+        post_process_func=post_process_func,
+        opts=opts,
+        **plot_kwargs,
+    )
+
+    # 3) convert to Path and sort
+    frame_paths = [Path(fp) for fp in raw_frames]
+    return sorted(frame_paths)
 
 
 def create_gif(frames, output_gif=None, fps=10, cleanup=False):
@@ -207,14 +273,18 @@ def create_gif_from_frames(
     Returns:
     - None
     """
-    frames = sorted(
-        [
-            os.path.join(frames_dir, f)
-            for f in os.listdir(frames_dir)
-            if f.endswith(".png") and (prefix is None or f.startswith(prefix))
-        ]
-    )
+    # frames = sorted(
+    #     [
+    #         os.path.join(frames_dir, f)
+    #         for f in os.listdir(frames_dir)
+    #         if f.endswith(".png") and (prefix is None or f.startswith(prefix))
+    #     ]
+    # )
     # frames = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir) if f.endswith('.png')])
+    # Convert frames_dir to Path object and gather PNG frames
+    frames_path = Path(frames_dir).expanduser()
+    frames = list_png_files(frames_path, prefix)
+
     temp_gifs = []  # Temporary GIFs for each batch
 
     total_batches = (len(frames) + batch_size - 1) // batch_size  # 総バッチ数を計算
@@ -249,9 +319,13 @@ def create_gif_from_frames(
                 for frame in reader:
                     writer.append_data(frame)
 
+    # if cleanup:
+    #     for frame in frames:
+    #         os.remove(frame)
     if cleanup:
         for frame in frames:
-            os.remove(frame)
+            # Remove frame file to clean up
+            Path(frame).unlink()
 
     print(f"GIF Animation created successfully at: {output_gif}")
 
@@ -419,9 +493,11 @@ class FrameGenerator:
         """
         Generate frames using multiprocessing with the class's generate_frame method.
         """
-        output_dir = os.path.expanduser(output_dir)
-        os.makedirs(output_dir, exist_ok=True)
-
+        # output_dir = os.path.expanduser(output_dir)
+        # os.makedirs(output_dir, exist_ok=True)
+        # prepare output directory
+        output_path = Path(output_dir).expanduser()
+        output_path.mkdir(parents=True, exist_ok=True)
         # time_indices = range(da.sizes["time"])
         # args_list = [(cls, time, da, plotter, output_dir, base_name, post_process_func, plot_kwargs) for time in time_indices]
 
@@ -471,7 +547,42 @@ class FrameGenerator:
         with Pool(processes=processes) as pool:
             frames = pool.map(cls.generate_frame_batch, args_list)
 
-        return frames
+        # return frames
+        # --------------------------------------------------------------------
+        # Merge proc_* subdirectories into output_dir and remove them
+        # --------------------------------------------------------------------
+        merged = []
+        # for each proc_X folder
+        for proc_dir in output_path.glob("proc_*"):
+            for fp in proc_dir.glob(f"{base_name}_*.png"):
+                dst = output_path / fp.name
+                if dst.exists():
+                    dst.unlink()  # remove old copy
+                fp.rename(dst)  # move into output_dir
+                merged.append(dst)
+            proc_dir.rmdir()  # remove empty proc_* dir
+
+        # If user code expected the flat list of frame paths, return that:
+        #  - use merged list if non-empty, else fall back to original frames
+        final_paths = merged if merged else [Path(f) for f in frames]
+        # sort by the numeric suffix in file name
+        # from .utils import _extract_index
+
+        # final_paths.sort(key=lambda p: _extract_index(str(p)))
+        # return list of path strings for backward compatibility
+        # return [str(p) for p in final_paths]
+        # Inline sort by numeric suffix (e.g. "..._123.png")
+        import re
+
+        FRAME_RE = re.compile(r"_(\d+)\.png$")
+
+        def _extract_index(path_obj):
+            m = FRAME_RE.search(path_obj.name)
+            return int(m.group(1)) if m else -1
+
+        final_paths.sort(key=_extract_index)
+        # Return list of path‐strings for backward compatibility
+        return [str(p) for p in final_paths]
 
 
 class PlotHelperMixin:
