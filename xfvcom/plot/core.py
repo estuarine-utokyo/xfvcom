@@ -1,6 +1,7 @@
 # xfvcom.py: A Python module for loading, analyzing, and plotting FVCOM model output data in xfvcom package.
 # Author: Jun Sasaki
 import inspect
+import warnings
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Callable, Dict, Hashable, Tuple
@@ -32,6 +33,16 @@ from ..plot_options import FvcomPlotOptions
 from ..utils.helpers import PlotHelperMixin, pick_first
 from .config import FvcomPlotConfig
 from .utils import add_colorbar
+
+"""
+Suppress Shapely RuntimeWarning when linestrings encounter NaN coords.
+Cartopy may generate such NaNs internally (e.g. at dateline).
+"""
+warnings.filterwarnings(
+    "ignore",
+    message="invalid value encountered in linestrings",
+    category=RuntimeWarning,
+)
 
 _TRICF_SIG = set(inspect.signature(maxes.Axes.tricontourf).parameters)
 

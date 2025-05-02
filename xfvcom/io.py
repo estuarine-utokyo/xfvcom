@@ -108,9 +108,7 @@ class FvcomDataLoader:
         if obcfile_path:
             if os.path.isfile(obcfile_path):
                 # print(f"Loading open boundary nodes from {obcfile_path}")
-                df = pd.read_csv(
-                    obcfile_path, header=None, skiprows=1, delim_whitespace=True
-                )
+                df = pd.read_csv(obcfile_path, header=None, skiprows=1, sep=r"\s+")
                 node_bc = df.iloc[:, 1].values - 1
                 if verbose:
                     print(f"{node_bc}")
