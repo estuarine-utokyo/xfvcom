@@ -4,3 +4,4 @@ matplotlib
 pyproj
 scikit-learn
 cartopy>=0.24
+imageio

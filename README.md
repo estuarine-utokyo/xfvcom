@@ -115,6 +115,7 @@ This package depends on the following libraries:
 - `scikit-learn`
 - `imageio`
 - `moviepy`
+- `cartopy`
 
 To install the required dependencies, run:
 ```bash
