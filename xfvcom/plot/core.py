@@ -582,7 +582,7 @@ class FvcomPlotter(PlotHelperMixin):
             )
 
         # Format y-axis to accommodate negative and positive values
-        max_v: float = float(np.max(np.abs(max_speed)))
+        max_v: float = np.max(np.abs(max_speed))
         ax.set_ylim(-max_v, max_v)
 
         # Format axes
