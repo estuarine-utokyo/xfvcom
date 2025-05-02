@@ -1,15 +1,14 @@
+from __future__ import annotations
+
 # --- standard library -------------------------------------------------
 import os
-from pathlib import Path
+from typing import Any
 
 # --- third-party ------------------------------------------------------
 import numpy as np
 import pandas as pd
 import pyproj
 import xarray as xr
-
-# --- package internal -------------------------------------------------
-from .utils.helpers_utils import ensure_time_index
 
 
 class FvcomDataLoader:
@@ -20,24 +19,22 @@ class FvcomDataLoader:
     # def __init__(self, base_path=None, ncfile=None, obcfile_path=None,
     def __init__(
         self,
-        ncfile_path=None,
-        obcfile_path=None,
-        engine="netcdf4",
-        chunks=None,
-        utm2geo=True,
-        zone=54,
-        north=True,
-        inverse=False,
-        time_tolerance=None,
-        verbose=False,
-        **kwargs,
-    ):
+        ncfile_path: str | None = None,
+        obcfile_path: str | None = None,
+        engine: str = "netcdf4",
+        chunks: dict[str, int] | None = None,
+        utm2geo: bool = True,
+        zone: int = 54,
+        north: bool = True,
+        inverse: bool = False,
+        time_tolerance: int | None = None,
+        verbose: bool = False,
+        **kwargs: Any,
+    ) -> None:
         """
         Initialize the FvcomDataLoader instance.
 
         Parameters:
-        #- base_path: Directory path where the NetCDF file is located.
-        #- ncfile: Name of the NetCDF file to load.
         - ncfile_path: Netcdf file path
         - obcfile_path: Path to the open boundary node file.
         - engine: {"netcdf4", "scipy", "pydap", "h5netcdf", "zarr", None}, installed backend.
@@ -112,12 +109,12 @@ class FvcomDataLoader:
                 node_bc = df.iloc[:, 1].values - 1
                 if verbose:
                     print(f"{node_bc}")
-                self.ds["node_bc"] = xr.DataArray(node_bc, dims=("obc_node"))
+                self.ds["node_bc"] = xr.DataArray(node_bc, dims=("obc_node",))
                 self.ds["node_bc"].attrs["long_name"] = "open boundary nodes"
                 print(f"Open boundary nodes loaded successfully from {obcfile_path}")
                 # print(self.ds.node_bc.values)
 
-    def _setup_nv_ccw(self):
+    def _setup_nv_ccw(self) -> None:
         """
         Set up the counterclockwise nv_ccw.
         """
@@ -136,7 +133,13 @@ class FvcomDataLoader:
             "long_name"
         ] = "nodes surrounding element in unti-clockwise direction for matplotlib"
 
-    def slice_by_time(self, start, end, copy=False, reset_time=False):
+    def slice_by_time(
+        self,
+        start: str | np.datetime64,
+        end: str | np.datetime64,
+        copy: bool = False,
+        reset_time: bool = False,
+    ) -> xr.Dataset | None:
         """
         Slice the dataset by a time range.
 
@@ -193,7 +196,11 @@ class FvcomDataLoader:
             print(f"Error slicing dataset: {e}")
             return None
 
-    def _load_dataset(self):
+    def _load_dataset(self) -> xr.Dataset:
+        """Load the NetCDF dataset using xarray.
+        Returns:
+            xarray.Dataset: Loaded dataset.
+        """
         try:
             ds = xr.open_dataset(
                 self.ncfile_path,
@@ -207,7 +214,7 @@ class FvcomDataLoader:
         except FileNotFoundError:
             raise FileNotFoundError(f"File not found: {self.ncfile_path}")
 
-    def _convert_utm_to_geo(self):
+    def _convert_utm_to_geo(self) -> None:
         """Convert UTM coordinates (x, y) and (xc, yc) to geographic (lon, lat)."""
         lon, lat = self._xy_to_lonlat(self.ds.x.values, self.ds.y.values)
         lonc, latc = self._xy_to_lonlat(self.ds.xc.values, self.ds.yc.values)
@@ -217,8 +224,10 @@ class FvcomDataLoader:
         self.ds["lonc"] = xr.DataArray(lonc, dims="nele")
         self.ds["latc"] = xr.DataArray(latc, dims="nele")
 
-    def _add_depth_variables(self):
-        """Add 'z' and 'z_dfs' depth variables to the dataset. `z_dfs` is depth from the surface in positive."""
+    def _add_depth_variables(self) -> None:
+        """
+        Add 'z' and 'z_dfs' depth variables to the dataset. `z_dfs` is depth from the surface in positive.
+        """
         try:
             ## The following is too slow and revised using numpy's broadcasting as follows.
             # self.ds['z'] = (("siglay", "time", "node" ), np.array([self.ds.zeta + siglay * (self.ds.h + self.# ds.zeta) for siglay in self.ds.siglay]))
@@ -268,14 +277,28 @@ class FvcomDataLoader:
         except Exception as e:
             raise ValueError(f"Error in adding depth variables: {e}")
 
-    def _xy_to_lonlat(self, x, y):
-        """Convert UTM (x, y) to geographic coordinates (lon, lat)."""
+    def _xy_to_lonlat(
+        self,
+        x: float | np.ndarray,
+        y: float | np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Convert UTM (x, y) to geographic coordinates (lon, lat).
+
+        Parameters:
+        - x: UTM x-coordinates.
+        - y: UTM y-coordinates.
+
+        Returns:
+        - lon: Longitude coordinates.
+        - lat: Latitude coordinates.
+        """
         crs_from = f"+proj=utm +zone={self.zone} {'+north' if self.north else ''} +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
         crs_to = f"+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
         transformer = pyproj.Transformer.from_crs(crs_from, crs_to)
         return transformer.transform(x, y)
 
-    def _add_trailing_slash(self, directory_path):
+    def _add_trailing_slash(self, directory_path: str) -> str:
         """
         Add slash ("/") if directory path does not end with slash.
         """
@@ -284,7 +307,13 @@ class FvcomDataLoader:
             directory_path += "/"
         return directory_path
 
-    def _time_tolerence(self, time_tolerance):
+    def _time_tolerence(self, time_tolerance: int | None = None) -> None:
+        """
+        Snap time to the nearest hour within the specified tolerance range.
+
+        Parameters:
+        - time_tolerance: Tolerance in minutes to snap time to the nearest hour.
+        """
         is_positive_integer = isinstance(time_tolerance, int) and time_tolerance > 0
         if not is_positive_integer:
             print(
