@@ -1,5 +1,10 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+
 import numpy as np
 import pyproj
+import xarray as xr
 from sklearn.neighbors import NearestNeighbors
 
 
@@ -8,12 +13,21 @@ class FvcomAnalyzer:
     Provides analysis capabilities for FVCOM datasets.
     """
 
-    def __init__(self, dataset, zone=54, north=True):
+    def __init__(self, dataset: xr.Dataset, zone: int = 54, north: bool = True) -> None:
+        """
+        Initializes the FvcomAnalyzer with a dataset and projection parameters.
+
+        Parameters:
+        - dataset: An xarray Dataset containing FVCOM data.
+        - zone: UTM zone for coordinate transformation (default is 54).
+        - north: Boolean indicating if the UTM zone is in the northern hemisphere (default is True).
+        """
+
         self.ds = dataset
         self.zone = zone
         self.north = north
 
-    def get_variables_by_dims(self, dims):
+    def get_variables_by_dims(self, dims: Sequence[str]) -> list[str]:
         """
         Returns a list of variable names that have the specified dimensions.
 
@@ -23,12 +37,25 @@ class FvcomAnalyzer:
         Returns:
         - A list of variable names matching the specified dimensions.
         """
-        variables = [
-            var_name for var_name, var in self.ds.variables.items() if var.dims == dims
+        # variables = [
+        #     var_name for var_name, var in self.ds.variables.items() if var.dims == dims
+        # ]
+        dims_tup = tuple(dims)
+        variables: list[str] = [
+            var_name
+            for var_name, var in self.ds.variables.items()
+            if var.dims == dims_tup
         ]
+
         return variables
 
-    def nearest_neighbor(self, lon, lat, node=True, distances=False):
+    def nearest_neighbor(
+        self,
+        lon: float | np.ndarray,
+        lat: float | np.ndarray,
+        node: bool = True,
+        distances: bool = False,
+    ) -> int | tuple[float, int]:
         """
         Find the nearest node or element to the specified coordinates.
 
@@ -68,7 +95,9 @@ class FvcomAnalyzer:
             return distances_array[0, 0], nearest_index
         return nearest_index
 
-    def _lonlat_to_xy(self, lon, lat, inverse=False):
+    def _lonlat_to_xy(
+        self, lon: float | np.ndarray, lat: float | np.ndarray, inverse: bool = False
+    ) -> tuple[float, float] | tuple[np.ndarray, np.ndarray]:
         """
         Convert geographic coordinates to UTM or vice versa.
         """
