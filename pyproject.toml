@@ -32,7 +32,7 @@ dependencies = [
   "scikit-learn>=1.4",
   "imageio>=2.34",
   "moviepy>=1.0.3", 
-  "tqdm>=4.66"
+  "tqdm>=4.66",
 ]
 
 [project.optional-dependencies]
