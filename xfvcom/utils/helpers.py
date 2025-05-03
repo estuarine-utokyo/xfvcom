@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence
 
 if TYPE_CHECKING:
     # Forward-reference only for static type-checking; avoids import cycle
@@ -30,6 +30,14 @@ from ..utils.helpers_utils import clean_kwargs, unpack_plot_kwargs
 
 # import dask
 # from dask.delayed import delayed
+
+
+def _cleanup_files(paths: Sequence[Path], show_progress: bool = False) -> None:
+    iterator = (
+        tqdm(paths, desc="Cleaning up files", unit="file") if show_progress else paths
+    )
+    for p in iterator:
+        p.unlink()
 
 
 # -----------------------------------------------------------------------------
@@ -120,9 +128,10 @@ def create_gif(frames, output_gif=None, fps=10, cleanup=False):
             writer.append_data(imageio.imread(str(frame)))
     #  - remove via pathlib
     if cleanup:
-        for frame in tqdm(frames, desc="Cleaning up frames", unit="frame"):
-            # remove via pathlib
-            Path(frame).unlink()
+        # for frame in tqdm(frames, desc="Cleaning up frames", unit="frame"):
+        #     # remove via pathlib
+        #     Path(frame).unlink()
+        _cleanup_files([Path(f) for f in frames], show_progress=True)
     print(f"GIF animation saved at: {output_gif}")
 
 
@@ -175,12 +184,12 @@ def create_gif_with_batch(
 
     # Cleanup temporary files
     if cleanup:
-        for temp_gif in temp_gifs:
-            # remove file via pathlib
-            Path(temp_gif).unlink()
-        for frame in frames:
-            Path(frame).unlink()
-
+        # for temp_gif in temp_gifs:
+        #     # remove file via pathlib
+        #     Path(temp_gif).unlink()
+        # for frame in frames:
+        #     Path(frame).unlink()
+        _cleanup_files([Path(p) for p in temp_gifs] + [Path(f) for f in frames])
     print(f"GIF animation saved at: {output_gif}")
 
 
@@ -220,8 +229,9 @@ def create_mp4(frames, output_mp4=None, fps=10, cleanup=True):
     # clip.write_videofile(output_mp4, codec="libx264", fps=fps, pix_fmt="yuv420p")
 
     if cleanup:
-        for frame in frames:
-            Path(frame).unlink()
+        # for frame in frames:
+        #     Path(frame).unlink()
+        _cleanup_files([Path(f) for f in frames])
 
     # print(f"Saved the MP4 animation as '{output_mp4}'.")
 
@@ -304,9 +314,10 @@ def create_gif_from_frames(
                     writer.append_data(frame)
 
     if cleanup:
-        for frame in frames:
-            # Remove frame file to clean up
-            Path(frame).unlink()
+        # for frame in frames:
+        #     # Remove frame file to clean up
+        #     Path(frame).unlink()
+        _cleanup_files([Path(f) for f in frames])
 
     print(f"GIF Animation created successfully at: {output_gif}")
 
