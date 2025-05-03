@@ -173,11 +173,11 @@ def create_gif(
     output_gif = Path(output_gif).expanduser()
     # Create GIF using imageio without batch processing
     duration = int(1000 / fps)
-    with imageio.get_writer(str(output_gif), mode="I", duration=duration) as writer:
+    with imageio.get_writer(str(output_gif), mode="I", duration=duration) as writer:  # type: ignore[attr-defined]
         # with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
         for frame in tqdm(frames, desc="Creating GIF", unit="frame"):
             # ensure str for imageio
-            writer.append_data(imageio.imread(str(frame)))
+            writer.append_data(imageio.imread(str(frame)))  # type: ignore[attr-defined]
     #  - remove via pathlib
     if cleanup:
         # for frame in tqdm(frames, desc="Cleaning up frames", unit="frame"):
@@ -228,20 +228,20 @@ def create_gif_with_batch(
         batch_frames = frames[batch_start : batch_start + batch_size]
         temp_gif = f"{output_gif}_batch_{i}.gif"
         temp_gifs.append(temp_gif)
-        with imageio.get_writer(str(temp_gif), mode="I", duration=duration) as writer:
+        with imageio.get_writer(str(temp_gif), mode="I", duration=duration) as writer:  # type: ignore[attr-defined]
             # with imageio.get_writer(temp_gif, mode="I", fps=fps) as writer:
             for frame in tqdm(
                 batch_frames, desc=f"Batch {i}/{total_batches}", unit="frame"
             ):
-                writer.append_data(imageio.imread(frame))
+                writer.append_data(imageio.imread(frame))  # type: ignore[attr-defined]
 
     # Combine batched GIFs into final GIF
     # with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
-    with imageio.get_writer(str(output_gif), mode="I", duration=duration) as writer:
+    with imageio.get_writer(str(output_gif), mode="I", duration=duration) as writer:  # type: ignore[attr-defined]
         for temp_gif in tqdm(temp_gifs, desc="Combining Batches", unit="batch"):
             with imageio.get_reader(temp_gif) as reader:
-                for frame in reader:
-                    writer.append_data(frame)
+                for frame in reader:  # type: ignore[attr-defined]
+                    writer.append_data(frame)  # type: ignore[attr-defined]
 
     # Cleanup temporary files
     if cleanup:
@@ -384,21 +384,21 @@ def create_gif_from_frames(
         temp_gifs.append(temp_gif)
 
         duration = int(1000 / fps)
-        with imageio.get_writer(str(output_gif), mode="I", duration=duration) as writer:
+        with imageio.get_writer(str(output_gif), mode="I", duration=duration) as writer:  # type: ignore[assignment]
             # with imageio.get_writer(temp_gif, mode="I", fps=fps) as writer:
             for frame in tqdm(
                 batch_frames, desc=f"Batch {i}/{total_batches}", unit="frame"
             ):
-                writer.append_data(imageio.imread(frame))
+                writer.append_data(imageio.imread(frame))  # type: ignore[attr-defined]
     logger.info("Temporary GIFs created successfully.")
 
     # Combine temporary GIFs into the final GIF
     # Robust version of the above code
-    with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
+    with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:  # type: ignore[attr-defined]
         for temp_gif in tqdm(temp_gifs, desc="Combining Batches", unit="batch"):
             with imageio.get_reader(temp_gif) as reader:
-                for frame in reader:
-                    writer.append_data(frame)
+                for frame in reader:  # type: ignore[attr-defined]
+                    writer.append_data(frame)  # type: ignore[attr-defined]
 
     if cleanup:
         # for frame in frames:

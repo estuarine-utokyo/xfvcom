@@ -106,7 +106,7 @@ class FvcomDataLoader:
             if os.path.isfile(obcfile_path):
                 # print(f"Loading open boundary nodes from {obcfile_path}")
                 df = pd.read_csv(obcfile_path, header=None, skiprows=1, sep=r"\s+")
-                node_bc = df.iloc[:, 1].values - 1
+                node_bc: np.ndarray = df.iloc[:, 1].to_numpy() - 1
                 if verbose:
                     print(f"{node_bc}")
                 self.ds["node_bc"] = xr.DataArray(node_bc, dims=("obc_node",))
@@ -123,8 +123,8 @@ class FvcomDataLoader:
             "long_name"
         ] = "nodes surrounding element in zero-based for matplotlib"
         # Extract triangle connectivity
-        nv_ccw = self.ds["nv"].values.T - 1
-        nv_ccw = self.ds["nv_zero"].values
+        # nv_ccw: np.ndarray = self.ds["nv"].to_numpy().T - 1
+        nv_ccw: np.ndarray = self.ds["nv_zero"].to_numpy()
         # Reverse node order for counter-clockwise triangles that matplotlib expects.
         nv_ccw = nv_ccw[:, ::-1]
         # print(nv_ccw.shape)
