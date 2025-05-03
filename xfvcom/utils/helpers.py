@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from ..plot.core import FvcomPlotter
 
 import inspect
+import logging
 import multiprocessing
 import os
 import shutil
@@ -30,6 +31,10 @@ from ..utils.helpers_utils import clean_kwargs, unpack_plot_kwargs
 
 # import dask
 # from dask.delayed import delayed
+
+
+# Create module‐level logger
+logger = logging.getLogger(__name__)
 
 
 def _cleanup_files(paths: Sequence[Path], show_progress: bool = False) -> None:
@@ -132,7 +137,7 @@ def create_gif(frames, output_gif=None, fps=10, cleanup=False):
         #     # remove via pathlib
         #     Path(frame).unlink()
         _cleanup_files([Path(f) for f in frames], show_progress=True)
-    print(f"GIF animation saved at: {output_gif}")
+    logger.info("GIF animation saved at: %s", output_gif)
 
 
 def create_gif_with_batch(
@@ -190,7 +195,7 @@ def create_gif_with_batch(
         # for frame in frames:
         #     Path(frame).unlink()
         _cleanup_files([Path(p) for p in temp_gifs] + [Path(f) for f in frames])
-    print(f"GIF animation saved at: {output_gif}")
+    logger.info("GIF animation saved at: %s", output_gif)
 
 
 def create_mp4(frames, output_mp4=None, fps=10, cleanup=True):
@@ -303,7 +308,7 @@ def create_gif_from_frames(
                 batch_frames, desc=f"Batch {i}/{total_batches}", unit="frame"
             ):
                 writer.append_data(imageio.imread(frame))
-    print("Temporary GIFs created successfully.")
+    logger.info("Temporary GIFs created successfully.")
 
     # Combine temporary GIFs into the final GIF
     # Robust version of the above code
@@ -318,8 +323,7 @@ def create_gif_from_frames(
         #     # Remove frame file to clean up
         #     Path(frame).unlink()
         _cleanup_files([Path(f) for f in frames])
-
-    print(f"GIF Animation created successfully at: {output_gif}")
+    logger.info("GIF Animation created successfully at: %s", output_gif)
 
 
 class FrameGenerator:
@@ -759,7 +763,7 @@ class PlotHelperMixin:
         if "river_names" in self.ds:
             num_rivers = self.ds["river_names"].sizes["rivers"]
         else:
-            print("ERROR: No 'river_names' variable found.")
+            logger.error("No 'river_names' variable found.")
             return None
 
         # バッチの数を計算
