@@ -1,6 +1,7 @@
 # xfvcom.py: A Python module for loading, analyzing, and plotting FVCOM model output data in xfvcom package.
 # Author: Jun Sasaki
 import inspect
+import logging
 import warnings
 from collections.abc import Sequence
 from datetime import datetime
@@ -43,6 +44,21 @@ warnings.filterwarnings(
     message="invalid value encountered in linestrings",
     category=RuntimeWarning,
 )
+
+# ------------------------------------------------------------------
+# Module-level logger (keeps external behaviour unchanged)
+# ------------------------------------------------------------------
+logger = logging.getLogger(__name__)
+
+# ------------------------------------------------------------------
+# If user hasn’t configured logging, fall back to console INFO output
+# (→ behaviour almost identical to former `print()` calls).
+# ------------------------------------------------------------------
+if not logger.hasHandlers():
+    _h = logging.StreamHandler()  # stdout/stderr 自動選択
+    _h.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(_h)
+    logger.setLevel(logging.INFO)
 
 _TRICF_SIG = set(inspect.signature(maxes.Axes.tricontourf).parameters)
 
@@ -92,7 +108,9 @@ class FvcomPlotter(PlotHelperMixin):
         - **kwargs: Additional arguments for customization (e.g., dpi, figsize).
         """
         if var_name not in self.ds:
-            print(f"Error: the variable '{var_name}' is not found in the dataset.")
+            msg = f"Error: the variable '{var_name}' is not found in the dataset."
+            logger.error(msg)
+            # print(msg)          # keep previous console output
             return None
 
         # Validate the dimension
@@ -141,10 +159,13 @@ class FvcomPlotter(PlotHelperMixin):
 
         if log:  # Check if log scale is requested
             if data.min() <= 0:
-                print(
-                    "Warning: Logarithmic scale cannot be used with non-positive values."
+
+                logger.warning(
+                    "Logarithmic scale cannot be used with non-positive values; switching to linear scale."
                 )
-                print("Switching to linear scale.")
+                # print(
+                #     "Warning: Logarithmic scale cannot be used with non-positive values. Switching to linear scale."
+                # )
                 log = False
 
         # If no axis is provided, create a new one
@@ -327,7 +348,10 @@ class FvcomPlotter(PlotHelperMixin):
         - **kwargs: Additional arguments for customization (e.g., dpi, figsize).
         """
         if varname not in self.ds:
-            print(f"Error: the variable '{varname}' is not found in the dataset.")
+
+            msg = f"Error: the variable '{varname}' is not found in the dataset."
+            logger.error(msg)
+            # print(msg)
             return None
 
         # Validate the dimensions of the variable
@@ -838,7 +862,9 @@ class FvcomPlotter(PlotHelperMixin):
         - **kwargs: Additional arguments for customization (e.g., levels).
         """
         if var_name not in self.ds:
-            print(f"Error: The variable '{var_name}' is not found in the dataset.")
+            msg = f"Error: The variable '{var_name}' is not found in the dataset."
+            logger.error(msg)
+            # print(msg)
             return None
 
         # Auto-detect the vertical coordinate
@@ -1064,11 +1090,19 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             ymin, ymax = ylim
         if verbose:
-            print(f"x range: {xmin} to {xmax}")
-            print(f"y range: {ymin} to {ymax}")
-            print(
-                f"nv_ccw shape: {self.ds.nv_ccw.shape}, nv_ccw min: {self.ds.nv_ccw.min()}, nv_ccw max: {self.ds.nv_ccw.max()}"
+            logger.debug(f"x range: {xmin} to {xmax}")
+            logger.debug(f"y range: {ymin} to {ymax}")
+            logger.debug(
+                "nv_ccw shape: %s, nv...min: %s, nv_ccw max: %s",
+                self.ds.nv_ccw.shape,
+                self.ds.nv_ccw.min(),
+                self.ds.nv_ccw.max(),
             )
+            # print(f"x range: {xmin} to {xmax}")
+            # print(f"y range: {ymin} to {ymax}")
+            # print(
+            #     f"nv_ccw shape: {self.ds.nv_ccw.shape}, nv...min: {self.ds.nv_ccw.min()}, nv_ccw max: {self.ds.nv_ccw.max()}"
+            # )
 
         # Validate nv_ccw and coordinates
         if verbose:
@@ -1088,9 +1122,11 @@ class FvcomPlotter(PlotHelperMixin):
         try:
             triang = mtri.Triangulation(x, y, triangles=nv)
             if verbose:
-                print(f"Number of triangles: {len(triang.triangles)}")
+                logger.debug("Number of triangles: %d", len(triang.triangles))
+                # print(f"Number of triangles: {len(triang.triangles)}")
         except ValueError as e:
-            print(f"Error creating Triangulation: {e}")
+            logger.error("Error creating Triangulation: %s", e)
+            # print(f"Error creating Triangulation: {e}")
             return None
 
         # Set up axis
@@ -1263,7 +1299,9 @@ class FvcomPlotter(PlotHelperMixin):
                 ax.tick_params(labelsize=11, labelcolor="black")
 
         if coastlines:
-            print("Plotting coastlines...")
+            logger.info("Plotting coastlines...")
+            # print("Plotting coastlines...")
+
             nv = self.ds.nv_ccw.values
             nbe = np.array(
                 [
@@ -1285,7 +1323,9 @@ class FvcomPlotter(PlotHelperMixin):
 
         if obclines:
             # Plot open boundary lines
-            print("Plotting open boundary lines...")
+            logger.info("Plotting open boundary lines...")
+            # print("Plotting open boundary lines...")
+
             if "node_bc" not in self.ds:
                 raise ValueError(
                     "Dataset does not contain 'node_bc' variable for open boundary lines."
@@ -1353,7 +1393,8 @@ class FvcomPlotter(PlotHelperMixin):
                 elif arg in frame_globals:
                     dyn_kwargs[arg] = frame_globals[arg]
                 else:
-                    print(f"Warning: Unable to resolve argument '{arg}'.")
+                    logger.warning("Unable to resolve argument '%s'.", arg)
+                    # print(f"Warning: Unable to resolve argument '{arg}'.")
 
             # Call the user callback
             post_process_func(**dyn_kwargs)
@@ -1362,7 +1403,8 @@ class FvcomPlotter(PlotHelperMixin):
         if save_path:
             dpi = opts.dpi or self.cfg.dpi
             fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
-            print(f"Plot saved to: {save_path}")
+            logger.info("Plot saved to: %s", save_path)
+            # print(f"Plot saved to: {save_path}")
 
         return ax
 
