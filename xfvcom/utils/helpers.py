@@ -386,7 +386,7 @@ class FrameGenerator:
         for i, t in enumerate(time_slice):
             if verbose:
                 print(f"[{class_label}] rank={rank}  time={t}")
-            save_path = os.path.join(proc_output_dir, f"{base_name}_{t}.png")
+            save_path = Path(proc_output_dir) / f"{base_name}_{t}.png"
             frame_data = da.isel(time=i) if "time" in da.dims else da
 
             cls.plot_data(
