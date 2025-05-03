@@ -6,92 +6,89 @@
 
 ## Features
 
-- **Load FVCOM data**: Easily load NetCDF-format FVCOM input and output files.
-- **Coordinate transformation**: Convert between UTM coordinates and geographic coordinates (longitude/latitude).
-- **Depth calculation**: Add depth variables based on water levels, sigma layers, and bathymetry.
-- **Analysis tools**:
-  - Find nearest nodes.
-  - Filter variables based on specific dimensions.
-- **Visualization**:
-  - Create time-series plots.
-  - Generate 2D contour and vector plots.
-  - Produce animated GIFs for 2D spatial data.
+* **Load FVCOM data**
+  Easily load NetCDF-format FVCOM input and output files.
+* **Coordinate transformation**
+  Convert between UTM coordinates and geographic coordinates (longitude/latitude).
+* **Depth calculation**
+  Add depth variables based on water levels, sigma layers, and bathymetry.
+* **Analysis tools**
+
+  * Find nearest nodes
+  * Filter variables based on specific dimensions
+* **Visualization**
+
+  * Create time-series plots
+  * Generate 2D contour and vector plots
+  * Produce animated GIFs and MP4s for 2D spatial data
 
 ---
 
 ## Installation
 
-### Install in Development Mode
+This package is currently intended for **local development only** and is **not** published on PyPI.
 
-Follow these steps to install the package in development mode:
+### Prerequisites
 
-1. Clone the repository:
-   ```bash
-   git clone git@github.com:estuarine-utokyo/xfvcom.git
-   cd xfvcom
-   ```
+* Miniforge (or compatible conda distribution)
+* Python ≥ 3.10
 
-2. Install required dependencies:
-   - **Using conda**:
-     ```bash
-     conda install numpy xarray matplotlib pyproj scikit-learn
-     conda install jupyterlab pandas hvplot
-     conda install imageio moviepy tqdm
-     ```
-   - **Using pip**:
-     ```bash
-     pip install -r requirements.txt
-     ```
+### Create and activate conda environment
 
-3. Install the package in development mode:
-   ```bash
-   pip install -e .
-   ```
+```bash
+conda create -n xfvcom python=3.10 -c conda-forge \
+    numpy xarray pandas matplotlib cartopy pyproj \
+    scipy scikit-learn imageio moviepy tqdm \
+    pytest mypy black isort
+conda activate xfvcom
+```
+
+### Install xfvcom in editable mode
+
+```bash
+pip install -e .
+```
 
 ---
 
 ## Usage
 
 ### Load Data
+
 ```python
 from xfvcom import FvcomDataLoader
 
-# Load FVCOM data
 loader = FvcomDataLoader(base_path="/path/to/data", ncfile="sample.nc")
-dataset = loader.ds
+ds = loader.ds
 ```
 
 ### Analyze Data
+
 ```python
 from xfvcom import FvcomAnalyzer
 
-# Initialize analyzer
-analyzer = FvcomAnalyzer(dataset)
-nearest_node = analyzer.nearest_neighbor(lon=140.0, lat=35.0)
-print(f"Nearest node index: {nearest_node}")
+analyzer = FvcomAnalyzer(ds)
+idx = analyzer.nearest_neighbor(lon=140.0, lat=35.0)
+print(f"Nearest node index: {idx}")
 ```
 
 ### Plot Data
 
 #### Time-Series Plot
+
 ```python
 from xfvcom import FvcomPlotConfig, FvcomPlotter
 
-# Configure plot settings
-plot_config = FvcomPlotConfig(figsize=(8, 2), dpi=300)
-plotter = FvcomPlotter(dataset, plot_config)
-
-# Plot time series
-time_series_plot = plotter.plot_timeseries(
-    var_name="zeta", index=nearest_node, start="2020-01-01", end="2020-12-31", rolling_window=25
-)
+cfg = FvcomPlotConfig(figsize=(8, 2), dpi=300)
+plotter = FvcomPlotter(ds, cfg)
+fig = plotter.ts_contourf("zeta", index=idx, start="2020-01-01", end="2020-12-31")
 ```
 
-#### Generate 2D GIF/MP4 Animation
+#### 2D GIF/MP4 Animation
+
 ```python
 from xfvcom.plot_utils import create_anim_2d_plot
 
-# Generate a GIF/MP4 animation
 create_anim_2d_plot(
     plotter=plotter,
     var_name="salinity",
@@ -106,39 +103,33 @@ create_anim_2d_plot(
 
 ## Dependencies
 
-This package depends on the following libraries:
+All runtime dependencies are listed in **pyproject.toml** under `[project.dependencies]`. To add new packages, use:
 
-- `numpy`
-- `xarray`
-- `matplotlib`
-- `pyproj`
-- `scikit-learn`
-- `imageio`
-- `moviepy`
-- `cartopy`
-
-To install the required dependencies, run:
 ```bash
-pip install -r requirements.txt
+conda install -c conda-forge <package>
 ```
 
 ---
 
 ## Developer Information
 
-### Run Tests
-Run tests using `pytest`:
+### Run Tests & Quality Checks
+
 ```bash
+# 1) Unit tests
 pytest tests/
+
+# 2) Static type checking
+mypy .
+
+# 3) Code formatting and import order
+black --check .
+isort --check-only .
 ```
 
 ### Contributing
-Contributions are welcome! Follow these steps to submit a pull request:
 
-1. Fork the repository.
-2. Create a new branch (`git checkout -b feature-branch`).
-3. Make your changes.
-4. Submit a pull request.
+Contributions are welcome! Please fork the repo, create a feature branch, and submit a pull request.
 
 ---
 
@@ -150,7 +141,17 @@ This project is licensed under the [MIT License](LICENSE).
 
 ## File Relationships
 
-- `xfvcom.py`: Core module for loading, analyzing, and plotting FVCOM data.
-- `helpers.py`: Provides helper functions for GIF/MP4 generation, frame creation, and batch plotting.
-- `helpers_utils.py`: Utility functions for cleaning and unpacking keyword arguments.
-- `plot_utils.py`: Focuses on creating 2D plot animations (GIF/MP4) by integrating `helpers.py` and `xfvcom.py`.
+* **xfvcom.py**
+  Core module for loading, analyzing, and plotting FVCOM data.
+* **helpers.py**
+  Provides helper functions for GIF/MP4 generation, frame creation, and batch plotting.
+* **helpers\_utils.py**
+  Utility functions for cleaning and unpacking keyword arguments.
+* **plot\_utils.py**
+  Creates 2D plot animations (GIF/MP4) by integrating `helpers.py` and `xfvcom.py`.
+* **plot\_options.py**
+  Configuration dataclass for plot styling and options.
+* **core.py**
+  Main plotting routines (contour, vector, section).
+* **io.py**
+  Data loader for FVCOM NetCDF files.

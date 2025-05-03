@@ -1,5 +1,21 @@
 from __future__ import annotations
 
+"""
+Helper functions and classes for creating GIF/MP4 animations,
+generating plot frames in parallel, and cleaning up temporary files.
+
+This module provides:
+- Listing PNG frame files from a directory.
+- Creating GIF animations from image frames (including batched processing).
+- Converting GIF to MP4 via ffmpeg.
+- Parallel frame generation via FrameGenerator.
+- Centralized cleanup of files with optional progress display.
+- PlotHelperMixin for batch‐plot utilities.
+
+Requires Python 3.10+ with `from __future__ import annotations`.
+Uses `pathlib.Path` for I/O and standard `logging` for status messages.
+"""
+
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 if TYPE_CHECKING:
