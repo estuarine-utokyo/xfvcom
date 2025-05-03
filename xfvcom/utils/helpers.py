@@ -111,18 +111,18 @@ def create_gif(frames, output_gif=None, fps=10, cleanup=False):
     """
     if output_gif is None:
         output_gif = "Animation.gif"
-    output_gif = os.path.expanduser(output_gif)
-
-    # GIF作成の逐次処理（バッチなし）
+    # Expand user and wrap as Path
+    output_gif = Path(output_gif).expanduser()
+    # Create GIF using imageio without batch processing
     with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
         for frame in tqdm(frames, desc="Creating GIF", unit="frame"):
-            writer.append_data(imageio.imread(frame))
-
-    # フレーム削除処理
+            # ensure str for imageio
+            writer.append_data(imageio.imread(str(frame)))
+    #  - remove via pathlib
     if cleanup:
         for frame in tqdm(frames, desc="Cleaning up frames", unit="frame"):
-            os.remove(frame)
-
+            # remove via pathlib
+            Path(frame).unlink()
     print(f"GIF animation saved at: {output_gif}")
 
 
@@ -356,7 +356,9 @@ class FrameGenerator:
         if verbose:
             print(f"[FrameGenerator] time={time}, kwargs={plot_kwargs}")
 
-        save_path = os.path.join(output_dir, f"{base_name}_{time}.png")
+        # save_path = os.path.join(output_dir, f"{base_name}_{time}.png")
+        # use pathlib for constructing the file path
+        save_path = Path(output_dir) / f"{base_name}_{time}.png"
 
         cls.plot_data(
             da=da,
@@ -396,8 +398,11 @@ class FrameGenerator:
 
         # 各プロセス専用フォルダを作成（ディスク I/O 競争を防止）
         rank = multiprocessing.current_process()._identity[0]  # プロセスID
-        proc_output_dir = os.path.join(output_dir, f"proc_{rank}")
-        os.makedirs(proc_output_dir, exist_ok=True)
+        # proc_output_dir = os.path.join(output_dir, f"proc_{rank}")
+        # os.makedirs(proc_output_dir, exist_ok=True)
+        # use pathlib for process‐specific output directory
+        proc_output_dir = Path(output_dir) / f"proc_{rank}"
+        proc_output_dir.mkdir(parents=True, exist_ok=True)
 
         # メモリ上に確保（I/O オーバーヘッド削減）
         da = da.isel(time=time_slice).load()
