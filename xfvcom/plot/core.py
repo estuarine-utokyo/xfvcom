@@ -270,14 +270,7 @@ class FvcomPlotter(PlotHelperMixin):
         da = da.isel(rivers=river_index)
 
         # 3) Resolve river name for labels
-        if "river_names" in self.ds:
-            raw = self.ds["river_names"].isel(rivers=river_index).values
-            name = raw.item() if isinstance(raw, np.ndarray) else raw
-            if isinstance(name, (bytes, bytearray)):
-                name = name.decode("utf-8")
-            river_name = str(name).strip()
-        else:
-            river_name = f"river {river_index}"
+        river_name = self._river_name(river_index)
 
         # 4) Default title / xlabel / ylabel
         if isinstance(title, str):
@@ -2590,6 +2583,28 @@ class FvcomPlotter(PlotHelperMixin):
             + da_node.isel(node=xr.DataArray(nv[:, 1], dims="nele"))
             + da_node.isel(node=xr.DataArray(nv[:, 2], dims="nele"))
         ) / 3.0
+
+    def _river_name(self, river_index: int | None) -> str:
+        """
+        Return **cleaned river name** for *river_index*.
+        Falls back to ``"river {index}"`` when ``river_names`` absent.
+
+        Raises
+        ------
+        ValueError
+            When ``river_index`` is *None* because a concrete river index is
+            required to resolve a name.
+        """
+        if river_index is None:
+            raise ValueError("`river_index` must be an integer (0-based) — got None.")
+        if "river_names" not in self.ds:
+            return f"river {river_index}"
+
+        raw = self.ds["river_names"].isel(rivers=river_index).values
+        name = raw.item() if isinstance(raw, np.ndarray) else raw
+        if isinstance(name, (bytes, bytearray)):
+            name = name.decode("utf-8")
+        return str(name).strip()
 
 
 # ------------------------------------------------------------------
