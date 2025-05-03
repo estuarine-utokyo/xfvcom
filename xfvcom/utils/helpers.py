@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 if TYPE_CHECKING:
     # Forward-reference only for static type-checking; avoids import cycle
@@ -37,7 +37,7 @@ from ..utils.helpers_utils import clean_kwargs, unpack_plot_kwargs
 logger = logging.getLogger(__name__)
 
 
-def _cleanup_files(paths: Sequence[Path], show_progress: bool = False) -> None:
+def _cleanup_files(paths: list[Path], show_progress: bool = False) -> None:
     iterator = (
         tqdm(paths, desc="Cleaning up files", unit="file") if show_progress else paths
     )
@@ -60,7 +60,7 @@ def ensure_dir(path: Path, clean: bool = False) -> None:
 # -----------------------------------------------------------------------------
 # File/Directory Utilities
 # -----------------------------------------------------------------------------
-def list_png_files(frames_dir: Path, prefix: Optional[str] = None) -> list[Path]:
+def list_png_files(frames_dir: Path, prefix: str | None = None) -> list[Path]:
     """
     Return sorted list of PNG files in frames_dir.
     If prefix is specified, only match files starting with '{prefix}_'.
@@ -76,8 +76,8 @@ def generate_frames_and_collect(
     processes: int,
     var_name: str,
     output_dir: Path,
-    siglay: Optional[int] = None,
-    post_process_func: Optional[Callable] = None,
+    siglay: int | None = None,
+    post_process_func: Callable | None = None,
     opts: Any = None,
     **plot_kwargs: Any,
 ) -> list[Path]:
@@ -109,7 +109,12 @@ def generate_frames_and_collect(
     return sorted(frame_paths)
 
 
-def create_gif(frames, output_gif=None, fps=10, cleanup=False):
+def create_gif(
+    frames: Sequence[str | Path],
+    output_gif: str | Path | None = None,
+    fps: int = 10,
+    cleanup: bool = False,
+) -> None:
     """
     Create a GIF animation from a list of frames using memory-efficient processing.
 
@@ -141,8 +146,12 @@ def create_gif(frames, output_gif=None, fps=10, cleanup=False):
 
 
 def create_gif_with_batch(
-    frames, output_gif=None, fps=10, batch_size=500, cleanup=False
-):
+    frames: Sequence[str | Path],
+    output_gif: str | Path | None = None,
+    fps: int = 10,
+    batch_size: int = 500,
+    cleanup: bool = False,
+) -> None:
     """
     Obsolete: This may not be superior to create_gif.
     Create a GIF animation from a list of frames with memory-efficient batch processing.
@@ -198,7 +207,12 @@ def create_gif_with_batch(
     logger.info("GIF animation saved at: %s", output_gif)
 
 
-def create_mp4(frames, output_mp4=None, fps=10, cleanup=True):
+def create_mp4(
+    frames: Sequence[str | Path],
+    output_mp4: str | Path | None = None,
+    fps: int = 10,
+    cleanup: bool = True,
+) -> None:
     """
     Create an MP4 animation from a list of frames.
     Currently this function does not work as expected. Use convert_gif_to_mp4 instead.
@@ -241,7 +255,10 @@ def create_mp4(frames, output_mp4=None, fps=10, cleanup=True):
     # print(f"Saved the MP4 animation as '{output_mp4}'.")
 
 
-def convert_gif_to_mp4(input_gif, output_mp4):
+def convert_gif_to_mp4(
+    input_gif: str | Path,
+    output_mp4: str | Path,
+) -> None:
     """
     Convert a GIF animation to an MP4 video using ffmpeg.
 
@@ -273,8 +290,13 @@ def convert_gif_to_mp4(input_gif, output_mp4):
 
 
 def create_gif_from_frames(
-    frames_dir, output_gif, fps=10, prefix=None, batch_size=500, cleanup=False
-):
+    frames_dir: str | Path,
+    output_gif: str | Path,
+    fps: int = 10,
+    prefix: str | None = None,
+    batch_size: int = 500,
+    cleanup: bool = False,
+) -> None:
     """
     Revised this method
     Create a GIF animation from PNG frames in batches to handle memory constraints.
@@ -585,10 +607,17 @@ class PlotHelperMixin:
     ds: Any  # added for static-type checkers
     cfg: Any
     ts_river: Callable[..., Any]
+    ts_plot: Callable[..., Any]
 
     def ts_plot_in_batches(
-        self, varnames, index, batch_size=4, k=None, png_prefix="plot", **kwargs
-    ):
+        self,
+        varnames: list[str],
+        index: int,
+        batch_size: int = 4,
+        k: int | None = None,
+        png_prefix: str = "plot",
+        **kwargs: Any,
+    ) -> None:
         """
         Batch-plot multiple variables (time-series) in groups of `batch_size`,
         delegating each subplot to self.ts_plot().
