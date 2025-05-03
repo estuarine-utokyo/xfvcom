@@ -6,7 +6,7 @@ import inspect
 import logging
 import warnings
 from collections.abc import Hashable, Sequence
-from typing import Any
+from typing import Any, Callable
 
 import cartopy.crs as ccrs
 import matplotlib.axes as maxes
@@ -17,6 +17,7 @@ import pyproj
 import xarray as xr
 from cartopy.mpl.geoaxes import GeoAxes
 from cartopy.mpl.ticker import LatitudeFormatter, LongitudeFormatter
+from matplotlib.axes import Axes
 from matplotlib.colorbar import Colorbar
 from matplotlib.colors import BoundaryNorm
 from matplotlib.dates import DateFormatter
@@ -79,17 +80,17 @@ class FvcomPlotter(PlotHelperMixin):
 
     def plot_timeseries(
         self,
-        var_name,
-        index,
-        log=False,
-        k=None,
+        var_name: str,
+        index: int,
+        log: bool = False,
+        k: int | None = None,
         start=None,
         end=None,
-        rolling_window=None,
-        ax=None,
-        save_path=None,
+        rolling_window: int | None = None,
+        ax: Axes | None = None,
+        save_path: str | None = None,
         **kwargs,
-    ):
+    ) -> Axes | None:
         """
         Plot a time series for a specified variable at a given node or element index.
 
@@ -205,7 +206,13 @@ class FvcomPlotter(PlotHelperMixin):
 
         return ax
 
-    def hvplot_time_series(self, var, siglay=None, node=None, **kwargs):
+    def hvplot_time_series(
+        self,
+        var: str,
+        siglay: int | None = None,
+        node: int | None = None,
+        **kwargs,
+    ):
         """
         Plot a time series for the specified variable.
         """
@@ -220,15 +227,15 @@ class FvcomPlotter(PlotHelperMixin):
 
     def ts_river(
         self,
-        da: xr.DataArray = None,
-        varname: str = None,
+        da: xr.DataArray | None = None,
+        varname: str | None = None,
         river_index: int = None,
-        rolling_window: int = None,
-        title=None,
-        verbose=False,
-        ax=None,
+        rolling_window: int | None = None,
+        title: str | None = None,
+        verbose: bool = False,
+        ax: Axes | None = None,
         **kwargs,
-    ):
+    ) -> tuple[plt.Figure, Axes]:
         """
         Plot a river variable time-series by delegating to self.ts_plot().
 
@@ -313,24 +320,24 @@ class FvcomPlotter(PlotHelperMixin):
 
     def ts_vector(
         self,
-        da_x: xr.DataArray = None,
-        da_y: xr.DataArray = None,
-        varname_x: str = None,
-        varname_y: str = None,
-        index: int = None,
+        da_x: xr.DataArray | None = None,
+        da_y: xr.DataArray | None = None,
+        varname_x: str | None = None,
+        varname_y: str | None = None,
+        index: int | None = None,
         xlabel: str = "",
         ylabel: str = "Wind speed (m/s)",
-        title: str = None,
-        rolling_window: int = None,
+        title: str | None = None,
+        rolling_window: int | None = None,
         show_legend: bool = True,
         with_magnitude: bool = True,
         show_vec_legend: bool = True,
-        vec_legend_speed: float = 10,
+        vec_legend_speed: float = 10.0,
         vec_legend_loc: tuple = (0.85, 0.1),
-        ax=None,
+        ax: Axes | None = None,
         opts: FvcomPlotOptions | None = None,
         **kwargs,
-    ):
+    ) -> tuple[plt.Figure, Axes]:
         """
         Plot time-series of vector components (u, v) and optionally their magnitude.
         Accept either (da_x, da_y) or (varname_x, varname_y) exclusively.
@@ -531,18 +538,18 @@ class FvcomPlotter(PlotHelperMixin):
     def ts_contourf_z(
         self,
         da: xr.DataArray,
-        index: int = None,
-        xlim: tuple = None,
-        ylim: tuple = None,
+        index: int | None = None,
+        xlim: tuple | None = None,
+        ylim: tuple | None = None,
         xlabel: str = "Time",
         ylabel: str = "Depth (m)",
-        title: str = None,
+        title: str | None = None,
         rolling_window: int | None = None,
-        ax=None,
-        cmap=None,
-        label=None,
-        contourf_kwargs: dict = None,
-        colorbar_kwargs: dict = None,
+        ax: Axes | None = None,
+        cmap: str | None = None,
+        label: str | None = None,
+        contourf_kwargs: dict | None = None,
+        colorbar_kwargs: dict | None = None,
         plot_surface: bool = False,
         surface_kwargs: dict | None = None,
         **kwargs,
@@ -712,24 +719,24 @@ class FvcomPlotter(PlotHelperMixin):
 
     def plot_timeseries_2d(
         self,
-        var_name,
-        index=None,
+        var_name: str,
+        index: int | None = None,
         start=None,
         end=None,
-        depth=False,
-        rolling_window=None,
-        ax=None,
+        depth: bool = False,
+        rolling_window: int | None = None,
+        ax: Axes | None = None,
         ylim=None,
-        levels=20,
-        vmin=None,
-        vmax=None,
-        cmap=None,
-        save_path=None,
-        method="contourf",
-        add_contour=False,
-        label_contours=False,
+        levels: int = 20,
+        vmin: float | None = None,
+        vmax: float | None = None,
+        cmap: str | None = None,
+        save_path: str | None = None,
+        method: str = "contourf",
+        add_contour: bool = False,
+        label_contours: bool = False,
         **kwargs,
-    ):
+    ) -> Axes | None:
         """
         Obsolete. Remove this method in future versions. Use ts_contourf_z instead.
         Plot a 2D time series for a specified variable as a contour map with time on the x-axis and a vertical coordinate (siglay/siglev) on the y-axis.
@@ -900,12 +907,12 @@ class FvcomPlotter(PlotHelperMixin):
         self,
         *,
         da: xr.DataArray | None = None,
-        save_path=None,
-        post_process_func=None,
+        save_path: str | None = None,
+        post_process_func: Callable | None = None,
         opts: FvcomPlotOptions | None = None,
         local: dict[str, Any] | None = None,
         **_,
-    ):
+    ) -> Axes | None:
         """
         Plot scalar field (DataArray) or mesh-only figure.
 
@@ -1136,15 +1143,12 @@ class FvcomPlotter(PlotHelperMixin):
                     extend=extend_flag,
                     **tc_kwargs,
                 )
-                # cbar = plt.colorbar(cf, ax=ax, extend=extend_flag, orientation='vertical', shrink=1.0)
                 cbar = self._make_colorbar(ax, cf, cbar_label, opts=opts)
-                # cbar.set_label(cbar_label, fontsize=self.cfg.fontsize["cbar_label"], labelpad=10)
             if with_mesh:
                 # Always use PlateCarree here.
                 ax.triplot(triang, color=color, lw=lw, transform=ccrs.PlateCarree())
             # Use set_extent for lat/lon ranges
             ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())  # type: ignore[union-attr]
-            # ax.set_extent([xmin, xmax, ymin, ymax], crs=projection)
             ax.set_title(title, fontsize=self.cfg.fontsize["title"])
             xlabel = extra.get("xlabel", "Longitude")
             ylabel = extra.get("ylabel", "Latitude")
@@ -1288,8 +1292,15 @@ class FvcomPlotter(PlotHelperMixin):
         return ax
 
     def add_marker(
-        self, ax=None, x=None, y=None, marker="o", color="red", size=20, **kwargs
-    ):
+        self,
+        ax: Axes | None = None,
+        x=None,
+        y=None,
+        marker: str = "o",
+        color: str = "red",
+        size: int = 20,
+        **kwargs,
+    ) -> Axes:
         """
         Add a marker to the existing plot (e.g., a mesh plot). Must be used with plot_2d.
 
@@ -1335,10 +1346,10 @@ class FvcomPlotter(PlotHelperMixin):
         skip: int | str | None = None,  # "auto" or explicit integer
         var_u: str = "u",
         var_v: str = "v",
-        ax: plt.Axes | None = None,
+        ax: Axes | None = None,
         opts: FvcomPlotOptions | None = None,
         **kwargs,
-    ) -> plt.Axes:
+    ) -> Axes:
         """
         Plot a 2-D current vector map for a single (time, siglay) slice.
         This is step-1 minimal version: no averaging, no automatic scaling.
@@ -1474,22 +1485,22 @@ class FvcomPlotter(PlotHelperMixin):
     def ts_contourf(
         self,
         da: xr.DataArray,
-        index: int = None,
-        x="time",
-        y="siglay",
+        index: int | None = None,
+        x: str = "time",
+        y: str = "siglay",
         xlim=None,
         ylim=None,
-        xlabel="Time",
-        ylabel="Sigma",
-        title=None,
-        rolling_window=None,
-        min_periods=None,
-        ax=None,
-        date_format=None,
-        contourf_kwargs: dict = None,
-        colorbar_kwargs: dict = None,
+        xlabel: str = "Time",
+        ylabel: str = "Sigma",
+        title: str | None = None,
+        rolling_window: int | None = None,
+        min_periods: int | None = None,
+        ax: Axes | None = None,
+        date_format: str | None = None,
+        contourf_kwargs: dict | None = None,
+        colorbar_kwargs: dict | None = None,
         **kwargs,
-    ) -> tuple[plt.Figure, plt.Axes, Colorbar]:
+    ) -> tuple[plt.Figure, Axes, Colorbar]:
         """
         Plot a contour map of vertical time-series DataArray.
         contourf_kwargs and **kwargs are combined to flexibly pass any contourf parameters; colorbar_kwargs is for colorbar settings.
@@ -1576,13 +1587,6 @@ class FvcomPlotter(PlotHelperMixin):
             self._prepare_contourf_args(da, contourf_kwargs, kwargs)
         )
 
-        # Plot the contour map
-        # plot = da.plot.contourf(x=x, y=y, ylim=ylim, levels=levels, cmap=cmap,
-        #                        vmin=vmin, vmax=vmax, extend=extend, ax=ax,
-        #                        add_colorbar=False, **merged_contourf_kwargs)
-        # if ylim is None:
-        #    ylim = (da[y].min().item(), da[y].max().item())
-        #    ax.set_ylim(ylim)
         # Build kwargs for contourf
         plot_kwargs = {
             "x": x,
@@ -1617,22 +1621,22 @@ class FvcomPlotter(PlotHelperMixin):
     def ts_plot(
         self,
         da: xr.DataArray = None,
-        varname: str = None,
-        index: int = None,
-        k: int = None,
-        ax=None,
+        varname: str | None = None,
+        index: int | None = None,
+        k: int | None = None,
+        ax: Axes | None = None,
         xlabel: str | bool | None = None,
         ylabel: str | bool | None = True,
         title: str | bool | None = None,
-        color: str = None,
-        linestyle: str = None,
-        date_format: str = None,
-        xlim: tuple = None,
-        ylim: tuple = None,
-        rolling_window=None,
-        log=False,
+        color: str | None = None,
+        linestyle: str | None = None,
+        date_format: str | None = None,
+        xlim: tuple | None = None,
+        ylim: tuple | None = None,
+        rolling_window: int | None = None,
+        log: bool = False,
         **kwargs,
-    ) -> tuple[plt.Figure, plt.Axes]:
+    ) -> tuple[plt.Figure, Axes]:
         """
         1-D time series plot. Provides a DataArray or variable name to extract from the dataset.
         Accept either da or varname exclusively.
@@ -1748,21 +1752,21 @@ class FvcomPlotter(PlotHelperMixin):
     def section_contourf_z(
         self,
         da: xr.DataArray,
-        lat: float = None,
-        lon: float = None,
-        line: list[tuple[float, float]] = None,
-        spacing: float = 100.0,
-        xlim: tuple = None,
-        ylim: tuple = None,
+        lat: float | None = None,
+        lon: float | None = None,
+        line: list[tuple[float, float]] | None = None,
+        spacing: float | None = 100.0,
+        xlim: tuple | None = None,
+        ylim: tuple | None = None,
         xlabel: str = "Distance (m)",
         ylabel: str = "Depth (m)",
-        title: str = None,
-        ax=None,
+        title: str | None = None,
+        ax: Axes | None = None,
         land_color: str = "#A0522D",  # Default seabed/land color (sienna)
-        contourf_kwargs: dict = None,
-        colorbar_kwargs: dict = None,
+        contourf_kwargs: dict | None = None,
+        colorbar_kwargs: dict | None = None,
         **kwargs,
-    ):
+    ) -> tuple[plt.Figure, Axes, Colorbar]:
         """
         Plot a vertical section of a 3D variable (da) on FVCOM mesh.
 
@@ -1973,10 +1977,10 @@ class FvcomPlotter(PlotHelperMixin):
 
     def _sample_transect(
         self,
-        lat: float = None,
-        lon: float = None,
-        line: list[tuple[float, float]] = None,
-        spacing: float = 200.0,
+        lat: float | None = None,
+        lon: float | None = None,
+        line: list[tuple[float, float]] | None = None,
+        spacing: float | None = 200.0,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Generate evenly spaced sample points along a transect.
@@ -2000,15 +2004,16 @@ class FvcomPlotter(PlotHelperMixin):
             raise ValueError("Specify lat, lon, or line for section.")
 
         geod = pyproj.Geod(ellps="WGS84")
+        spacing_val: float = 200.0 if spacing is None else float(spacing)
         samples = [pts[0]]
         for p0, p1 in zip(pts[:-1], pts[1:]):
             lon0, lat0 = p0
             lon1, lat1 = p1
             _, _, dist = geod.inv(lon0, lat0, lon1, lat1)
-            steps = int(dist // spacing)
+            steps = int(dist // spacing_val)
             for i in range(1, steps + 1):
                 lon_i, lat_i, _ = geod.fwd(
-                    lon0, lat0, geod.inv(lon0, lat0, lon1, lat1)[0], i * spacing
+                    lon0, lat0, geod.inv(lon0, lat0, lon1, lat1)[0], i * spacing_val
                 )
                 samples.append((lon_i, lat_i))
             samples.append((lon1, lat1))
@@ -2022,7 +2027,11 @@ class FvcomPlotter(PlotHelperMixin):
         return lons, lats, dists
 
     def _extract_section_data(
-        self, da: xr.DataArray, lons: np.ndarray, lats: np.ndarray, dists: np.ndarray
+        self,
+        da: xr.DataArray,
+        lons: np.ndarray,
+        lats: np.ndarray,
+        dists: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Build 2D grids X (distance), Y (depth), and V (values).
@@ -2068,13 +2077,19 @@ class FvcomPlotter(PlotHelperMixin):
         X = np.broadcast_to(dists[np.newaxis, :], Y.shape)
         return X, Y, V
 
-    def _prepare_contourf_args(self, da, contourf_kwargs, extra_kwargs):
+    def _prepare_contourf_args(
+        self,
+        da: xr.DataArray,
+        contourf_kwargs: dict | None,
+        extra_kwargs: dict | None,
+    ) -> tuple[dict, np.ndarray, str, float, float, str]:
         """
         Merge contourf_kwargs and extra_kwargs, and extract levels, cmap, vmin, vmax, extend.
         Returns:
             merged_kwargs, levels, cmap, vmin, vmax, extend
         """
         contourf_kwargs = contourf_kwargs or {}
+        extra_kwargs = extra_kwargs or {}
         merged = {**contourf_kwargs, **extra_kwargs}
 
         # Extract and handle contourf parameters with appropriate defaults
@@ -2130,12 +2145,12 @@ class FvcomPlotter(PlotHelperMixin):
 
     def _make_colorbar(
         self,
-        ax,
+        ax: Axes,
         mappable,
-        label,
+        label: str,
         colorbar_kwargs: dict | None = None,
         opts: FvcomPlotOptions | None = None,
-    ):
+    ) -> Colorbar | None:
         """
         Create and attach a colorbar to `ax` for the given mappable (QuadContourSet).
         Obeying priority:
@@ -2190,7 +2205,12 @@ class FvcomPlotter(PlotHelperMixin):
         return cbar
 
     def _format_time_axis(
-        self, ax: plt.Axes, title: str, xlabel: str, ylabel: str, date_format: str
+        self,
+        ax: Axes,
+        title: str,
+        xlabel: str,
+        ylabel: str,
+        date_format: str,
     ) -> None:
         """
         Helper function to format the time axis for time series plots.
@@ -2215,7 +2235,10 @@ class FvcomPlotter(PlotHelperMixin):
         return da.sel(time=slice(start_sel, end_sel))
 
     def _slice_time_series(
-        self, da: xr.DataArray, index: int = None, k: int = None
+        self,
+        da: xr.DataArray,
+        index: int | None = None,
+        k: int | None = None,
     ) -> tuple[xr.DataArray, Hashable | None, str | None]:
         """
         Slice a DataArray for 1D or vertical time series.
@@ -2311,7 +2334,10 @@ class FvcomPlotter(PlotHelperMixin):
         return xlabel, ylabel, title
 
     def _apply_log_scale(
-        self, ax: plt.Axes, data: xr.DataArray, log_flag: bool
+        self,
+        ax: Axes,
+        data: xr.DataArray,
+        log_flag: bool,
     ) -> None:
         """
         Apply logarithmic scale to the y-axis if requested, using proper locator and formatter.
@@ -2385,8 +2411,8 @@ class FvcomPlotter(PlotHelperMixin):
         self,
         u3d: xr.DataArray,
         v3d: xr.DataArray,
-        time_sel=None,
-        siglay_sel=None,
+        time_sel: int | slice | list | tuple | None = None,
+        siglay_sel: int | slice | list | tuple | None = None,
         reduce: dict | None = None,
     ) -> tuple[xr.DataArray, xr.DataArray]:
         """
@@ -2464,7 +2490,7 @@ class FvcomPlotter(PlotHelperMixin):
 
         return uc, vc
 
-    def _auto_skip(self, nele, base=3000):
+    def _auto_skip(self, nele: int, base: int = 3000) -> int:
         """
         Return suitable skip value so that plotted arrows ≈ nele/base.
         """
@@ -2472,7 +2498,12 @@ class FvcomPlotter(PlotHelperMixin):
 
         return max(1, int(math.sqrt(nele / base)))
 
-    def _apply_indexer(self, da: xr.DataArray, dim: str, idx):
+    def _apply_indexer(
+        self,
+        da: xr.DataArray,
+        dim: str,
+        idx: int | slice | list | tuple | None = None,
+    ) -> xr.DataArray:
         """
         Apply idx to dim, choosing isel (positional) or sel (label) automatically.
         * Positional types → .isel(drop=False)
@@ -2508,7 +2539,10 @@ class FvcomPlotter(PlotHelperMixin):
                 "Specify a valid label or use opts.vec_time (positional index)."
             ) from e
 
-    def _label_to_index(self, label) -> int | None:
+    def _label_to_index(
+        self,
+        label: Hashable,
+    ) -> int | None:
         """
         Return the positional index of *label* along self.ds.time.
         Works for integer labels as well as numpy.datetime64 / pandas.Timestamp.
@@ -2540,7 +2574,12 @@ class FvcomPlotter(PlotHelperMixin):
         # --- C. unsupported coordinate type ---------------------------
         return None
 
-    def _layer_thickness(self, *, siglay=None, time_sel=None):
+    def _layer_thickness(
+        self,
+        *,
+        siglay: int | slice | list | tuple | None = None,
+        time_sel=None,
+    ) -> xr.DataArray:
         """
         Return physical layer thickness (m) on cell centres.
         Dimensions → ('time', 'siglay', 'nele')
@@ -2576,7 +2615,15 @@ class FvcomPlotter(PlotHelperMixin):
 
         return thick_cell
 
-    def _node2cell_mean(self, da_node):
+    def _node2cell_mean(
+        self,
+        da_node: xr.DataArray,
+    ) -> xr.DataArray:
+        """
+        Convert node-based data to cell-centre by averaging three surrounding nodes.
+        * da_node: DataArray with dims ('time', 'node')
+        * Returns: DataArray with dims ('time', 'nele')
+        """
         nv = self.ds["nv_zero"].values  # (nele, 3) node indices
         return (
             da_node.isel(node=xr.DataArray(nv[:, 0], dims="nele"))
