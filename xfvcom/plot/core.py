@@ -5,12 +5,10 @@ import logging
 import warnings
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Callable, Dict, Hashable, Tuple
+from typing import Any, Hashable
 
 import cartopy.crs as ccrs
-import cartopy.io.img_tiles as cimgt
 import matplotlib.axes as maxes
-import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 import numpy as np
@@ -2091,8 +2089,6 @@ class FvcomPlotter(PlotHelperMixin):
         Generate evenly spaced sample points along a transect.
         Returns: lons, lats, cumulative distances (m).
         """
-        import numpy as np
-        import pyproj
 
         # Determine transect line endpoints
         if line:
@@ -2138,8 +2134,6 @@ class FvcomPlotter(PlotHelperMixin):
         """
         Build 2D grids X (distance), Y (depth), and V (values).
         """
-        import numpy as np
-        import pyproj
         from scipy.spatial import KDTree
 
         # Triangulate mesh for domain test
@@ -2427,29 +2421,7 @@ class FvcomPlotter(PlotHelperMixin):
             else:
                 title = f"Time Series of {long_name}{roll_txt}"
         else:  # None, False, "" → no label
-            xlabel = ""
-
-        # Build title only when True
-        if title is None:
             title = ""
-        elif isinstance(title, str):
-            pass
-        else:
-
-            # if title is None:
-            # add rolling text if requested
-            roll_txt = (
-                f" with {rolling_window}-hour Rolling Mean" if rolling_window else ""
-            )
-            if spatial_dim:
-                if layer_dim:
-                    title = f"Time Series of {long_name} ({spatial_dim}={index}, {layer_dim}={k}){roll_txt}"
-                else:
-                    title = (
-                        f"Time Series of {long_name} ({spatial_dim}={index}){roll_txt}"
-                    )
-            else:
-                title = f"Time Series of {long_name}{roll_txt}"
 
         return xlabel, ylabel, title
 
@@ -2622,9 +2594,6 @@ class FvcomPlotter(PlotHelperMixin):
         * Fallback to .sel() if positional fails (IndexError) or if idx is non-positional.
         * If .sel() fails (KeyError), raise a clear ValueError for the user.
         """
-        from collections.abc import Sequence
-
-        import numpy as np
 
         # --- 1) decide whether idx looks positional ------------------
         is_positional = False
