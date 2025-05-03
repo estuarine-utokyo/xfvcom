@@ -145,7 +145,9 @@ def create_gif_with_batch(
     """
     if output_gif is None:
         output_gif = "Animation.gif"  # Default GIF file name
-    output_gif = os.path.expanduser(output_gif)
+    # output_gif = os.path.expanduser(output_gif)
+    # expand user and wrap as Path
+    output_gif = Path(output_gif).expanduser()
 
     # Temporary files for batched GIFs
     temp_gifs = []
