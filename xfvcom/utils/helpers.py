@@ -54,6 +54,16 @@ logger = logging.getLogger(__name__)
 
 
 def _cleanup_files(paths: list[Path], show_progress: bool = False) -> None:
+    """
+    Delete each file in `paths`.
+
+    Parameters
+    ----------
+    paths : list[Path]
+        File paths to remove.
+    show_progress : bool, default False
+        If True, show a progress bar.
+    """
     iterator = (
         tqdm(paths, desc="Cleaning up files", unit="file") if show_progress else paths
     )
@@ -78,8 +88,19 @@ def ensure_dir(path: Path, clean: bool = False) -> None:
 # -----------------------------------------------------------------------------
 def list_png_files(frames_dir: Path, prefix: str | None = None) -> list[Path]:
     """
-    Return sorted list of PNG files in frames_dir.
-    If prefix is specified, only match files starting with '{prefix}_'.
+    Return a sorted list of PNG files in the given directory.
+
+    Parameters
+    ----------
+    frames_dir : Path
+        Directory to search for `.png` files.
+    prefix : str | None, optional
+        If given, only include files starting with this prefix.
+
+    Returns
+    -------
+    list[Path]
+        Sorted list of matching PNG file paths.
     """
     if not frames_dir.exists():
         raise FileNotFoundError(f"{frames_dir} does not exist")
@@ -132,23 +153,28 @@ def create_gif(
     cleanup: bool = False,
 ) -> None:
     """
-    Create a GIF animation from a list of frames using memory-efficient processing.
+    Create a GIF animation from a list of image frames.
 
-    Parameters:
-    - frames: List of file paths to the frames.
-    - output_gif: Output file path for the GIF. Defaults to "output.gif".
-    - fps: Frames per second for the GIF.
-    - cleanup: If True, delete the frame files after creating the GIF.
-
-    Returns:
-    - None
+    Parameters
+    ----------
+    frames : list[str | Path]
+        Paths to input image files.
+    output_gif : str | Path, optional
+        Path to the output GIF file. Defaults to “Animation.gif”.
+    fps : int, default 10
+        Frames per second for the GIF.
+    cleanup : bool, default False
+        If True, delete source frames after creating the GIF.
     """
+
     if output_gif is None:
         output_gif = "Animation.gif"
     # Expand user and wrap as Path
     output_gif = Path(output_gif).expanduser()
     # Create GIF using imageio without batch processing
-    with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
+    duration = int(1000 / fps)
+    with imageio.get_writer(str(output_gif), mode="I", duration=duration) as writer:
+        # with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
         for frame in tqdm(frames, desc="Creating GIF", unit="frame"):
             # ensure str for imageio
             writer.append_data(imageio.imread(str(frame)))
@@ -169,19 +195,22 @@ def create_gif_with_batch(
     cleanup: bool = False,
 ) -> None:
     """
-    Obsolete: This may not be superior to create_gif.
-    Create a GIF animation from a list of frames with memory-efficient batch processing.
+    Create a GIF animation by processing frames in batches.
 
-    Parameters:
-    - frames: List of file paths to the frames.
-    - output_gif: Output file path for the GIF. Defaults to "output.gif".
-    - fps: Frames per second for the GIF.
-    - cleanup: If True, delete the frame files after creating the GIF.
-    - batch_size: Number of frames to process at a time to reduce memory usage.
-
-    Returns:
-    - None
+    Parameters
+    ----------
+    frames : list[str | Path]
+        Paths to input image files.
+    output_gif : str | Path, optional
+        Path to the final output GIF. Defaults to “Animation.gif”.
+    fps : int, default 10
+        Frames per second for both batch GIFs and the final GIF.
+    batch_size : int, default 500
+        Number of frames per intermediate batch GIF.
+    cleanup : bool, default False
+        If True, delete intermediate batch GIFs and source frames.
     """
+
     if output_gif is None:
         output_gif = "Animation.gif"  # Default GIF file name
     # expand user and wrap as Path
@@ -194,19 +223,21 @@ def create_gif_with_batch(
     ) // batch_size  # Calculate total number of batches
 
     # Process frames in batches
+    duration = int(1000 / fps)
     for i, batch_start in enumerate(range(0, len(frames), batch_size), start=1):
         batch_frames = frames[batch_start : batch_start + batch_size]
         temp_gif = f"{output_gif}_batch_{i}.gif"
         temp_gifs.append(temp_gif)
-
-        with imageio.get_writer(temp_gif, mode="I", fps=fps) as writer:
+        with imageio.get_writer(str(temp_gif), mode="I", duration=duration) as writer:
+            # with imageio.get_writer(temp_gif, mode="I", fps=fps) as writer:
             for frame in tqdm(
                 batch_frames, desc=f"Batch {i}/{total_batches}", unit="frame"
             ):
                 writer.append_data(imageio.imread(frame))
 
     # Combine batched GIFs into final GIF
-    with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
+    # with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
+    with imageio.get_writer(str(output_gif), mode="I", duration=duration) as writer:
         for temp_gif in tqdm(temp_gifs, desc="Combining Batches", unit="batch"):
             with imageio.get_reader(temp_gif) as reader:
                 for frame in reader:
@@ -230,18 +261,25 @@ def create_mp4(
     cleanup: bool = True,
 ) -> None:
     """
-    Create an MP4 animation from a list of frames.
-    Currently this function does not work as expected. Use convert_gif_to_mp4 instead.
+    Create an MP4 animation from a list of image frames.
 
-    Parameters:
-    - frames: List of file paths to the frames (e.g., PNG files).
-    - output_mp4: Output file path for the MP4. Defaults to "output.mp4".
-    - fps: Frames per second for the animation.
-    - cleanup: If True, delete the frame files after creating the MP4.
+    Note
+    ----
+    This function currently relies on moviepy and may not work as expected;
+    consider using `convert_gif_to_mp4` for more robust GIF→MP4 conversion.
 
-    Returns:
-    - None
+    Parameters
+    ----------
+    frames : list[str | Path]
+        Paths to input image files (e.g., PNG frames).
+    output_mp4 : str | Path, optional
+        Path to write the MP4 file. Defaults to "output.mp4".
+    fps : int, default 10
+        Frames per second for the resulting video.
+    cleanup : bool, default True
+        If True, delete source frame files after writing the MP4.
     """
+
     # Lazy import – give clear guidance if moviepy is missing
     try:
         from moviepy.editor import ImageSequenceClip
@@ -268,23 +306,27 @@ def create_mp4(
         #     Path(frame).unlink()
         _cleanup_files([Path(f) for f in frames])
 
-    # print(f"Saved the MP4 animation as '{output_mp4}'.")
-
 
 def convert_gif_to_mp4(
     input_gif: str | Path,
     output_mp4: str | Path,
 ) -> None:
     """
-    Convert a GIF animation to an MP4 video using ffmpeg.
+    Convert an existing GIF animation to MP4 format via ffmpeg.
 
-    Parameters:
-    - input_gif: Path to the input GIF file.
-    - output_mp4: Path to the output MP4 file.
+    Parameters
+    ----------
+    input_gif : str | Path
+        Path to source GIF file.
+    output_mp4 : str | Path
+        Desired path for output MP4 file.
 
-    Returns:
-    - None
+    Raises
+    ------
+    Mp4ConversionError
+        If ffmpeg returns a non-zero exit code.
     """
+
     command = [
         "ffmpeg",
         "-y",  # Skip overwrite confirmation
@@ -302,7 +344,7 @@ def convert_gif_to_mp4(
     subprocess.run(
         command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
-    print(f"Converted from {input_gif} to {output_mp4}.")
+    logger.info("Converted GIF %s to MP4 %s", input_gif, output_mp4)
 
 
 def create_gif_from_frames(
@@ -314,20 +356,20 @@ def create_gif_from_frames(
     cleanup: bool = False,
 ) -> None:
     """
-    Revised this method
-    Create a GIF animation from PNG frames in batches to handle memory constraints.
+    Create a GIF animation by reading all PNG frames in a directory.
 
-    Parameters:
-    - frames_dir: Directory containing PNG frames.
-    - output_gif: Path to save the GIF animation.
-    - fps: Frames per second for the GIF.
-    - prefix: Filter files that start with this prefix (e.g., 'salinity').
-    - batch_size: Number of frames to process in each batch.
-    - cleanup: If True, delete PNG frames after creating the GIF.
-
-    Returns:
-    - None
+    Parameters
+    ----------
+    frames_dir : str | Path
+        Directory containing `.png` frames.
+    output_gif : str | Path
+        Path to the output GIF file.
+    fps : int, default 10
+        Frames per second for the GIF.
+    cleanup : bool, default False
+        If True, delete source frames after creating the GIF.
     """
+
     # Convert frames_dir to Path object and gather PNG frames
     frames_path = Path(frames_dir).expanduser()
     frames = list_png_files(frames_path, prefix)
@@ -341,7 +383,9 @@ def create_gif_from_frames(
         temp_gif = f"{output_gif}_batch_{i}.gif"
         temp_gifs.append(temp_gif)
 
-        with imageio.get_writer(temp_gif, mode="I", fps=fps) as writer:
+        duration = int(1000 / fps)
+        with imageio.get_writer(str(output_gif), mode="I", duration=duration) as writer:
+            # with imageio.get_writer(temp_gif, mode="I", fps=fps) as writer:
             for frame in tqdm(
                 batch_frames, desc=f"Batch {i}/{total_batches}", unit="frame"
             ):
@@ -702,7 +746,7 @@ class PlotHelperMixin:
             fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
             plt.close(fig)
 
-        print(f"Saved {num_batches} figure(s) as '{png_prefix}_batch_#.png'.")
+        logger.info("Saved %d figure(s) as '%s_batch_#.png'", num_batches, png_prefix)
 
     def ts_river_in_batches(
         self,
@@ -780,7 +824,7 @@ class PlotHelperMixin:
             fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
             plt.close(fig)
 
-        print(f"Saved {num_batches} figure(s) as '{png_prefix}_batch_#.png'.")
+        logger.info("Saved %d figure(s) as '%s_batch_#.png'", num_batches, png_prefix)
 
     def plot_timeseries_for_river_in_batches(
         self,
@@ -850,7 +894,7 @@ class PlotHelperMixin:
             fig.savefig(save_path, dpi=300, bbox_inches="tight")
             plt.close(fig)
 
-        print(f"Saved {num_batches} figures as '{save_prefix}_batch_#.png'.")
+        logger.info("Saved %d figures as '%s_batch_#.png'", num_batches, save_prefix)
 
 
 # Other helper functions can be added here as needed.
