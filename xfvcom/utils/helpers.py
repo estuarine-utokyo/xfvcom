@@ -145,7 +145,6 @@ def create_gif_with_batch(
     """
     if output_gif is None:
         output_gif = "Animation.gif"  # Default GIF file name
-    # output_gif = os.path.expanduser(output_gif)
     # expand user and wrap as Path
     output_gif = Path(output_gif).expanduser()
 
@@ -177,9 +176,10 @@ def create_gif_with_batch(
     # Cleanup temporary files
     if cleanup:
         for temp_gif in temp_gifs:
-            os.remove(temp_gif)
+            # remove file via pathlib
+            Path(temp_gif).unlink()
         for frame in frames:
-            os.remove(frame)
+            Path(frame).unlink()
 
     print(f"GIF animation saved at: {output_gif}")
 
@@ -221,7 +221,7 @@ def create_mp4(frames, output_mp4=None, fps=10, cleanup=True):
 
     if cleanup:
         for frame in frames:
-            os.remove(frame)
+            Path(frame).unlink()
 
     # print(f"Saved the MP4 animation as '{output_mp4}'.")
 
@@ -275,14 +275,6 @@ def create_gif_from_frames(
     Returns:
     - None
     """
-    # frames = sorted(
-    #     [
-    #         os.path.join(frames_dir, f)
-    #         for f in os.listdir(frames_dir)
-    #         if f.endswith(".png") and (prefix is None or f.startswith(prefix))
-    #     ]
-    # )
-    # frames = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir) if f.endswith('.png')])
     # Convert frames_dir to Path object and gather PNG frames
     frames_path = Path(frames_dir).expanduser()
     frames = list_png_files(frames_path, prefix)
@@ -304,16 +296,6 @@ def create_gif_from_frames(
     print("Temporary GIFs created successfully.")
 
     # Combine temporary GIFs into the final GIF
-    # with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
-    #    for temp_gif in temp_gifs:
-    #        gif_reader = imageio.get_reader(temp_gif)
-    #        for frame in gif_reader:
-    #            writer.append_data(frame)
-    #        gif_reader.close()
-    #        if cleanup:
-    #            os.remove(temp_gif)
-
-    # Combine temporary GIFs into the final GIF
     # Robust version of the above code
     with imageio.get_writer(output_gif, mode="I", fps=fps) as writer:
         for temp_gif in tqdm(temp_gifs, desc="Combining Batches", unit="batch"):
@@ -321,9 +303,6 @@ def create_gif_from_frames(
                 for frame in reader:
                     writer.append_data(frame)
 
-    # if cleanup:
-    #     for frame in frames:
-    #         os.remove(frame)
     if cleanup:
         for frame in frames:
             # Remove frame file to clean up
@@ -358,7 +337,6 @@ class FrameGenerator:
         if verbose:
             print(f"[FrameGenerator] time={time}, kwargs={plot_kwargs}")
 
-        # save_path = os.path.join(output_dir, f"{base_name}_{time}.png")
         # use pathlib for constructing the file path
         save_path = Path(output_dir) / f"{base_name}_{time}.png"
 
@@ -391,17 +369,11 @@ class FrameGenerator:
         verbose = plot_kwargs.pop("verbose", False)
 
         # Unpack and clean plot_kwargs
-        # print("Original plot_kwargs:", plot_kwargs)
         plot_kwargs = unpack_plot_kwargs(plot_kwargs)
-        # print("Unpacked plot_kwargs:", plot_kwargs)
         plot_kwargs = clean_kwargs(plotter.plot_2d, plot_kwargs)
-        # print("Cleaned plot_kwargs:", plot_kwargs)
-        # save_path = os.path.join(output_dir, f"{base_name}_{time}.png")
 
         # 各プロセス専用フォルダを作成（ディスク I/O 競争を防止）
         rank = multiprocessing.current_process()._identity[0]  # プロセスID
-        # proc_output_dir = os.path.join(output_dir, f"proc_{rank}")
-        # os.makedirs(proc_output_dir, exist_ok=True)
         # use pathlib for process‐specific output directory
         proc_output_dir = Path(output_dir) / f"proc_{rank}"
         proc_output_dir.mkdir(parents=True, exist_ok=True)
@@ -500,8 +472,6 @@ class FrameGenerator:
         """
         Generate frames using multiprocessing with the class's generate_frame method.
         """
-        # output_dir = os.path.expanduser(output_dir)
-        # os.makedirs(output_dir, exist_ok=True)
         # prepare output directory
         output_path = Path(output_dir).expanduser()
         output_path.mkdir(parents=True, exist_ok=True)
