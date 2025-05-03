@@ -1,5 +1,7 @@
 # xfvcom.py: A Python module for loading, analyzing, and plotting FVCOM model output data in xfvcom package.
 # Author: Jun Sasaki
+from __future__ import annotations
+
 import inspect
 import logging
 import warnings
@@ -159,9 +161,6 @@ class FvcomPlotter(PlotHelperMixin):
                 logger.warning(
                     "Logarithmic scale cannot be used with non-positive values; switching to linear scale."
                 )
-                # print(
-                #     "Warning: Logarithmic scale cannot be used with non-positive values. Switching to linear scale."
-                # )
                 log = False
 
         # If no axis is provided, create a new one
@@ -347,7 +346,6 @@ class FvcomPlotter(PlotHelperMixin):
 
             msg = f"Error: the variable '{varname}' is not found in the dataset."
             logger.error(msg)
-            # print(msg)
             return None
 
         # Validate the dimensions of the variable
@@ -678,6 +676,9 @@ class FvcomPlotter(PlotHelperMixin):
         Returns:
         - (fig, ax, cbar): Figure, Axes, and Colorbar objects for the plot.
         """
+        # 0. Common metadata ----------------------------------------------
+        long_name = da.attrs.get("long_name", da.name)
+
         # 1. Verify da has the required dimensions
         if "time" not in da.dims:
             raise ValueError(f"DataArray must have 'time' dimension, got {da.dims}")
@@ -862,7 +863,6 @@ class FvcomPlotter(PlotHelperMixin):
         if var_name not in self.ds:
             msg = f"Error: The variable '{var_name}' is not found in the dataset."
             logger.error(msg)
-            # print(msg)
             return None
 
         # Auto-detect the vertical coordinate
@@ -952,7 +952,7 @@ class FvcomPlotter(PlotHelperMixin):
         elif isinstance(levels, (list, np.ndarray)):
             levels = np.array(levels)
         if method == "contourf":
-            # norm = BoundaryNorm(levels, plt.get_cmap(cmap).N, clip=False)
+            norm = BoundaryNorm(levels, plt.get_cmap(cmap).N, clip=False)
             cf = ax.contourf(
                 time_grid,
                 y_grid,
@@ -1097,11 +1097,6 @@ class FvcomPlotter(PlotHelperMixin):
                 self.ds.nv_ccw.min(),
                 self.ds.nv_ccw.max(),
             )
-            # print(f"x range: {xmin} to {xmax}")
-            # print(f"y range: {ymin} to {ymax}")
-            # print(
-            #     f"nv_ccw shape: {self.ds.nv_ccw.shape}, nv...min: {self.ds.nv_ccw.min()}, nv_ccw max: {self.ds.nv_ccw.max()}"
-            # )
 
         # Validate nv_ccw and coordinates
         if verbose:
@@ -1122,10 +1117,9 @@ class FvcomPlotter(PlotHelperMixin):
             triang = mtri.Triangulation(x, y, triangles=nv)
             if verbose:
                 logger.debug("Number of triangles: %d", len(triang.triangles))
-                # print(f"Number of triangles: {len(triang.triangles)}")
         except ValueError as e:
             logger.error("Error creating Triangulation: %s", e)
-            # print(f"Error creating Triangulation: {e}")
+
             return None
 
         # Set up axis
@@ -1296,7 +1290,6 @@ class FvcomPlotter(PlotHelperMixin):
 
         if coastlines:
             logger.info("Plotting coastlines...")
-            # print("Plotting coastlines...")
 
             nv = self.ds.nv_ccw.values
             nbe = np.array(
@@ -1320,7 +1313,6 @@ class FvcomPlotter(PlotHelperMixin):
         if obclines:
             # Plot open boundary lines
             logger.info("Plotting open boundary lines...")
-            # print("Plotting open boundary lines...")
 
             if "node_bc" not in self.ds:
                 raise ValueError(
@@ -1390,7 +1382,6 @@ class FvcomPlotter(PlotHelperMixin):
                     dyn_kwargs[arg] = frame_globals[arg]
                 else:
                     logger.warning("Unable to resolve argument '%s'.", arg)
-                    # print(f"Warning: Unable to resolve argument '{arg}'.")
 
             # Call the user callback
             post_process_func(**dyn_kwargs)
@@ -1400,7 +1391,6 @@ class FvcomPlotter(PlotHelperMixin):
             dpi = opts.dpi or self.cfg.dpi
             fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
             logger.info("Plot saved to: %s", save_path)
-            # print(f"Plot saved to: {save_path}")
 
         return ax
 
@@ -2021,18 +2011,7 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             ax.set_ylim(np.nanmin(Y), np.nanmax(Y))
 
-        # # 3 Now that y-limits are fixed, fill seabed and mesh-missing regions
-        # # bottom_depth = np.nanmin(Y, axis=0)  # seabed profile (deepest mesh)
-        # # Exclude fully-NaN (land) columns before nanmin to avoid warning
-        # Y_water = np.where(mask_land, np.nan, Y)      # land → all-nan column
-        # bottom_depth = np.nanmin(Y_water, axis=0)     # deepest valid depth
-        # ymin_axis, ymax_axis = ax.get_ylim()  # current axis limits
-        # fill_base = min(ymin_axis, ymax_axis)  # lower boundary in data coords
-        # mask_land = np.all(np.isnan(V), axis=0)
-        # mask_water = ~mask_land
-
         # 3 Now that y-limits are fixed, fill seabed and mesh-missing regions
-
         # a) land/water mask along transect
         mask_land = np.all(np.isnan(V), axis=0)  # True → 陸列
         mask_water = ~mask_land
@@ -2214,7 +2193,6 @@ class FvcomPlotter(PlotHelperMixin):
         # Determine vmin and vmax from data if not explicitly provided
         vmin = raw_vmin if raw_vmin is not None else da.min().item()
         vmax = raw_vmax if raw_vmax is not None else da.max().item()
-        # print(f"vmin: {vmin}, vmax: {vmax}")
 
         # Convert levels if necessary:
         if levels is None:
@@ -2246,18 +2224,14 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             data_min = da.min().item()
             data_max = da.max().item()
-            # print(f"data_min: {data_min}, data_max: {data_max}")
-            # print(f"vmin: {vmin}, vmax: {vmax}")
             if vmin <= data_min and vmax >= data_max:
                 extend = "neither"
             elif vmin > data_min and vmax >= data_max:
                 extend = "min"
             elif vmax < data_max and vmin <= data_min:
                 extend = "max"
-                # print("Here")
             else:
                 extend = "both"
-        # print(f"extend: {extend}")
 
         return merged, levels, cmap, vmin, vmax, extend
 
