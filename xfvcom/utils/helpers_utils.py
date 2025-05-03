@@ -219,7 +219,9 @@ def generate_test_data() -> tuple[list[xr.DataArray], list[xr.DataArray]]:
     Generate an ideal test data (perfect) for evaluate_model_scores().
     """
 
-    time = np.arange("2023-01-01", "2023-01-11", dtype="datetime64[h]").astype(
+    time: np.ndarray = np.arange(
+        "2023-01-01", "2023-01-11", dtype="datetime64[h]"
+    ).astype(
         "datetime64[ns]"
     )  # Ensure nanosecond precision
     sim_list = [
