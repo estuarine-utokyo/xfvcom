@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
@@ -13,7 +13,7 @@ from sklearn.metrics import mean_squared_error, r2_score
 
 def clean_kwargs(
     func: Callable[..., Any],
-    kwargs: Mapping[str, Any],
+    kwargs: dict[str, Any],
 ) -> dict[str, Any]:
     """
     Filter kwargs so that only arguments accepted by *func* survive.
@@ -36,7 +36,7 @@ def clean_kwargs(
     return {k: v for k, v in kwargs.items() if k in func_args}
 
 
-def unpack_plot_kwargs(kwargs: dict) -> dict:
+def unpack_plot_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     """
     Unpack nested 'plot_kwargs' dictionary if present.
 
