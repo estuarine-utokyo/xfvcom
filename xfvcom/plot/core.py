@@ -3,9 +3,8 @@
 import inspect
 import logging
 import warnings
-from collections.abc import Sequence
-from datetime import datetime
-from typing import Any, Hashable
+from collections.abc import Hashable, Sequence
+from typing import Any
 
 import cartopy.crs as ccrs
 import matplotlib.axes as maxes
@@ -14,7 +13,6 @@ import matplotlib.tri as mtri
 import numpy as np
 import pyproj
 import xarray as xr
-from cartopy.io.img_tiles import GoogleTiles
 from cartopy.mpl.geoaxes import GeoAxes
 from cartopy.mpl.ticker import LatitudeFormatter, LongitudeFormatter
 from matplotlib.colorbar import Colorbar
@@ -275,12 +273,12 @@ class FvcomPlotter(PlotHelperMixin):
         # 3) Resolve river name for labels
         if "river_names" in self.ds:
             raw = self.ds["river_names"].isel(rivers=river_index).values
-            river_name = raw.item() if isinstance(raw, np.ndarray) else raw
-            # river_name = raw.decode("utf-8").strip() if isinstance(raw, (bytes, bytearray)) else str(raw)
+            name = raw.item() if isinstance(raw, np.ndarray) else raw
+            if isinstance(name, (bytes, bytearray)):
+                name = name.decode("utf-8")
+            river_name = str(name).strip()
         else:
             river_name = f"river {river_index}"
-
-        river_name = river_name.decode("utf-8").strip()
 
         # 4) Default title / xlabel / ylabel
         if isinstance(title, str):
@@ -366,8 +364,10 @@ class FvcomPlotter(PlotHelperMixin):
             )
         river_name = self.ds["river_names"].isel(rivers=river_index).values
         if isinstance(river_name, np.ndarray):
-            river_name = river_name.item()  # 単一値を取得
-        river_name = river_name.decode("utf-8").strip()
+            river_name = river_name.item()
+        if isinstance(river_name, (bytes, bytearray)):
+            river_name = river_name.decode("utf-8")
+        river_name = str(river_name).strip()
 
         # Select the data
         data = self.ds[varname].isel(rivers=river_index)
@@ -952,6 +952,7 @@ class FvcomPlotter(PlotHelperMixin):
         elif isinstance(levels, (list, np.ndarray)):
             levels = np.array(levels)
         if method == "contourf":
+            # norm = BoundaryNorm(levels, plt.get_cmap(cmap).N, clip=False)
             cf = ax.contourf(
                 time_grid,
                 y_grid,
@@ -1142,9 +1143,6 @@ class FvcomPlotter(PlotHelperMixin):
 
         # Add map tiles if requested
         if add_tiles and self.use_latlon:
-            # tile_provider = cimgt.OSM()
-            # tile_provider = cimgt.Stamen('terrain')
-            # tile_provider = GoogleTiles(style="satellite")
             if tile_provider is None:
                 raise ValueError(
                     "Tile provider is not set. Please provide a valid tile provider, \
@@ -2001,7 +1999,7 @@ class FvcomPlotter(PlotHelperMixin):
             vmin=vmin,
             vmax=vmax,
             extend=extend,
-            linewidths=0,
+            # linewidths=0,
             antialiased=False,
             ax=ax,
             add_colorbar=False,
@@ -2023,12 +2021,35 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             ax.set_ylim(np.nanmin(Y), np.nanmax(Y))
 
+        # # 3 Now that y-limits are fixed, fill seabed and mesh-missing regions
+        # # bottom_depth = np.nanmin(Y, axis=0)  # seabed profile (deepest mesh)
+        # # Exclude fully-NaN (land) columns before nanmin to avoid warning
+        # Y_water = np.where(mask_land, np.nan, Y)      # land → all-nan column
+        # bottom_depth = np.nanmin(Y_water, axis=0)     # deepest valid depth
+        # ymin_axis, ymax_axis = ax.get_ylim()  # current axis limits
+        # fill_base = min(ymin_axis, ymax_axis)  # lower boundary in data coords
+        # mask_land = np.all(np.isnan(V), axis=0)
+        # mask_water = ~mask_land
+
         # 3 Now that y-limits are fixed, fill seabed and mesh-missing regions
-        bottom_depth = np.nanmin(Y, axis=0)  # seabed profile (deepest mesh)
-        ymin_axis, ymax_axis = ax.get_ylim()  # current axis limits
-        fill_base = min(ymin_axis, ymax_axis)  # lower boundary in data coords
-        mask_land = np.all(np.isnan(V), axis=0)
+
+        # a) land/water mask along transect
+        mask_land = np.all(np.isnan(V), axis=0)  # True → 陸列
         mask_water = ~mask_land
+
+        # b) seabed profile (deepest valid depth for each column)
+        #    mask Land columns → use masked array to suppress All-NaN warning
+        Y_water = np.where(mask_land, np.nan, Y)  # land is NaN
+        bottom_depth = (
+            np.ma.masked_invalid(Y_water)  # safe for all NaN columns
+            .min(axis=0)
+            .filled(np.nan)  # land columns are still NaN
+        )
+
+        # c) 基準線など
+        ymin_axis, ymax_axis = ax.get_ylim()
+        fill_base = min(ymin_axis, ymax_axis)
+
         # a) fill below seabed line (land patch under ocean)
         ax.fill_between(
             distances,
@@ -2134,7 +2155,6 @@ class FvcomPlotter(PlotHelperMixin):
         """
         Build 2D grids X (distance), Y (depth), and V (values).
         """
-        from scipy.spatial import KDTree
 
         # Triangulate mesh for domain test
         lon_n = self.ds["lon"].values
@@ -2282,8 +2302,6 @@ class FvcomPlotter(PlotHelperMixin):
             extra.update(opts.cbar_kwargs)
         if colorbar_kwargs:
             extra.update(colorbar_kwargs)
-
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
 
         divider = make_axes_locatable(ax)
         if isinstance(ax, GeoAxes):
