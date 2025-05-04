@@ -489,11 +489,12 @@ class FvcomPlotter(PlotHelperMixin):
             ref_speed = (
                 (max_speed * 0.3) if vec_legend_speed is None else vec_legend_speed
             )
-            ax.quiverkey(
+            ax.quiverkey(  # type: ignore[arg-type]
                 Q,
-                *vec_legend_loc,
-                ref_speed,
-                f"{ref_speed:.1f} m/s",
+                X=vec_legend_loc[0],
+                Y=vec_legend_loc[1],
+                U=ref_speed,
+                label=f"{ref_speed:.1f} m/s",
                 labelpos="E",
                 coordinates="axes",
                 color=quiver_opts["color"],
@@ -553,7 +554,7 @@ class FvcomPlotter(PlotHelperMixin):
         plot_surface: bool = False,
         surface_kwargs: dict | None = None,
         **kwargs,
-    ) -> tuple[plt.Figure, plt.Axes, Colorbar]:
+    ) -> tuple[plt.Figure, plt.Axes, Colorbar | None]:
         """
         Plot a 2D time-series contour (time vs depth) for the specified variable.
         This method is specialized for z-coordinate (depth) data and does not support sigma coordinates.
@@ -1230,9 +1231,34 @@ class FvcomPlotter(PlotHelperMixin):
             # --- 1) derive positional index from scalar DataArray -----
             da_time_idx = None
             if da is not None and "time" in da.coords:
-                # works for both scalar (0-D) and length-1 1-D coordinates
                 label = da.coords["time"].values.item()
-                da_time_idx = self._label_to_index(label)  # helper you added
+
+                # (a) try pandas-based exact lookup – tolerant to dtype/unit differences
+                try:
+                    idx_obj = self.ds.indexes["time"].get_loc(label)
+                    da_time_idx = (
+                        idx_obj.start if isinstance(idx_obj, slice) else int(idx_obj)
+                    )
+                except Exception:
+                    # (b) fallback to numpy-based helper (kept for numeric coords)
+                    da_time_idx = self._label_to_index(label)
+
+                # (c) final fallback ― numpy direct comparison
+                if da_time_idx is None:
+                    arr_time = self.ds["time"].values
+
+                    if isinstance(label, (int, np.integer)):
+                        # 1) Compare both in int64 [ns]
+                        arr_int = arr_time.astype("datetime64[ns]").astype("int64")
+                        match = np.flatnonzero(arr_int == int(label))
+                    else:
+                        # 2) Compare both in datetime64 [ns]
+                        arr_ns = arr_time.astype("datetime64[ns]")
+                        lab_ns = np.datetime64(label, "ns")
+                        match = np.flatnonzero(arr_ns == lab_ns)
+
+                    if match.size:
+                        da_time_idx = int(match[0])
 
             # --- 2) decide final time for vector plot -----------------
             if opts.vec_time is not None:
@@ -1500,7 +1526,7 @@ class FvcomPlotter(PlotHelperMixin):
         contourf_kwargs: dict | None = None,
         colorbar_kwargs: dict | None = None,
         **kwargs,
-    ) -> tuple[plt.Figure, Axes, Colorbar]:
+    ) -> tuple[plt.Figure, Axes, Colorbar | None]:
         """
         Plot a contour map of vertical time-series DataArray.
         contourf_kwargs and **kwargs are combined to flexibly pass any contourf parameters; colorbar_kwargs is for colorbar settings.
@@ -1766,7 +1792,7 @@ class FvcomPlotter(PlotHelperMixin):
         contourf_kwargs: dict | None = None,
         colorbar_kwargs: dict | None = None,
         **kwargs,
-    ) -> tuple[plt.Figure, Axes, Colorbar]:
+    ) -> tuple[plt.Figure, Axes, Colorbar | None]:
         """
         Plot a vertical section of a 3D variable (da) on FVCOM mesh.
 
@@ -2562,14 +2588,32 @@ class FvcomPlotter(PlotHelperMixin):
 
         # --- B. datetime-like coordinate ------------------------------
         if dtype_kind == "M":
-            # ensure label is datetime64 for safe comparison
+            # ----  Compare by aligning to the same units as the coordinates. --------------
+            unit = np.datetime_data(arr.dtype)[0]  # 's', 'ns', etc.
             if np.asarray(label).dtype.kind == "M":
-                label_dt = label
+                label_dt = np.datetime64(label, unit)  # cast
             else:
-                # fallback: attempt nanosecond resolution
-                label_dt = np.datetime64(label, "ns")
+                label_dt = np.datetime64(str(label), unit)
             idx = np.where(arr == label_dt)[0]
+
+            if idx.size:
+                return int(idx[0])
+
+            # ---- fallback: both sides → int64 [ns] で再比較 -----------------
+            arr_ns = arr.astype("datetime64[ns]")
+            lab_ns = np.datetime64(label_dt, "ns")
+            idx = np.where(arr_ns == lab_ns)[0]
             return int(idx[0]) if idx.size else None
+
+        # --- C. object 配列（datetime, pandas.Timestamp など） -------------
+        if dtype_kind == "O":
+            try:
+                arr_ns = arr.astype("datetime64[ns]")
+                lab_ns = np.datetime64(str(label), "ns")
+                idx = np.where(arr_ns == lab_ns)[0]
+                return int(idx[0]) if idx.size else None
+            except Exception:
+                pass  # 変換できなければ次のフォールバックへ
 
         # --- C. unsupported coordinate type ---------------------------
         return None
