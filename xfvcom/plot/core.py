@@ -1254,7 +1254,7 @@ class FvcomPlotter(PlotHelperMixin):
                     else:
                         # 2) Compare both in datetime64 [ns]
                         arr_ns = arr_time.astype("datetime64[ns]")
-                        lab_ns = np.datetime64(label, "ns")
+                        lab_ns = np.datetime64(label, "ns")  # type: ignore[call-overload]
                         match = np.flatnonzero(arr_ns == lab_ns)
 
                     if match.size:
@@ -2591,9 +2591,9 @@ class FvcomPlotter(PlotHelperMixin):
             # ----  Compare by aligning to the same units as the coordinates. --------------
             unit = np.datetime_data(arr.dtype)[0]  # 's', 'ns', etc.
             if np.asarray(label).dtype.kind == "M":
-                label_dt = np.datetime64(label, unit)  # type: ignore[arg-type]
+                label_dt = np.datetime64(label, unit)  # type: ignore[call-overload]
             else:
-                label_dt = np.datetime64(str(label), unit)  # type: ignore[arg-type]
+                label_dt = np.datetime64(str(label), unit)  # type: ignore[call-overload]
             idx = np.where(arr == label_dt)[0]
 
             if idx.size:
@@ -2601,7 +2601,7 @@ class FvcomPlotter(PlotHelperMixin):
 
             # ---- fallback: both sides → int64 [ns] で再比較 -----------------
             arr_ns = arr.astype("datetime64[ns]")
-            lab_ns = np.datetime64(label_dt, "ns")  # type: ignore[arg-type]
+            lab_ns = np.datetime64(label_dt, "ns")  # type: ignore[call-overload]
             idx = np.where(arr_ns == lab_ns)[0]
             return int(idx[0]) if idx.size else None
 
@@ -2609,7 +2609,7 @@ class FvcomPlotter(PlotHelperMixin):
         if dtype_kind == "O":
             try:
                 arr_ns = arr.astype("datetime64[ns]")
-                lab_ns = np.datetime64(str(label), "ns")
+                lab_ns = np.datetime64(str(label), "ns")  # type ignore[call-overload]
                 idx = np.where(arr_ns == lab_ns)[0]
                 return int(idx[0]) if idx.size else None
             except Exception:
