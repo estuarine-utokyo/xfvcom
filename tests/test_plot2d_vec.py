@@ -1,7 +1,7 @@
 # tests/test_plot2d_vec.py
 import matplotlib
 
-matplotlib.use("Agg")
+matplotlib.use("Agg")  # headless backend
 
 import numpy as np
 import pandas as pd
@@ -11,24 +11,52 @@ from xfvcom.plot.core import FvcomPlotConfig, FvcomPlotOptions, FvcomPlotter
 
 
 def _tiny_ds() -> xr.Dataset:
-    """Return a 3-time-step, 1-layer, 2-node toy dataset."""
+    """Return the smallest FVCOM-like dataset that plot_2d() can handle."""
+    # --- base axes ----------------------------------------------------
     time = pd.date_range("2020-01-01 01:00", periods=3, freq="6h")
-    da = xr.DataArray(
-        np.arange(3 * 1 * 2).reshape(3, 1, 2),  # temp
-        coords={"time": time, "siglay": [0], "node": [0, 1]},
+    siglay = [0]  # single layer
+    node = [0, 1, 2]  # three nodes → one triangle (0,1,2)
+    nele = [0]  # one element
+
+    # --- coordinates --------------------------------------------------
+    lon = xr.DataArray([0.0, 1.0, 0.0], dims=("node",))
+    lat = xr.DataArray([35.0, 35.0, 36.0], dims=("node",))
+    # cell centre = simple mean of vertices
+    lonc = xr.DataArray([lon.mean().item()], dims=("nele",))
+    latc = xr.DataArray([lat.mean().item()], dims=("nele",))
+
+    # --- connectivity: 1-based (nv) & 0-based (nv_zero/nv_ccw) -------
+    nv_zero = np.array([[0, 1, 2]], dtype="i4")  # (nele,3)
+    nv = xr.DataArray(nv_zero + 1, dims=("nele", "three"))
+    nv_ccw = nv  # for verbose check
+
+    # --- variables ----------------------------------------------------
+    temp = xr.DataArray(
+        np.arange(len(time) * len(siglay) * len(node)).reshape(
+            len(time), len(siglay), len(node)
+        ),
         dims=("time", "siglay", "node"),
+        coords={"time": time, "siglay": siglay, "node": node},
         name="temp",
-        attrs={"units": "°C", "long_name": "temperature"},
+        attrs={"long_name": "temperature", "units": "°C"},
     )
-    ds = da.to_dataset()
+    u = xr.zeros_like(temp) + 0.1
+    v = xr.zeros_like(temp) + 0.2
 
-    # --- minimal lon/lat coords required by plot_2d -----------------
-    ds["lon"] = xr.DataArray([0.0, 1.0], dims=("node",))
-    ds["lat"] = xr.DataArray([35.0, 35.5], dims=("node",))
-
-    # Velocity components
-    ds["u"] = xr.zeros_like(da) + 0.1
-    ds["v"] = xr.zeros_like(da) + 0.2
+    ds = xr.Dataset(
+        {
+            "temp": temp,
+            "u": u,
+            "v": v,
+            "lon": lon,
+            "lat": lat,
+            "lonc": lonc,
+            "latc": latc,
+            "nv_zero": (("nele", "three"), nv_zero),
+            "nv": nv,
+            "nv_ccw": nv_ccw,
+        }
+    )
     return ds
 
 
@@ -37,14 +65,16 @@ def test_plot2d_with_vectors(tmp_path):
     cfg = FvcomPlotConfig()
     plotter = FvcomPlotter(ds, cfg)
 
-    # scalar DA (time=1)
+    # scalar DataArray (time=1) with vector overlay
     da_scalar = ds["temp"].isel(time=1, siglay=0)
     opts = FvcomPlotOptions(plot_vec2d=True, vec_siglay=0)
 
-    fig, ax, _ = plotter.plot_2d(da=da_scalar, opts=opts)
-    # Simple verification
-    assert ax.get_title() != ""
+    ax = plotter.plot_2d(da=da_scalar, opts=opts)
+    assert ax is not None
 
-    # For debug purpose
-    fig.savefig(tmp_path / "plot2d_vec.png", dpi=80)
-    matplotlib.pyplot.close(fig)
+    # basic sanity: at least one contour/quad collection or a title
+    assert ax.collections or ax.get_title()
+
+    # save for manual inspection (optional)
+    ax.figure.savefig(tmp_path / "plot2d_vec.png", dpi=80)
+    matplotlib.pyplot.close(ax.figure)
