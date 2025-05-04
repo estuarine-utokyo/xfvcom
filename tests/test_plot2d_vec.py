@@ -7,12 +7,12 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from xfvcom.plot.core import FvcomPlotOptions, FvcomPlotter
+from xfvcom.plot.core import FvcomPlotConfig, FvcomPlotOptions, FvcomPlotter
 
 
 def _tiny_ds() -> xr.Dataset:
     """Return a 3-time-step, 1-layer, 2-node toy dataset."""
-    time = pd.date_range("2020-01-01 01:00", periods=3, freq="6H")
+    time = pd.date_range("2020-01-01 01:00", periods=3, freq="6h")
     da = xr.DataArray(
         np.arange(3 * 1 * 2).reshape(3, 1, 2),  # temp
         coords={"time": time, "siglay": [0], "node": [0, 1]},
@@ -29,7 +29,8 @@ def _tiny_ds() -> xr.Dataset:
 
 def test_plot2d_with_vectors(tmp_path):
     ds = _tiny_ds()
-    plotter = FvcomPlotter(ds)
+    cfg = FvcomPlotConfig()
+    plotter = FvcomPlotter(cfg, ds)
 
     # scalar DA (time=1) にベクトル重畳を要求
     da_scalar = ds["temp"].isel(time=1, siglay=0)
