@@ -48,6 +48,8 @@ dev = [
   "isort>=5.13",
   "types-tqdm>=4.66",
   "pandas-stubs",
+  "matplotlib>=3.8",
+  "ruff>=0.3", 
 ]
 
 [tool.setuptools.packages.find]

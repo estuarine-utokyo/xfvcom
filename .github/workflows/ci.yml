@@ -11,7 +11,7 @@ jobs:
       # 1) Check-out repository
       - uses: actions/checkout@v4
 
-      # 2) System libs for Cartopy / PROJ / GEOS
+      # 2) System libraries required by Cartopy / PROJ / GEOS
       - name: Install system packages
         run: |
           sudo apt-get update
@@ -24,33 +24,28 @@ jobs:
         with:
           python-version: "3.12"
 
-      # 4) Install Python deps
+      # 4) Install Python dependencies (runtime + dev + video extras)
       - name: Install Python deps
         run: |
           python -m pip install -U pip
-          pip install -e .[dev,video]     # runtime + dev + video extras
-          # --- Work-around for editable+extras bug -----------------
-          # moviepy fails to get installed occasionally; install it explicitly
+          pip install -e .[dev,video]
+          # Work-around: occasionally moviepy is skipped in editable+extras
           python -m pip install "moviepy>=1.0.3"
-          # ----------------------------------------------------------
-          # verify cartopy is present (optional safety-net)
-          python - <<'PY'
-          import importlib, subprocess, sys
-          try:
-              importlib.import_module("cartopy")
-          except ImportError:
-              subprocess.check_call([sys.executable, "-m", "pip", "install", "cartopy"])
-          PY
 
-      # 5) Run tests
-      - name: Run tests
-        run: pytest -q
-
-      - name: Static type checking
-        run: mypy .
-
+      # 5) Code formatting (black)
       - name: Code formatting check
         run: black --check .
 
+      # 6) Import sorting (isort)
       - name: Import sorting check
         run: isort --check-only .
+
+      # 7) Static type checking (mypy)
+      - name: Static type checking
+        run: mypy .
+
+      # 8) Unit tests (pytest) – use headless backend
+      - name: Run unit tests
+        env:
+          MPLBACKEND: Agg
+        run: pytest -q
