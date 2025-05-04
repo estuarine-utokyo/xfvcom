@@ -1,7 +1,7 @@
 # tests/test_plot2d_vec.py
-import matplotlib  # ← GUI を使わないように
+import matplotlib
 
-matplotlib.use("Agg")  # (バックエンドは一度だけ設定)
+matplotlib.use("Agg")
 
 import numpy as np
 import pandas as pd
@@ -21,7 +21,7 @@ def _tiny_ds() -> xr.Dataset:
         attrs={"units": "°C", "long_name": "temperature"},
     )
     ds = da.to_dataset()
-    # 速度成分（同形状でゼロ）
+    # Velocity components
     ds["u"] = xr.zeros_like(da) + 0.1
     ds["v"] = xr.zeros_like(da) + 0.2
     return ds
@@ -30,16 +30,16 @@ def _tiny_ds() -> xr.Dataset:
 def test_plot2d_with_vectors(tmp_path):
     ds = _tiny_ds()
     cfg = FvcomPlotConfig()
-    plotter = FvcomPlotter(cfg, ds)
+    plotter = FvcomPlotter(ds, cfg)
 
-    # scalar DA (time=1) にベクトル重畳を要求
+    # scalar DA (time=1)
     da_scalar = ds["temp"].isel(time=1, siglay=0)
     opts = FvcomPlotOptions(plot_vec2d=True, vec_siglay=0)
 
     fig, ax, _ = plotter.plot_2d(da=da_scalar, opts=opts)
-    # タイトルが設定されていれば「描画に成功した」程度の簡易検証
+    # Simple verification
     assert ax.get_title() != ""
 
-    # 保存して目視デバッグ用 artefact を残せるようにしておく（任意）
+    # For debug purpose
     fig.savefig(tmp_path / "plot2d_vec.png", dpi=80)
     matplotlib.pyplot.close(fig)
