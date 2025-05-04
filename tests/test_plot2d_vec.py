@@ -21,6 +21,11 @@ def _tiny_ds() -> xr.Dataset:
         attrs={"units": "°C", "long_name": "temperature"},
     )
     ds = da.to_dataset()
+
+    # --- minimal lon/lat coords required by plot_2d -----------------
+    ds["lon"] = xr.DataArray([0.0, 1.0], dims=("node",))
+    ds["lat"] = xr.DataArray([35.0, 35.5], dims=("node",))
+
     # Velocity components
     ds["u"] = xr.zeros_like(da) + 0.1
     ds["v"] = xr.zeros_like(da) + 0.2
