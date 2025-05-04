@@ -1,0 +1,12 @@
+# environment.yml  (root of repository)
+name: xfvcom-docs
+channels:
+  - conda-forge
+dependencies:
+  # --- core -----------------------------------------------------------
+  - python=3.12
+  # --- documentation --------------------------------------------------
+  - sphinx
+  - furo                     # HTML theme
+  - sphinx-autodoc-typehints # type-hint support
+
