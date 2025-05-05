@@ -1193,61 +1193,14 @@ class FvcomPlotter(PlotHelperMixin):
         )
 
         # -------- vector-overlay hook inside plot_2d -----------------
-        if opts.plot_vec2d:
-            # --- 1) derive positional index from scalar DataArray -----
-            da_time_idx = None
-            if da is not None and "time" in da.coords:
-                label = da.coords["time"].values.item()
-
-                # (a) try pandas-based exact lookup – tolerant to dtype/unit differences
-                try:
-                    idx_obj = self.ds.indexes["time"].get_loc(label)
-                    da_time_idx = (
-                        idx_obj.start if isinstance(idx_obj, slice) else int(idx_obj)
-                    )
-                except Exception:
-                    # (b) fallback to numpy-based helper (kept for numeric coords)
-                    da_time_idx = self._label_to_index(label)
-
-                # (c) final fallback ― numpy direct comparison
-                if da_time_idx is None:
-                    arr_time = self.ds["time"].values
-
-                    if isinstance(label, (int, np.integer)):
-                        # 1) Compare both in int64 [ns]
-                        arr_int = arr_time.astype("datetime64[ns]").astype("int64")
-                        match = np.flatnonzero(arr_int == int(label))
-                    else:
-                        # 2) Compare both in datetime64 [ns]
-                        arr_ns = arr_time.astype("datetime64[ns]")
-                        lab_ns = np.datetime64(label, "ns")  # type: ignore[call-overload]
-                        match = np.flatnonzero(arr_ns == lab_ns)
-
-                    if match.size:
-                        da_time_idx = int(match[0])
-
-            # --- 2) decide final time for vector plot -----------------
-            if opts.vec_time is not None:
-                time_for_vector = opts.vec_time  # explicit override
-            elif da_time_idx is not None:
-                time_for_vector = da_time_idx  # derived from scalar
-            else:
-                raise ValueError(
-                    "plot_vec2d is True but vec_time is not specified and "
-                    "the scalar DataArray provides no matching time index. "
-                    "Set opts.vec_time explicitly."
-                )
-
-            # --- 3) call vector plot ----------------------------------
-            self.plot_vector2d(
-                time=time_for_vector,
-                siglay=opts.vec_siglay,
-                reduce=opts.vec_reduce,
-                skip=opts.skip,
-                ax=ax,
-                color=opts.arrow_color,
-                opts=opts,
-            )
+        self._draw_vectors(
+            ax=ax,
+            opts=opts,
+            scalar_da_is_drawn=(da is not None),
+            da_time=(
+                da["time"].values if (da is not None and "time" in da.coords) else None
+            ),
+        )
 
         # --- user post-processing -----------------------------------------
         if post_process_func:
@@ -1326,151 +1279,6 @@ class FvcomPlotter(PlotHelperMixin):
         ax.scatter(
             x, y, transform=transform, marker=marker, color=color, s=size, **kwargs
         )
-
-        return ax
-
-    def plot_vector2d(
-        self,
-        *,
-        time: int | slice | list | tuple,
-        siglay: int | slice | list | tuple | None = None,
-        reduce: dict[str, str] | None = None,  # {"time": "mean", "siglay": "mean"}
-        skip: int | str | None = None,  # "auto" or explicit integer
-        var_u: str = "u",
-        var_v: str = "v",
-        ax: Axes | None = None,
-        opts: FvcomPlotOptions | None = None,
-        **kwargs,
-    ) -> Axes:
-        """
-        Plot a 2-D current vector map for a single (time, siglay) slice.
-        This is step-1 minimal version: no averaging, no automatic scaling.
-
-        Parameters
-        ----------
-        time, siglay : int | slice | list | tuple
-            Selection for time and vertical indices.  Examples:
-                time=0
-                time=slice("2020-01-01","2020-02-01")
-                time=[0,1,2,3]
-        reduce : dict, optional
-            Mapping {'time': 'mean'|'sum'|None, 'siglay': 'mean'|'sum'|None}.
-            Use it to compute residual currents or vertical means.
-        skip : int | str, optional
-            Arrow subsampling interval.  "auto" selects a reasonable value
-            based on the mesh size (default "auto").
-
-        """
-        # 0) option merge
-        if opts is None:
-            opts = FvcomPlotOptions()
-        opts.extra.update(kwargs)
-
-        # ----------------------------------------------------------
-        # Sanitize kwargs: remove internal flags before quiver call
-        # ----------------------------------------------------------
-        if "with_magnitude" in kwargs:  # user passed as kw-arg
-            opts.with_magnitude = bool(kwargs.pop("with_magnitude"))
-
-        if skip == "auto" and opts.skip != "auto":
-            skip = opts.skip
-
-        # 1) determine skip
-        nele_total = self.ds.sizes.get("nele", len(self.ds["lonc"]))
-
-        if skip is None:  # no thinning
-            skip_val = 1
-        elif skip == "auto":
-            skip_val = self._auto_skip(nele_total)
-        else:
-            skip_val = int(skip)
-
-        # 2) slice & reduce u,v
-        uc, vc = self._select_and_reduce_uv(
-            self.ds[var_u],
-            self.ds[var_v],
-            time_sel=time,
-            siglay_sel=siglay,
-            reduce=reduce,
-        )
-
-        # 3) prepare base map if ax is None (unchanged)
-        if ax is None:
-            ax = self.plot_2d(da=None, opts=FvcomPlotOptions(with_mesh=True))
-
-        # 4) build quiver kwargs ------------------------------------
-        arrow_kwargs = {
-            "scale_units": "xy",
-            "angles": "xy",
-            "color": kwargs.get("color", opts.arrow_color),
-            "alpha": opts.arrow_alpha,
-            "width": opts.arrow_width,
-            # 'scale' will be injected later only if needed
-        }
-        arrow_kwargs.update(kwargs)  # allow user override
-
-        # ---- decide scale -------------------------------------------
-        # priority: explicit **kwargs > opts.scale
-        scale_val = kwargs.get("scale", opts.scale)
-
-        if scale_val is None:
-            arrow_kwargs.pop("scale", None)  # 自動
-        else:
-            arrow_kwargs["scale"] = float(scale_val)
-
-        # 5) draw magnitude ------------------------------------
-        draw_mag = opts.with_magnitude and not getattr(opts, "da_is_scalar", False)
-
-        if draw_mag:
-            import matplotlib.tri as mtri
-
-            lon_n = self.ds["lon"].values
-            lat_n = self.ds["lat"].values
-            tri_nv = self.ds["nv_zero"].values
-            triang = mtri.Triangulation(lon_n, lat_n, triangles=tri_nv)
-
-            mag = np.hypot(uc, vc)  # (nele,) element-centre magnitude
-            cf = ax.tripcolor(
-                triang,
-                facecolors=mag,
-                cmap=opts.cmap,
-                transform=ccrs.PlateCarree(),
-                shading="flat",
-                zorder=opts.vec_zorder - 1,
-            )
-
-            # -------- move colorbar INSIDE the draw_mag block ----------
-            self._make_colorbar(ax, cf, label="|U| (m/s)", opts=opts)
-
-        # 6) quiver plot --------------------------------------------
-        q = ax.quiver(
-            self.ds["lonc"][::skip_val],
-            self.ds["latc"][::skip_val],
-            uc[::skip_val],
-            vc[::skip_val],
-            transform=ccrs.PlateCarree(),
-            zorder=opts.vec_zorder,
-            **arrow_kwargs,
-        )
-
-        # 7) add quiverkey ---------------------------------------------
-        if opts.show_vec_legend:
-            # automatic reference speed = 30 % of max |u,v|
-            ref_speed = (
-                np.hypot(uc, vc).max() * 0.3
-                if opts.vec_legend_speed is None
-                else opts.vec_legend_speed
-            )
-            ax.quiverkey(
-                q,
-                *opts.vec_legend_loc,
-                ref_speed,
-                f"{ref_speed:.2f} m/s",
-                labelpos="E",
-                coordinates="axes",
-                color=kwargs.get("color", opts.arrow_color),
-                fontproperties={"size": self.cfg.fontsize_legend},
-            )
 
         return ax
 
@@ -2929,6 +2737,200 @@ class FvcomPlotter(PlotHelperMixin):
                 transform=transform,
                 zorder=4,
             )
+
+    def _draw_vectors(
+        self,
+        ax: "Axes",
+        *,
+        opts: "FvcomPlotOptions",
+        scalar_da_is_drawn: bool,
+        da_time: Any | None,
+    ) -> None:
+        """
+        Overlay depth-average (or selected layer) velocity vectors.
+
+        Parameters
+        ----------
+        scalar_da_is_drawn : True → plot_vector2d() should skip |U| magnitude
+        da_time            : Single np.datetime64 or slice used for scalar field.
+                            If vec_time is None, this is reused.
+        """
+        if not opts.plot_vec2d:
+            return
+
+        # 1) decide time for vectors
+        vec_time = opts.vec_time if opts.vec_time is not None else da_time
+        if isinstance(vec_time, np.ndarray):
+            vec_time = vec_time.tolist()
+
+        if vec_time is None:
+            raise ValueError(
+                "plot_vec2d is True but vec_time is not specified and "
+                "the scalar DataArray provides no matching time index. "
+                "Set opts.vec_time explicitly."
+            )
+
+        # 2) flag so plot_vector2d() knows scalar is already drawn
+        opts.da_is_scalar = scalar_da_is_drawn
+
+        # 3) delegate
+        self.plot_vector2d(
+            time=vec_time,
+            siglay=opts.vec_siglay,
+            reduce=opts.vec_reduce,
+            skip=opts.skip,
+            ax=ax,
+            color=opts.arrow_color,
+            opts=opts,
+        )
+
+        # reset flag (prevent side-effect for next call)
+        opts.da_is_scalar = False
+
+    def plot_vector2d(
+        self,
+        *,
+        time: int | slice | list | tuple,
+        siglay: int | slice | list | tuple | None = None,
+        reduce: dict[str, str] | None = None,  # {"time": "mean", "siglay": "mean"}
+        skip: int | str | None = None,  # "auto" or explicit integer
+        var_u: str = "u",
+        var_v: str = "v",
+        ax: Axes | None = None,
+        opts: FvcomPlotOptions | None = None,
+        **kwargs,
+    ) -> Axes:
+        """
+        Plot a 2-D current vector map for a single (time, siglay) slice.
+        This is step-1 minimal version: no averaging, no automatic scaling.
+
+        Parameters
+        ----------
+        time, siglay : int | slice | list | tuple
+            Selection for time and vertical indices.  Examples:
+                time=0
+                time=slice("2020-01-01","2020-02-01")
+                time=[0,1,2,3]
+        reduce : dict, optional
+            Mapping {'time': 'mean'|'sum'|None, 'siglay': 'mean'|'sum'|None}.
+            Use it to compute residual currents or vertical means.
+        skip : int | str, optional
+            Arrow subsampling interval.  "auto" selects a reasonable value
+            based on the mesh size (default "auto").
+
+        """
+        # 0) option merge
+        if opts is None:
+            opts = FvcomPlotOptions()
+        opts.extra.update(kwargs)
+
+        # ----------------------------------------------------------
+        # Sanitize kwargs: remove internal flags before quiver call
+        # ----------------------------------------------------------
+        if "with_magnitude" in kwargs:  # user passed as kw-arg
+            opts.with_magnitude = bool(kwargs.pop("with_magnitude"))
+
+        if skip == "auto" and opts.skip != "auto":
+            skip = opts.skip
+
+        # 1) determine skip
+        nele_total = self.ds.sizes.get("nele", len(self.ds["lonc"]))
+
+        if skip is None:  # no thinning
+            skip_val = 1
+        elif skip == "auto":
+            skip_val = self._auto_skip(nele_total)
+        else:
+            skip_val = int(skip)
+
+        # 2) slice & reduce u,v
+        uc, vc = self._select_and_reduce_uv(
+            self.ds[var_u],
+            self.ds[var_v],
+            time_sel=time,
+            siglay_sel=siglay,
+            reduce=reduce,
+        )
+
+        # 3) prepare base map if ax is None (unchanged)
+        if ax is None:
+            ax = self.plot_2d(da=None, opts=FvcomPlotOptions(with_mesh=True))
+
+        # 4) build quiver kwargs ------------------------------------
+        arrow_kwargs = {
+            "scale_units": "xy",
+            "angles": "xy",
+            "color": kwargs.get("color", opts.arrow_color),
+            "alpha": opts.arrow_alpha,
+            "width": opts.arrow_width,
+            # 'scale' will be injected later only if needed
+        }
+        arrow_kwargs.update(kwargs)  # allow user override
+
+        # ---- decide scale -------------------------------------------
+        # priority: explicit **kwargs > opts.scale
+        scale_val = kwargs.get("scale", opts.scale)
+
+        if scale_val is None:
+            arrow_kwargs.pop("scale", None)  # 自動
+        else:
+            arrow_kwargs["scale"] = float(scale_val)
+
+        # 5) draw magnitude ------------------------------------
+        draw_mag = opts.with_magnitude and not getattr(opts, "da_is_scalar", False)
+
+        if draw_mag:
+            import matplotlib.tri as mtri
+
+            lon_n = self.ds["lon"].values
+            lat_n = self.ds["lat"].values
+            tri_nv = self.ds["nv_zero"].values
+            triang = mtri.Triangulation(lon_n, lat_n, triangles=tri_nv)
+
+            mag = np.hypot(uc, vc)  # (nele,) element-centre magnitude
+            cf = ax.tripcolor(
+                triang,
+                facecolors=mag,
+                cmap=opts.cmap,
+                transform=ccrs.PlateCarree(),
+                shading="flat",
+                zorder=opts.vec_zorder - 1,
+            )
+
+            # -------- move colorbar INSIDE the draw_mag block ----------
+            self._make_colorbar(ax, cf, label="|U| (m/s)", opts=opts)
+
+        # 6) quiver plot --------------------------------------------
+        q = ax.quiver(
+            self.ds["lonc"][::skip_val],
+            self.ds["latc"][::skip_val],
+            uc[::skip_val],
+            vc[::skip_val],
+            transform=ccrs.PlateCarree(),
+            zorder=opts.vec_zorder,
+            **arrow_kwargs,
+        )
+
+        # 7) add quiverkey ---------------------------------------------
+        if opts.show_vec_legend:
+            # automatic reference speed = 30 % of max |u,v|
+            ref_speed = (
+                np.hypot(uc, vc).max() * 0.3
+                if opts.vec_legend_speed is None
+                else opts.vec_legend_speed
+            )
+            ax.quiverkey(
+                q,
+                *opts.vec_legend_loc,
+                ref_speed,
+                f"{ref_speed:.2f} m/s",
+                labelpos="E",
+                coordinates="axes",
+                color=kwargs.get("color", opts.arrow_color),
+                fontproperties={"size": self.cfg.fontsize_legend},
+            )
+
+        return ax
 
 
 # ------------------------------------------------------------------
