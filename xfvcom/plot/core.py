@@ -1061,9 +1061,6 @@ class FvcomPlotter(PlotHelperMixin):
                 ax.add_image(tile_provider, tile_zoom)  # type: ignore[call-arg]
             # ax.add_image(tile_provider, 8)  # Zoom level 8 is suitable for regional plots
 
-        # Argument treatment to avoid conflicts with **kwargs
-        # with_mesh = opts.with_mesh  # Remove with_mesh from kwargs
-
         # --------------------------------------------
         # precedence resolution for style parameters
         # --------------------------------------------
