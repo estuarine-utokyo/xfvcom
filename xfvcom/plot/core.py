@@ -15,6 +15,7 @@ import matplotlib.tri as mtri
 import numpy as np
 import pyproj
 import xarray as xr
+from cartopy.io import img_tiles as cimg
 from cartopy.mpl.geoaxes import GeoAxes
 from cartopy.mpl.ticker import LatitudeFormatter, LongitudeFormatter
 from matplotlib.axes import Axes
@@ -1038,17 +1039,16 @@ class FvcomPlotter(PlotHelperMixin):
             return None
 
         # Set up axis
-        ax = (local or {}).get("ax")  # pre-created Axes or None
-        if ax is None:
-            figsize = opts.figsize or self.cfg.figsize
-            if self.use_latlon:
-                fig, ax = plt.subplots(
-                    figsize=figsize, subplot_kw={"projection": projection}
-                )
-            else:
-                fig, ax = plt.subplots(figsize=figsize)  # No projection for Cartesian
-        else:
-            fig = ax.figure
+        ax = self._prepare_axis(
+            ax=(local or {}).get("ax"),
+            xmin=xmin,
+            xmax=xmax,
+            ymin=ymin,
+            ymax=ymax,
+            opts=opts,
+            projection=projection,
+        )
+        fig = ax.figure
 
         # Add map tiles if requested
         if add_tiles and self.use_latlon:
@@ -2758,6 +2758,94 @@ class FvcomPlotter(PlotHelperMixin):
                 da = da.sum("time")
 
         return da.squeeze(drop=True)
+
+    def _prepare_axis(
+        self,
+        *,
+        ax: Axes | None,
+        xmin: float,
+        xmax: float,
+        ymin: float,
+        ymax: float,
+        opts: FvcomPlotOptions,
+        projection: ccrs.Projection,
+    ) -> Axes:
+        """
+        Return a ready-to-use Axes.
+
+        If *ax* is supplied by caller it is returned unchanged.
+        Otherwise create a new figure/axis and apply extent / tiles / grid.
+        """
+        # ------------------------------------------------------
+        #  If ax is externally given, return it unchanged.
+        # ------------------------------------------------------
+        if ax is not None:
+            return ax
+
+        # ------------------------------------------------------
+        # Create a new figure/axis and apply extent / tiles / grid.
+        # ------------------------------------------------------
+        figsize = opts.figsize or self.cfg.figsize
+        if opts.use_latlon:
+            fig, ax = plt.subplots(
+                figsize=figsize, subplot_kw={"projection": projection}
+            )
+            ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())
+            if opts.add_tiles:
+                self._add_tiles(ax, opts=opts)
+            if opts.plot_grid:
+                self._add_gridlines(ax, opts=opts)
+        else:
+            fig, ax = plt.subplots(figsize=figsize)
+            ax.set_xlim(xmin, xmax)
+            ax.set_ylim(ymin, ymax)
+            ax.set_aspect("equal")
+        return ax
+
+    def _add_tiles(self, ax: "Axes", *, opts: "FvcomPlotOptions") -> None:
+        """
+        Add background web-map tiles to *ax*.
+        Accepts either a string alias ("terrain", "toner", ...) or
+        a Cartopy ImageTiles object (e.g., GoogleTiles, Stamen).
+        """
+        provider = opts.tile_provider or "terrain"
+
+        # --- 1) provider is already an ImageTiles instance -------------
+        if (
+            isinstance(provider, cimg.GoogleTiles)
+            or isinstance(provider, cimg.Stamen)
+            or isinstance(provider, cimg.QuadtreeTiles)
+        ):
+            tiler = provider
+
+        # --- 2) provider is a string alias -----------------------------
+        elif isinstance(provider, str):
+            name = provider.lower()
+            if name in {"terrain", "terrain-background"}:
+                tiler = cimg.Stamen("terrain-background")
+            elif name in {"toner", "toner-background"}:
+                tiler = cimg.Stamen("toner-background")
+            elif name in {"watercolor"}:
+                tiler = cimg.Stamen("watercolor")
+            else:  # fallback
+                tiler = cimg.Stamen("terrain-background")
+
+        # --- 3) unsupported type ---------------------------------------
+        else:  # silently skip to keep backward-compat
+            return
+
+        # zoom level
+        zoom = opts.tile_zoom or 8
+        ax.add_image(tiler, zoom)
+
+    def _add_gridlines(self, ax: "Axes", *, opts: "FvcomPlotOptions") -> None:
+        """
+        Draw lat/lon gridlines exactly as旧コード.
+        """
+        gl = ax.gridlines(draw_labels=True, linewidth=0.5, alpha=0.5)
+        gl.top_labels = gl.right_labels = False
+        gl.xlabel_style = {"size": 8}
+        gl.ylabel_style = {"size": 8}
 
 
 # ------------------------------------------------------------------
