@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import pytest
 from matplotlib.testing.compare import compare_images
@@ -25,8 +26,19 @@ def _cmp_or_copy(src: Path, name: str, regen: bool) -> None:
 
 
 def test_mesh_coast_obc_regression(tmp_path, fvcom_ds, plotter, regen_baseline):
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(projection="platecarree")
+    fig, ax = plt.subplots(
+        figsize=(4, 4),
+        subplot_kw={"projection": ccrs.PlateCarree()},
+    )
+
+    # --------------------------------------------------
+    # 1) Add necessary variables in coastline / obcline
+    # --------------------------------------------------
+    if "nv_ccw" not in fvcom_ds:
+        fvcom_ds["nv_ccw"] = fvcom_ds["nv_zero"]
+    if "node_bc" not in fvcom_ds:
+        bc_nodes = fvcom_ds["nv_zero"][:, 0].values
+        fvcom_ds["node_bc"] = ("node_bc", bc_nodes)
 
     opts = FvcomPlotOptions(
         use_latlon=True,
