@@ -665,14 +665,6 @@ class FvcomPlotter(PlotHelperMixin):
             **merged_cf_kwargs,
         )
 
-        # Optionally add contour lines on top (if desired, similar to original add_contour logic)
-        # Example:
-        # if kwargs.get("add_contour"):
-        #     cs = ax.contour(da["time"].values, da.coords["Depth"].values, da.values,
-        #                     levels=levels, colors="k", linewidths=0.5)
-        #     if kwargs.get("label_contours"):
-        #         ax.clabel(cs, inline=True, fontsize=8)
-
         # 10. Optional: plot water surface elevation line
         #       surface_kwargs: dict passed to ax.plot (e.g. color, linewidth)
         if plot_surface:
@@ -946,6 +938,26 @@ class FvcomPlotter(PlotHelperMixin):
         # Flag for "scalar field is already drawn" so vector map can skip |U|
         opts.da_is_scalar = da is not None
 
+        # ------------------------------------------------------
+        # NEW: scalar-side selection & averaging
+        # ------------------------------------------------------
+        if da is not None:
+            da = self._reduce_scalar(
+                da,
+                time_sel=opts.scalar_time,
+                siglay_sel=opts.scalar_siglay,
+                reduce=opts.scalar_reduce,
+            )
+            # --------------------------------------------------
+            # Safety: Raise ValueError if siglay is still present.
+            # --------------------------------------------------
+            if "siglay" in da.dims:
+                raise ValueError(
+                    "Scalar DataArray still has 'siglay' dimension after reduction. "
+                    "Specify opts.scalar_siglay or opts.scalar_reduce."
+                )
+        # da is None → mesh-only / vector-only
+
         projection = opts.projection  # map projection
         use_latlon = opts.use_latlon  # lon/lat or Cartesian
         self.use_latlon = use_latlon
@@ -973,7 +985,9 @@ class FvcomPlotter(PlotHelperMixin):
 
         if da is not None:
             values = da.values
-            default_cbar_label = f"{da.long_name} ({da.units})"
+            _long = da.attrs.get("long_name", da.name or "")
+            _units = da.attrs.get("units", "")
+            default_cbar_label = f"{_long} ({_units})" if _units else _long
             cbar_label = extra.get("cbar_label", default_cbar_label)
         else:
             with_mesh = True
@@ -2696,6 +2710,57 @@ class FvcomPlotter(PlotHelperMixin):
         if isinstance(name, (bytes, bytearray)):
             name = name.decode("utf-8")
         return str(name).strip()
+
+    def _reduce_scalar(
+        self,
+        da: xr.DataArray,
+        *,
+        time_sel=None,
+        siglay_sel=None,
+        reduce: dict[str, str] | None = None,
+    ) -> xr.DataArray:
+        """
+        Apply selection + reduction for scalar DataArray.
+
+        Parameters
+        ----------
+        da          : xr.DataArray
+        time_sel    : indexer for time dimension
+        siglay_sel  : indexer for siglay dimension
+        reduce      : {"time": "mean"|"sum", "siglay": "mean"|"sum"|"thickness"}
+
+        Notes
+        -----
+        * If *reduce* is None → no averaging.
+        * "thickness" performs layer-thickness weighted mean.
+        """
+        if time_sel is not None and "time" in da.dims:
+            da = da.sel(time=time_sel)
+        if siglay_sel is not None and "siglay" in da.dims:
+            da = da.sel(siglay=siglay_sel)
+
+        if not reduce:
+            return da
+
+        # ---- siglay --------------------------------------------------
+        if "siglay" in da.dims and (op := reduce.get("siglay")):
+            if op == "mean":
+                da = da.mean("siglay")
+            elif op == "sum":
+                da = da.sum("siglay")
+            elif op == "thickness":
+                w = self.ds["siglev"].diff("siglev")  # thickness per layer
+                w = w.sel(siglay=siglay_sel) if siglay_sel is not None else w
+                da = (da * w).sum("siglay") / w.sum("siglay")
+
+        # ---- time ----------------------------------------------------
+        if "time" in da.dims and (op := reduce.get("time")):
+            if op == "mean":
+                da = da.mean("time")
+            elif op == "sum":
+                da = da.sum("time")
+
+        return da.squeeze(drop=True)
 
 
 # ------------------------------------------------------------------

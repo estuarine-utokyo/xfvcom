@@ -107,7 +107,14 @@ class FvcomPlotOptions:
     vec_siglay: int | slice | list[int] | tuple[int, ...] | None = None
     # e.g. {"time":"mean","siglay":"mean"|"thickness"}
     vec_reduce: dict[str, str] | None = None
-    # vec_scale      : float | str = None          # custom quiver scale
+    # ------------------------------------------------------------
+    # 8-C. Scalar-map specific parameters (NEW)
+    # ------------------------------------------------------------
+    # 時間 / 鉛直方向の選択と平均処理をスカラー用に独立して指定
+    scalar_time: int | slice | list[int] | tuple[int, ...] | None = None
+    scalar_siglay: int | slice | list[int] | tuple[int, ...] | None = None
+    scalar_reduce: dict[str, str] | None = None  # {"time": "mean", "siglay": "mean"}
+
     # ------------------------------------------------------------
     # 9. ts_contourf / ts_contourf_z
     # ------------------------------------------------------------
