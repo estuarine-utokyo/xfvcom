@@ -44,7 +44,14 @@ jobs:
       - name: Static type checking
         run: mypy .
 
-      # 8) Unit tests (pytest) – use headless backend
+      # 8) (NEW) Restore baseline PNGs for image regression
+      - name: Restore baseline PNGs
+        uses: actions/cache/restore@v4
+        with:
+          path: tests/baseline
+          key: baseline-v1
+
+      # 9) Unit tests (pytest) – use headless backend
       - name: Run unit tests
         env:
           MPLBACKEND: Agg

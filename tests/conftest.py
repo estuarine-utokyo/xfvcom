@@ -5,6 +5,9 @@ Provide a minimal FVCOM-like Dataset (fvcom_ds) and a ready Plotter (plotter).
 
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -53,7 +56,21 @@ def fvcom_ds() -> xr.Dataset:
     return ds
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--regenerate-baseline",
+        action="store_true",
+        help="Overwrite baseline PNGs with current output",
+    )
+
+
 @pytest.fixture
 def plotter(fvcom_ds: xr.Dataset) -> FvcomPlotter:
     """Return a FvcomPlotter instance bound to *fvcom_ds*."""
     return FvcomPlotter(fvcom_ds, FvcomPlotConfig())
+
+
+@pytest.fixture
+def regen_baseline(request) -> bool:  # 型ヒントは任意
+    """True if pytest was run with --regenerate-baseline."""
+    return bool(request.config.getoption("--regenerate-baseline"))
