@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import cartopy.crs as ccrs
 from cartopy.io.img_tiles import GoogleTiles
@@ -91,6 +91,7 @@ class FvcomPlotOptions:
     arrow_headlength: int = 5
     arrow_headwidth: int = 3
     arrow_headaxislength: float = 4.5
+    arrow_scale: float | None | Literal["auto"] = "auto"
     scale: float | str | None = None
     scale_units: str = "y"
     show_vec_legend: bool = True
@@ -140,6 +141,18 @@ class FvcomPlotOptions:
     # ------------------------------------------------------------
     extra: dict[str, Any] = field(default_factory=dict, repr=False)
     da_is_scalar: bool = False
+
+    # -----------------------------------------------------------------
+    # Normalize user inputs so plotter internals can assume fixed types
+    # -----------------------------------------------------------------
+    def __post_init__(self) -> None:
+        # arrow_scale: "auto" -> None  (None == auto-scale)
+        if isinstance(self.arrow_scale, str) and self.arrow_scale.lower() == "auto":
+            self.arrow_scale = None
+
+        # vec_reduce / scalar_reduce: always dict (possibly empty)
+        self.vec_reduce = self.vec_reduce or {}
+        self.scalar_reduce = self.scalar_reduce or {}
 
     # ------------------------------------------------------------
     # Helper constructor to keep backward compatibility with **kwargs
