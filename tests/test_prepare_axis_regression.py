@@ -21,7 +21,7 @@ def _assert_or_regen(tmp_png: Path, baseline_name: str, regen: bool) -> None:
     if regen or not ref.exists():
         shutil.copy(tmp_png, ref)
     else:
-        diff = compare_images(ref, tmp_png, tol=1.0)  # type: ignore[arg-type]
+        diff = compare_images(str(ref), str(tmp_png), tol=1.0)  # type: ignore[call-overload]
         assert diff is None, diff
 
 

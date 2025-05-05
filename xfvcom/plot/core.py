@@ -2499,7 +2499,7 @@ class FvcomPlotter(PlotHelperMixin):
             fig, ax = plt.subplots(
                 figsize=figsize, subplot_kw={"projection": projection}
             )
-            ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())  # type: ignore[attr-defined]
+            ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())  # type: ignore[union-attr]
             if opts.add_tiles:
                 self._add_tiles(ax, opts=opts)
             if opts.plot_grid:
@@ -2551,7 +2551,7 @@ class FvcomPlotter(PlotHelperMixin):
         """
         Draw lat/lon gridlines exactly as旧コード.
         """
-        gl = ax.gridlines(draw_labels=True, linewidth=0.5, alpha=0.5)
+        gl = ax.gridlines(draw_labels=True, linewidth=0.5, alpha=0.5)  # type: ignore[attr-defined]
         gl.top_labels = gl.right_labels = False
         gl.xlabel_style = {"size": 8}
         gl.ylabel_style = {"size": 8}
@@ -2938,7 +2938,7 @@ class FvcomPlotter(PlotHelperMixin):
 
         # 5) save -----------------------------------------------------------
         if save_path is not None:
-            ax.figure.savefig(save_path, dpi=opts.dpi or 150, bbox_inches="tight")
+            ax.figure.savefig(save_path, dpi=opts.dpi or 150, bbox_inches="tight")  # type: ignore[union-attr]
 
 
 # ------------------------------------------------------------------
