@@ -1124,61 +1124,40 @@ class FvcomPlotter(PlotHelperMixin):
         # Handle Cartesian coordinates
         if not self.use_latlon:
             title = extra.get("title", "FVCOM Mesh (Cartesian)")
-            if da is not None:
-                cf = self._draw_scalar(ax, triang, da, opts=opts)
-                cbar = self._make_colorbar(ax, cf, cbar_label, opts=opts)
-            ax.set_xlim(xmin, xmax)
-            ax.set_ylim(ymin, ymax)
-            ax.set_title(title, fontsize=self.cfg.fontsize["title"])
             xlabel = extra.get("xlabel", "X (m)")
             ylabel = extra.get("ylabel", "Y (m)")
-            ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize["xlabel"])
-            ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize["ylabel"])
-            ax.set_aspect("equal")
         # Handle lat/lon coordinates
         else:
             title = extra.get("title", "")
-            if da is not None:
-                cf = self._draw_scalar(ax, triang, da, opts=opts)
-                cbar = self._make_colorbar(ax, cf, cbar_label, opts=opts)
-            # Use set_extent for lat/lon ranges
-            ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())  # type: ignore[union-attr]
-            ax.set_title(title, fontsize=self.cfg.fontsize["title"])
             xlabel = extra.get("xlabel", "Longitude")
             ylabel = extra.get("ylabel", "Latitude")
-            ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize["xlabel"])
-            ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize["ylabel"])
-            ax.set_aspect("equal")
 
-            # Add gridlines for lat/lon. Always use PlateCarree here.
-            if plot_grid:
-                gl = ax.gridlines(  # type: ignore[attr-defined,union-attr]
-                    draw_labels=True, crs=ccrs.PlateCarree(), linestyle=linestyle, lw=lw
-                )
-                gl.top_labels = False
-                gl.right_labels = False
-                gl.xlabel_style = {"size": 11}
-                gl.ylabel_style = {"size": 11}
-            else:
-                gl = ax.gridlines(  # type: ignore[attr-defined,union-attr]
-                    draw_labels=False, crs=ccrs.PlateCarree(), linestyle=linestyle, lw=0
-                )
-                lon_ticks = gl.xlocator.tick_values(xmin, xmax)
-                lat_ticks = gl.ylocator.tick_values(ymin, ymax)
-                ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())
-                ax.set_yticks(lat_ticks, crs=ccrs.PlateCarree())
-                ax.xaxis.set_major_formatter(LongitudeFormatter())
-                ax.yaxis.set_major_formatter(LatitudeFormatter())
-                x_min_proj, y_min_proj = projection.transform_point(
-                    xmin, ymin, src_crs=ccrs.PlateCarree()
-                )
-                x_max_proj, y_max_proj = projection.transform_point(
-                    xmax, ymax, src_crs=ccrs.PlateCarree()
-                )
-                ax.set_xlim(x_min_proj, x_max_proj)
-                ax.set_ylim(y_min_proj, y_max_proj)
-                ax.tick_params(labelsize=11, labelcolor="black")
+        # Draw filled contour plot
+        if da is not None:
+            self._draw_scalar(
+                ax=ax,
+                triang=triang,
+                da=da,
+                opts=opts,
+            )
 
+        # Finalizing plot: (Title, xlable, ylabel, savefig, etc.)
+        self._finalize_plot(
+            ax=ax,
+            opts=opts,
+            projection=projection,
+            xmin=xmin,
+            xmax=xmax,
+            ymin=ymin,
+            ymax=ymax,
+            title=title,
+            xlabel=xlabel,
+            ylabel=ylabel,
+            post_process_func=post_process_func,
+            save_path=save_path,
+        )
+
+        # Draw mesh
         self._draw_mesh(
             ax=ax,
             triang=triang,
@@ -1201,38 +1180,6 @@ class FvcomPlotter(PlotHelperMixin):
                 da["time"].values if (da is not None and "time" in da.coords) else None
             ),
         )
-
-        # --- user post-processing -----------------------------------------
-        if post_process_func:
-            # Analyse function signature
-            func_sig = inspect.signature(post_process_func)
-            valid_args = func_sig.parameters.keys()
-
-            # Build kwargs dynamically
-            dyn_kwargs = {}
-            frame_locals = locals()  # everything defined inside plot_2d
-            frame_globals = globals()  # module-level names
-
-            for arg in valid_args:
-                if arg == "ax":
-                    dyn_kwargs[arg] = ax
-                elif arg == "da":
-                    dyn_kwargs[arg] = da
-                elif arg in frame_locals:
-                    dyn_kwargs[arg] = frame_locals[arg]
-                elif arg in frame_globals:
-                    dyn_kwargs[arg] = frame_globals[arg]
-                else:
-                    logger.warning("Unable to resolve argument '%s'.", arg)
-
-            # Call the user callback
-            post_process_func(**dyn_kwargs)
-
-        # Save the plot if requested
-        if save_path:
-            dpi = opts.dpi or self.cfg.dpi
-            fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
-            logger.info("Plot saved to: %s", save_path)
 
         return ax
 
@@ -2931,6 +2878,68 @@ class FvcomPlotter(PlotHelperMixin):
             )
 
         return ax
+
+    def _finalize_plot(
+        self,
+        ax: "Axes",
+        *,
+        opts: FvcomPlotOptions,
+        projection: ccrs.Projection,
+        xmin: float,
+        xmax: float,
+        ymin: float,
+        ymax: float,
+        title: str,
+        xlabel: str,
+        ylabel: str,
+        post_process_func: Callable | None,
+        save_path: str | None,
+    ) -> None:
+        """
+        Apply titles / labels / gridlines, run post-process hook, and
+        optionally save the figure.
+
+        Behaviour identical to legacy plot_2d() tail section.
+        """
+        # 1) extent & aspect ------------------------------------------------
+        if opts.use_latlon:
+            ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())
+            ax.set_aspect("equal")
+        else:
+            ax.set_xlim(xmin, xmax)
+            ax.set_ylim(ymin, ymax)
+            ax.set_aspect("equal")
+
+        # 2) titles / labels ------------------------------------------------
+        ax.set_title(title, fontsize=self.cfg.fontsize["title"])
+        ax.set_xlabel(xlabel, fontsize=self.cfg.fontsize["xlabel"])
+        ax.set_ylabel(ylabel, fontsize=self.cfg.fontsize["ylabel"])
+
+        # 3) gridlines (geographic only) -----------------------------------
+        if opts.use_latlon:
+            if opts.plot_grid:
+                gl = ax.gridlines(
+                    draw_labels=True, crs=ccrs.PlateCarree(), lw=0.5, alpha=0.5
+                )
+                gl.top_labels = gl.right_labels = False
+                gl.xlabel_style = gl.ylabel_style = {"size": 11}
+            else:
+                # Custom tick locator / formatter (旧コードをそのまま)
+                gl = ax.gridlines(draw_labels=False, crs=ccrs.PlateCarree(), lw=0)
+                lon_ticks = gl.xlocator.tick_values(xmin, xmax)
+                lat_ticks = gl.ylocator.tick_values(ymin, ymax)
+                ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())
+                ax.set_yticks(lat_ticks, crs=ccrs.PlateCarree())
+                ax.xaxis.set_major_formatter(LongitudeFormatter())
+                ax.yaxis.set_major_formatter(LatitudeFormatter())
+
+        # 4) user hook ------------------------------------------------------
+        if post_process_func is not None:
+            post_process_func(ax=ax)
+
+        # 5) save -----------------------------------------------------------
+        if save_path is not None:
+            ax.figure.savefig(save_path, dpi=opts.dpi or 150, bbox_inches="tight")
 
 
 # ------------------------------------------------------------------
