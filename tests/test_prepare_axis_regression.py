@@ -59,5 +59,5 @@ def test_prepare_axis_regression(
 
     case = "scalar_geo"  # いまは地理座標のみ
     out_png = tmp_path / f"{case}.png"
-    fig.savefig(out_png, dpi=100, bbox_inches="tight")
+    fig.savefig(out_png, dpi=100)
     _assert_or_regen(out_png, f"{case}.png", regen_baseline)

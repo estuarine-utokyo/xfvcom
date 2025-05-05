@@ -55,5 +55,5 @@ def test_scalar_vector_regression(tmp_path, fvcom_ds, plotter, regen_baseline):
     plotter.plot_2d(da=da, ax=ax, opts=opts)
 
     out = tmp_path / "scalar_vec.png"
-    fig.savefig(out, dpi=100, bbox_inches="tight")
+    fig.savefig(out, dpi=100)
     _cmp_or_copy(out, "scalar_vec.png", regen_baseline)

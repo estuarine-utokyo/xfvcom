@@ -51,5 +51,5 @@ def test_mesh_coast_obc_regression(tmp_path, fvcom_ds, plotter, regen_baseline):
     plotter.plot_2d(da=None, ax=ax, opts=opts)
 
     out = tmp_path / "mesh_coast.png"
-    fig.savefig(out, dpi=100, bbox_inches="tight")
+    fig.savefig(out, dpi=100)
     _cmp_or_copy(out, "mesh_coast.png", regen_baseline)

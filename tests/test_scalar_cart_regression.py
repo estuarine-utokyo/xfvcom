@@ -47,5 +47,5 @@ def test_scalar_cart_regression(tmp_path, fvcom_ds, plotter, regen_baseline):
     plotter.plot_2d(da=da, ax=ax, opts=opts)
 
     out = tmp_path / "scalar_cart.png"
-    fig.savefig(out, dpi=100, bbox_inches="tight")
+    fig.savefig(out, dpi=100)
     _cmp_or_copy(out, "scalar_cart.png", regen_baseline)
