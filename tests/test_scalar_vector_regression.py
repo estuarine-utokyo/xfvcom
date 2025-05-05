@@ -21,7 +21,7 @@ def _cmp_or_copy(src: Path, name: str, regen: bool) -> None:
     if regen or not ref.exists():
         shutil.copy(src, ref)
     else:
-        diff = compare_images(ref, src, tol=1.0)
+        diff = compare_images(ref, src, tol=1.0)  # type: ignore[arg-type]
         assert diff is None, diff
 
 
@@ -38,8 +38,8 @@ def test_scalar_vector_regression(tmp_path, fvcom_ds, plotter, regen_baseline):
         nv = fvcom_ds["nv_zero"].values  # (nele, 3)
         lonc = fvcom_ds["lon"].values[nv].mean(axis=1)
         latc = fvcom_ds["lat"].values[nv].mean(axis=1)
-        fvcom_ds["lonc"] = ("nele", lonc)
-        fvcom_ds["latc"] = ("nele", latc)
+        fvcom_ds["lonc"] = ("nele", lonc)  # type: ignore[assignment]
+        fvcom_ds["latc"] = ("nele", latc)  # type: ignore[assignment]
 
     da = fvcom_ds["temp"].isel(time=1, siglay=0)
     opts = FvcomPlotOptions(

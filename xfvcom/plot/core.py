@@ -204,7 +204,7 @@ class FvcomPlotter(PlotHelperMixin):
         # Save or show the plot
         if save_path:
             dpi = kwargs.get("dpi", self.cfg.dpi)
-            fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
+            fig.savefig(save_path, dpi=dpi, bbox_inches="tight")  # type: ignore[union-attr]
 
         return ax
 
@@ -1060,7 +1060,6 @@ class FvcomPlotter(PlotHelperMixin):
                 )
             else:
                 ax.add_image(tile_provider, tile_zoom)  # type: ignore[call-arg]
-            # ax.add_image(tile_provider, 8)  # Zoom level 8 is suitable for regional plots
 
         # --------------------------------------------
         # precedence resolution for style parameters
@@ -2500,7 +2499,7 @@ class FvcomPlotter(PlotHelperMixin):
             fig, ax = plt.subplots(
                 figsize=figsize, subplot_kw={"projection": projection}
             )
-            ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())
+            ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())  # type: ignore[attr-defined]
             if opts.add_tiles:
                 self._add_tiles(ax, opts=opts)
             if opts.plot_grid:
@@ -2546,7 +2545,7 @@ class FvcomPlotter(PlotHelperMixin):
 
         # zoom level
         zoom = opts.tile_zoom or 8
-        ax.add_image(tiler, zoom)
+        ax.add_image(tiler, zoom)  # type: ignore[call-arg]
 
     def _add_gridlines(self, ax: "Axes", *, opts: "FvcomPlotOptions") -> None:
         """
@@ -2903,7 +2902,7 @@ class FvcomPlotter(PlotHelperMixin):
         """
         # 1) extent & aspect ------------------------------------------------
         if opts.use_latlon:
-            ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())
+            ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())  # type: ignore[attr-defined]
             ax.set_aspect("equal")
         else:
             ax.set_xlim(xmin, xmax)
@@ -2918,14 +2917,14 @@ class FvcomPlotter(PlotHelperMixin):
         # 3) gridlines (geographic only) -----------------------------------
         if opts.use_latlon:
             if opts.plot_grid:
-                gl = ax.gridlines(
+                gl = ax.gridlines(  # type: ignore[attr-defined]
                     draw_labels=True, crs=ccrs.PlateCarree(), lw=0.5, alpha=0.5
                 )
                 gl.top_labels = gl.right_labels = False
                 gl.xlabel_style = gl.ylabel_style = {"size": 11}
             else:
                 # Custom tick locator / formatter (旧コードをそのまま)
-                gl = ax.gridlines(draw_labels=False, crs=ccrs.PlateCarree(), lw=0)
+                gl = ax.gridlines(draw_labels=False, crs=ccrs.PlateCarree(), lw=0)  # type: ignore[attr-defined]
                 lon_ticks = gl.xlocator.tick_values(xmin, xmax)
                 lat_ticks = gl.ylocator.tick_values(ymin, ymax)
                 ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())

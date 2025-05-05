@@ -22,7 +22,7 @@ def _cmp_or_copy(src: Path, name: str, regen: bool) -> None:
     if regen or not ref.exists():
         shutil.copy(src, ref)
     else:
-        diff = compare_images(ref, src, tol=1.0)
+        diff = compare_images(ref, src, tol=1.0)  # type: ignore[arg-type]
         assert diff is None, diff
 
 
