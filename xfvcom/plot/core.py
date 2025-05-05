@@ -21,6 +21,7 @@ from cartopy.mpl.ticker import LatitudeFormatter, LongitudeFormatter
 from matplotlib.axes import Axes
 from matplotlib.colorbar import Colorbar
 from matplotlib.colors import BoundaryNorm
+from matplotlib.contour import QuadContourSet
 from matplotlib.dates import DateFormatter
 from matplotlib.gridspec import GridSpec
 from matplotlib.ticker import LogFormatter, LogLocator
@@ -1124,14 +1125,7 @@ class FvcomPlotter(PlotHelperMixin):
         if not self.use_latlon:
             title = extra.get("title", "FVCOM Mesh (Cartesian)")
             if da is not None:
-                cf = ax.tricontourf(
-                    triang,
-                    values,
-                    cmap=cmap_obj,
-                    transform=None,
-                    extend=extend_flag,
-                    **tc_kwargs,
-                )
+                cf = self._draw_scalar(ax, triang, da, opts=opts)
                 cbar = self._make_colorbar(ax, cf, cbar_label, opts=opts)
             if with_mesh:
                 ax.triplot(triang, color=color, lw=lw)
@@ -1147,14 +1141,7 @@ class FvcomPlotter(PlotHelperMixin):
         else:
             title = extra.get("title", "")
             if da is not None:
-                cf = ax.tricontourf(
-                    triang,
-                    values,
-                    cmap=cmap_obj,
-                    transform=ccrs.PlateCarree(),
-                    extend=extend_flag,
-                    **tc_kwargs,
-                )
+                cf = self._draw_scalar(ax, triang, da, opts=opts)
                 cbar = self._make_colorbar(ax, cf, cbar_label, opts=opts)
             if with_mesh:
                 # Always use PlateCarree here.
@@ -2846,6 +2833,46 @@ class FvcomPlotter(PlotHelperMixin):
         gl.top_labels = gl.right_labels = False
         gl.xlabel_style = {"size": 8}
         gl.ylabel_style = {"size": 8}
+
+    def _draw_scalar(
+        self,
+        ax: "Axes",
+        triang: mtri.Triangulation,
+        da: xr.DataArray,
+        *,
+        opts: "FvcomPlotOptions",
+    ) -> "QuadContourSet":
+        """
+        Draw filled contour of *da* and attach colorbar.
+
+        Returns
+        -------
+        cf : matplotlib QuadContourSet
+        """
+        extra = opts.extra
+        cmap_obj = extra.get("cmap", opts.cmap)
+        tc_kwargs = {
+            "levels": extra.get("levels", opts.levels),
+            "vmin": extra.get("vmin", opts.vmin),
+            "vmax": extra.get("vmax", opts.vmax),
+        }
+        extend_flag = extra.get("extend", opts.extend)
+
+        cf = ax.tricontourf(
+            triang,
+            da.values,
+            cmap=cmap_obj,
+            transform=(ccrs.PlateCarree() if opts.use_latlon else None),
+            extend=extend_flag,
+            **tc_kwargs,
+        )
+        # colorbar
+        default_label = (
+            f"{da.attrs.get('long_name', da.name)} ({da.attrs.get('units','')})"
+        )
+        cbar_label = extra.get("cbar_label", default_label)
+        self._make_colorbar(ax, cf, cbar_label, opts=opts)
+        return cf
 
 
 # ------------------------------------------------------------------
