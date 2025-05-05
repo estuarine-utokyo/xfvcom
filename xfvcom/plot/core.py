@@ -1127,8 +1127,6 @@ class FvcomPlotter(PlotHelperMixin):
             if da is not None:
                 cf = self._draw_scalar(ax, triang, da, opts=opts)
                 cbar = self._make_colorbar(ax, cf, cbar_label, opts=opts)
-            if with_mesh:
-                ax.triplot(triang, color=color, lw=lw)
             ax.set_xlim(xmin, xmax)
             ax.set_ylim(ymin, ymax)
             ax.set_title(title, fontsize=self.cfg.fontsize["title"])
@@ -1143,9 +1141,6 @@ class FvcomPlotter(PlotHelperMixin):
             if da is not None:
                 cf = self._draw_scalar(ax, triang, da, opts=opts)
                 cbar = self._make_colorbar(ax, cf, cbar_label, opts=opts)
-            if with_mesh:
-                # Always use PlateCarree here.
-                ax.triplot(triang, color=color, lw=lw, transform=ccrs.PlateCarree())
             # Use set_extent for lat/lon ranges
             ax.set_extent([xmin, xmax, ymin, ymax], crs=ccrs.PlateCarree())  # type: ignore[union-attr]
             ax.set_title(title, fontsize=self.cfg.fontsize["title"])
@@ -1184,45 +1179,18 @@ class FvcomPlotter(PlotHelperMixin):
                 ax.set_ylim(y_min_proj, y_max_proj)
                 ax.tick_params(labelsize=11, labelcolor="black")
 
-        if coastlines:
-            logger.info("Plotting coastlines...")
-
-            nv = self.ds.nv_ccw.values
-            nbe = np.array(
-                [
-                    [nv[n, j], nv[n, (j + 2) % 3]]
-                    for n in range(len(triang.neighbors))
-                    for j in range(3)
-                    if triang.neighbors[n, j] == -1
-                ]
-            )
-            for m in range(len(nbe)):
-                # ax.plot(x[nbe[m,:]], y[nbe[m,:]], color='gray', linewidth=1, transform=transform)
-                ax.plot(
-                    x[nbe[m, :]],
-                    y[nbe[m, :]],
-                    color=coastline_color,
-                    linewidth=1,
-                    transform=transform,
-                )
-
-        if obclines:
-            # Plot open boundary lines
-            logger.info("Plotting open boundary lines...")
-
-            if "node_bc" not in self.ds:
-                raise ValueError(
-                    "Dataset does not contain 'node_bc' variable for open boundary lines."
-                    " obcfile must be read in FvcomDataLoader."
-                )
-            node_bc = self.ds.node_bc.values
-            ax.plot(
-                x[node_bc[:]],
-                y[node_bc[:]],
-                color=obcline_color,
-                linewidth=1,
-                transform=transform,
-            )
+        self._draw_mesh(
+            ax=ax,
+            triang=triang,
+            with_mesh=with_mesh,
+            coastlines=coastlines,
+            obclines=obclines,
+            transform=(ccrs.PlateCarree() if self.use_latlon else None),
+            mesh_color=color,
+            mesh_lw=lw,
+            coast_color=coastline_color,
+            obcline_color=obcline_color,
+        )
 
         # -------- vector-overlay hook inside plot_2d -----------------
         if opts.plot_vec2d:
@@ -2873,6 +2841,94 @@ class FvcomPlotter(PlotHelperMixin):
         cbar_label = extra.get("cbar_label", default_label)
         self._make_colorbar(ax, cf, cbar_label, opts=opts)
         return cf
+
+    def _draw_mesh(
+        self,
+        *,
+        ax: Axes,
+        triang: mtri.Triangulation,
+        with_mesh: bool,
+        coastlines: bool,
+        obclines: bool,
+        transform,
+        mesh_color: str,
+        mesh_lw: float,
+        coast_color: str,
+        obcline_color: str,
+    ) -> None:
+        """
+        Draw element edges, coastlines, and open-boundary lines.
+
+        Parameters
+        ----------
+        ax            : Matplotlib Axes
+        triang        : Triangulation of the FVCOM mesh
+        with_mesh     : True  → draw element edges
+        coastlines    : True  → draw land–sea boundary
+        obclines      : True  → draw open-boundary lines
+        transform     : None or PlateCarree()  (passed to Matplotlib/Cartopy)
+        mesh_color    : Edge color for `triplot`
+        mesh_lw       : Linewidth for element edges
+        coast_color   : Color for coastline segments
+        obcline_color : Color for open-boundary segments
+        """
+        # ---------------------------------------------------
+        # 1. element edges
+        # ---------------------------------------------------
+        if with_mesh:
+            ax.triplot(
+                triang,
+                color=mesh_color,
+                lw=mesh_lw,
+                transform=transform,
+                zorder=2,
+            )
+
+        # ---------------------------------------------------
+        # 2. coastline segments  (nv where neighbour = -1)
+        # ---------------------------------------------------
+        if coastlines:
+            if not hasattr(self, "ds") or "nv_ccw" not in self.ds:
+                raise ValueError("'nv_ccw' missing; coastline drawing aborted.")
+            nv = self.ds.nv_ccw.values
+            nbe = np.array(
+                [
+                    [nv[n, j], nv[n, (j + 2) % 3]]
+                    for n in range(len(triang.neighbors))
+                    for j in range(3)
+                    if triang.neighbors[n, j] == -1
+                ]
+            )
+            x, y = self.ds["lon"].values, self.ds["lat"].values
+            for seg in nbe:
+                ax.plot(
+                    x[seg],
+                    y[seg],
+                    color=coast_color,
+                    linewidth=1.0,
+                    transform=transform,
+                    zorder=3,
+                )
+
+        # ---------------------------------------------------
+        # 3. open-boundary lines  (node_bc == 1)
+        # ---------------------------------------------------
+        if obclines:
+            if "node_bc" not in self.ds:
+                raise ValueError(
+                    "'node_bc' variable missing for open-boundary lines "
+                    "(read obcfile in FvcomDataLoader)."
+                )
+            node_bc = self.ds.node_bc.values
+            x, y = self.ds["lon"].values, self.ds["lat"].values
+            ax.plot(
+                x[node_bc],
+                y[node_bc],
+                color=obcline_color,
+                linewidth=1.0,
+                transform=transform,
+                zorder=4,
+            )
 
 
 # ------------------------------------------------------------------
