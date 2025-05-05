@@ -1,5 +1,5 @@
 # tests/test_options_postinit.py
-from xfvcom.plot.plot_options import FvcomPlotOptions
+from xfvcom.plot_options import FvcomPlotOptions
 
 
 def test_post_init_normalization():
