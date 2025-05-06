@@ -115,20 +115,6 @@ conda install -c conda-forge <package>
 
 ## Developer Information
 
-### Run Tests & Quality Checks
-
-```bash
-# 1) Unit tests
-pytest tests/
-
-# 2) Static type checking
-mypy .
-
-# 3) Code formatting and import order
-black --check .
-isort --check-only .
-```
-
 ### Contributing
 
 Contributions are welcome! Please fork the repo, create a feature branch, and submit a pull request.
