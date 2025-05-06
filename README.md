@@ -24,6 +24,12 @@
 
 ---
 
+## Detailed docs
+
+For an end-to-end plotting walkthrough, see  
+[docs/plotting.md](docs/plotting.md).
+
+
 ## Installation
 
 This package is currently intended for **local development only** and is **not** published on PyPI.
@@ -96,68 +102,6 @@ create_anim_2d_plot(
     plot_kwargs={"vmin": 28, "vmax": 34, "cmap": "jet"}
 )
 ```
-
-### 2‑D Scalar + Vector Overlay (`plot_vec2d`)
-
-`plot_2d()` can superimpose velocity vectors (`u`, `v`) on a scalar field (e.g., temperature).  
-Enable the overlay by setting `FvcomPlotOptions.plot_vec2d = True`.
-
-| Option        | Default | Description                                                            |
-|---------------|---------|------------------------------------------------------------------------|
-| `plot_vec2d`  | `False` | Draw velocity vectors on top of the scalar map                         |
-| `vec_time`    | *auto*  | Time index/label for vectors – if omitted, the time of `da` is used    |
-| `vec_siglay`  | `0`     | Vertical layer for vectors (`0` = surface)                             |
-| `arrow_color` | `"k"`   | Matplotlib color specification for arrows                              |
-| `spacing`     | `200.0` | Sampling spacing [m] when a transect is supplied                       |
-
-#### Example
-
-```python
-import matplotlib
-matplotlib.use("Agg")  # headless backend (optional)
-
-from xfvcom.plot.core import (
-    FvcomPlotter,
-    FvcomPlotConfig,
-    FvcomPlotOptions,
-)
-
-cfg = FvcomPlotConfig(figsize=(6, 5), dpi=150)
-opts = FvcomPlotOptions(
-    plot_vec2d=True,   # enable vector overlay
-    vec_siglay=0,      # surface layer
-    arrow_color="k",   # black arrows
-)
-
-plotter = FvcomPlotter(ds, cfg)
-
-# scalar field at time index 20, layer 0
-da = ds["temp"].isel(time=20, siglay=0)
-
-ax = plotter.plot_2d(da=da, opts=opts)
-ax.set_title("Surface Temperature + Currents")
-ax.figure.savefig("temp_vec.png", dpi=150)
-```
-
-#### Automatic time matching
-
-If `vec_time` is **not** provided, `plot_2d()` searches for a matching vector‑time index:
-
-1. Exact match via `Dataset.indexes["time"].get_loc(label)`  
-2. `datetime64` comparison after aligning the time unit (e.g., `ns`)  
-3. Numeric comparison using nanoseconds (`int64`)
-
-If no match is found, a `ValueError` is raised – set `vec_time` explicitly.
-
-#### Requirements
-
-* Mesh variables must exist in the dataset:  
-  `lon`, `lat`, `lonc`, `latc`, `nv_zero` (or `nv`, `nv_ccw`).
-* For headless environments set `MPLBACKEND=Agg` **or** call  
-  `matplotlib.use("Agg")` *before* importing `xfvcom.plot`.
-
-
----
 
 ## Dependencies
 
