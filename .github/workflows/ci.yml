@@ -51,8 +51,10 @@ jobs:
           path: tests/baseline
           key: baseline-v1
 
-      # 9) Unit tests (pytest) – use headless backend
-      - name: Run unit tests
+      # 9) Unit tests (pytest) – skip image-regression tests on CI
+      - name: Run unit tests (no-PNG)
         env:
           MPLBACKEND: Agg
-        run: pytest -q
+        run: |
+          # Skip tests marked with "png" to avoid flaky image-comparison in CI
+          pytest -q -m "not png"

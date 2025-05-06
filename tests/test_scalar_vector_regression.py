@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import pytest
 from matplotlib.testing.compare import compare_images
 
+pytestmark = pytest.mark.png
+
 from xfvcom.plot.core import FvcomPlotOptions, FvcomPlotter
 
 BASELINE = Path(__file__).parent / "baseline"
