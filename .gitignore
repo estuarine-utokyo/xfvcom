@@ -167,3 +167,4 @@ cython_debug/
 /examples/*.html
 /examples/html
 /examples/sliced
+/docs/_build/

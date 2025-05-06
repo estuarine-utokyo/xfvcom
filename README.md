@@ -24,11 +24,11 @@
 
 ---
 
-## Detailed docs
+## Documentation
 
-For an end-to-end plotting walkthrough, see  
-[docs/plotting.md](docs/plotting.md).
-
+* [2-D Horizontal Plotting](docs/plot_2d.md)
+* [Time-series & Depth-profiles](docs/plot_ts.md)
+* [Vertical Sections](docs/plot_section.md)
 
 ## Installation
 
@@ -64,8 +64,8 @@ pip install -e .
 ```python
 from xfvcom import FvcomDataLoader
 
-loader = FvcomDataLoader(base_path="/path/to/data", ncfile="sample.nc")
-ds = loader.ds
+fvcom = FvcomDataLoader(base_path="/path/to/data", ncfile="sample.nc")
+ds = fvcom.ds
 ```
 
 ### Analyze Data
