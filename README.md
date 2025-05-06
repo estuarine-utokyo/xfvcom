@@ -131,17 +131,33 @@ This project is licensed under the [MIT License](LICENSE).
 
 ## File Relationships
 
-* **xfvcom.py**
-  Core module for loading, analyzing, and plotting FVCOM data.
-* **helpers.py**
-  Provides helper functions for GIF/MP4 generation, frame creation, and batch plotting.
-* **helpers\_utils.py**
-  Utility functions for cleaning and unpacking keyword arguments.
-* **plot\_utils.py**
-  Creates 2D plot animations (GIF/MP4) by integrating `helpers.py` and `xfvcom.py`.
-* **plot\_options.py**
-  Configuration dataclass for plot styling and options.
-* **core.py**
-  Main plotting routines (contour, vector, section).
-* **io.py**
-  Data loader for FVCOM NetCDF files.
+* **helpers.py**  
+  High-level API for GIF/MP4 creation, frame generation, and batch plotting
+  (e.g., `FrameGenerator`).
+
+* **helpers_utils.py**  
+  Utility helpers for cleaning and merging option dictionaries used across
+  the code base.
+
+* **utils.py**  
+  Wrapper functions that combine `helpers.py` and `core.py` to create
+  sequences of 2-D plots and export them as animations (GIF/MP4).
+
+* **plot_options.py**  
+  `FvcomPlotOptions` dataclass holding all styling and plotting options.
+
+* **core.py**  
+  Main drawing routines implemented in `FvcomPlotter` (scalar contours,
+  vector fields, vertical sections, etc.).
+
+* **io.py**  
+  `FvcomDataLoader` for reading FVCOM NetCDF files, completing the mesh, and
+  performing light preprocessing.
+
+* **config.py**  
+  `FvcomPlotConfig` with default fonts, projections, and other constants that
+  `core.py` refers to.
+
+* **analysis.py**  
+  `FvcomAnalyzer` providing physics-oriented calculations and reductions
+  (layer averages, tidal decomposition, etc.).
