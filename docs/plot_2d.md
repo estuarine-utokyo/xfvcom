@@ -196,17 +196,4 @@ for ti in range(len(ds.time)):
 
 ---
 
-## 10. Contributing
-
-1. Add new examples or screenshots to `docs/images/`.
-2. Link them from `README.md`.
-3. Update PNG baselines:
-
-```bash
-pytest --regenerate-baseline -q
-pre-commit run --all-files
-git add tests/baseline/*.png
-git commit -m "Update image baselines"
-```
-
 [← Back to README](../README.md)

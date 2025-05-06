@@ -132,6 +132,8 @@ isort --check-only .
 ### Contributing
 
 Contributions are welcome! Please fork the repo, create a feature branch, and submit a pull request.
+For development workflow and test-suite details, please see
+[CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 ---
 
