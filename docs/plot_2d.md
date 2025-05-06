@@ -12,7 +12,7 @@ scalar fields, vector fields, and advanced hooks.
 
 ```python
 import cartopy.crs as ccrs
-from xfvcom   import FvcomDataLoader
+from xfvcom import FvcomDataLoader
 from xfvcom import FvcomPlotter, FvcomPlotConfig, FvcomPlotOptions
 
 fvcom = FvcomDataLoader(
