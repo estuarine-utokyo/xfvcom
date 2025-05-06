@@ -42,7 +42,7 @@ This package is currently intended for **local development only** and is **not**
 ### Create and activate conda environment
 
 ```bash
-conda create -n xfvcom python=3.10 -c conda-forge \
+conda create -n xfvcom python=3.12 -c conda-forge \
     numpy xarray pandas matplotlib cartopy pyproj \
     scipy scikit-learn imageio moviepy tqdm \
     pytest mypy black isort
