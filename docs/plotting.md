@@ -93,13 +93,14 @@ def add_timestamp(ax, da, time):
         transform=ax.transAxes,
         ha="left", va="top",
         color="white",
-        bbox=dict(fc="0.2", ec="none", alpha=0.7),
+        fontsize=10,
+        bbox=dict(fc="0.2", ec="none", alpha=0.7, pad=2),
     )
 
 plotter.plot_2d(
     da=ds["salinity"].isel(time=5, siglay=0),
     opts=FvcomPlotOptions(),
-    post_process_func=lambda ax, **kw: add_timestamp(ax, **kw),
+    post_process_func=add_timestamp,
 )
 ```
 
