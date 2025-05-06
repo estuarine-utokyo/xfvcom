@@ -45,11 +45,12 @@ def fvcom_ds() -> xr.Dataset:
     ds["siglev"] = (("siglev", "node"), np.tile(siglev[:, None], (1, len(node))))
 
     # 3-D velocity (cell‐centred) and scalar (node)
-    ds["u"] = (("time", "siglay", "nele"), np.random.rand(len(time), len(siglay), nele))
-    ds["v"] = (("time", "siglay", "nele"), np.random.rand(len(time), len(siglay), nele))
+    rng = np.random.default_rng(seed=0)
+    ds["u"] = (("time", "siglay", "nele"), rng.random((len(time), len(siglay), nele)))
+    ds["v"] = (("time", "siglay", "nele"), rng.random((len(time), len(siglay), nele)))
     ds["temp"] = (
         ("time", "siglay", "node"),
-        np.random.rand(len(time), len(siglay), len(node)),
+        rng.random((len(time), len(siglay), len(node))),
         {"long_name": "Temperature", "units": "°C"},
     )
 
