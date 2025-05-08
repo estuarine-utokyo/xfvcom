@@ -42,8 +42,8 @@ class FvcomPlotOptions:
     # ------------------------------------------------------------
     # 4. Spatial extent & projection
     # ------------------------------------------------------------
-    xlim: tuple[float, float] | None = None
-    ylim: tuple[float, float] | None = None
+    xlim: tuple[float | str, float | str] | None = None
+    ylim: tuple[float | str, float | str] | None = None
     use_latlon: bool = True
     projection: ccrs.Projection = field(default_factory=lambda: ccrs.Mercator())
 
@@ -65,6 +65,8 @@ class FvcomPlotOptions:
     obcline_color: str = "blue"
     grid_linestyle: str = "--"
     grid_linewidth: float = 0.5
+    lon_tick_skip: int | None = None  # e.g. 2 → 1/2 of original ticks
+    lat_tick_skip: int | None = None
 
     # ------------------------------------------------------------
     # 6. Colorbar

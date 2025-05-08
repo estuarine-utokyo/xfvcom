@@ -33,6 +33,7 @@ from ..decorators import precedence
 from ..io import FvcomDataLoader
 from ..plot_options import FvcomPlotOptions
 from ..utils.helpers import PlotHelperMixin, pick_first
+from ..utils.helpers_utils import parse_coordinate as _parse
 from .config import FvcomPlotConfig
 from .utils import add_colorbar
 
@@ -976,6 +977,14 @@ class FvcomPlotter(PlotHelperMixin):
         verbose = opts.verbose  # console logging
         xlim = opts.xlim  # (xmin,xmax)
         ylim = opts.ylim  # (ymin,ymax)
+
+        # -----------------------------------------------------------
+        # Sanitize spatial extent (allow "deg:min[:sec]" strings)
+        # -----------------------------------------------------------
+        if xlim is not None:
+            xlim = tuple(_parse(v) for v in xlim)  # type: ignore[assignment]
+        if ylim is not None:
+            ylim = tuple(_parse(v) for v in ylim)  # type: ignore[assignment]
 
         # Extract coordinates
         if self.use_latlon:
@@ -2441,9 +2450,9 @@ class FvcomPlotter(PlotHelperMixin):
         * "thickness" performs layer-thickness weighted mean.
         """
         if time_sel is not None and "time" in da.dims:
-            da = da.sel(time=time_sel)
+            da = self._apply_indexer(da, "time", time_sel)
         if siglay_sel is not None and "siglay" in da.dims:
-            da = da.sel(siglay=siglay_sel)
+            da = self._apply_indexer(da, "siglay", siglay_sel)
 
         if not reduce:
             return da
@@ -2923,10 +2932,19 @@ class FvcomPlotter(PlotHelperMixin):
                 gl.top_labels = gl.right_labels = False
                 gl.xlabel_style = gl.ylabel_style = {"size": 11}
             else:
-                # Custom tick locator / formatter (旧コードをそのまま)
+                # Custom tick locator / formatter
                 gl = ax.gridlines(draw_labels=False, crs=ccrs.PlateCarree(), lw=0)  # type: ignore[attr-defined]
                 lon_ticks = gl.xlocator.tick_values(xmin, xmax)
                 lat_ticks = gl.ylocator.tick_values(ymin, ymax)
+                # New: subsample ticks if user asked for it
+                if opts.lon_tick_skip:
+                    lon_ticks = lon_ticks[:: opts.lon_tick_skip]
+                if opts.lat_tick_skip:
+                    lat_ticks = lat_ticks[:: opts.lat_tick_skip]
+                ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())
+                ax.set_yticks(lat_ticks, crs=ccrs.PlateCarree())
+                ax.xaxis.set_major_formatter(LongitudeFormatter())
+                ax.yaxis.set_major_formatter(LatitudeFormatter())
                 ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())
                 ax.set_yticks(lat_ticks, crs=ccrs.PlateCarree())
                 ax.xaxis.set_major_formatter(LongitudeFormatter())
