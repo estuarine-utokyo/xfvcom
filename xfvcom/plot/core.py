@@ -2277,9 +2277,10 @@ class FvcomPlotter(PlotHelperMixin):
         if isinstance(idx, (int, np.integer)):
             is_positional = True
         elif isinstance(idx, slice):
-            is_positional = (
-                idx.start is None or isinstance(idx.start, (int, np.integer))
-            ) and (idx.stop is None or isinstance(idx.stop, (int, np.integer)))
+            # is_positional = (
+            #    idx.start is None or isinstance(idx.start, (int, np.integer))
+            # ) and (idx.stop is None or isinstance(idx.stop, (int, np.integer)))
+            is_positional = False
         elif isinstance(idx, Sequence):
             is_positional = all(isinstance(i, (int, np.integer)) for i in idx)
 
