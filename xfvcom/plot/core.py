@@ -1150,6 +1150,10 @@ class FvcomPlotter(PlotHelperMixin):
             )
 
         # Finalizing plot: (Title, xlable, ylabel, savefig, etc.)
+        frame_time = None
+        if da is not None and "time" in da.coords:
+            frame_time = da["time"].values.item()
+
         self._finalize_plot(
             ax=ax,
             opts=opts,
@@ -1163,6 +1167,8 @@ class FvcomPlotter(PlotHelperMixin):
             ylabel=ylabel,
             post_process_func=post_process_func,
             save_path=save_path,
+            da=da,
+            frame_time=frame_time,
         )
 
         # Draw mesh
@@ -2729,11 +2735,18 @@ class FvcomPlotter(PlotHelperMixin):
         opts.da_is_scalar = scalar_da_is_drawn
 
         # 3) delegate
+        da_u = opts.extra.get("da_u")
+        da_v = opts.extra.get("da_v")
+
         self.plot_vector2d(
-            time=vec_time,
-            siglay=opts.vec_siglay,
+            time=None if da_u is not None else vec_time,
+            siglay=None if da_u is not None else opts.vec_siglay,
             reduce=opts.vec_reduce,
             skip=opts.skip,
+            var_u=None if da_u is not None else "u",
+            var_v=None if da_v is not None else "v",
+            da_u=da_u,
+            da_v=da_v,
             ax=ax,
             color=opts.arrow_color,
             opts=opts,
@@ -2745,12 +2758,14 @@ class FvcomPlotter(PlotHelperMixin):
     def plot_vector2d(
         self,
         *,
-        time: int | slice | list | tuple,
+        time: int | slice | list | tuple | None,
         siglay: int | slice | list | tuple | None = None,
         reduce: dict[str, str] | None = None,  # {"time": "mean", "siglay": "mean"}
         skip: int | str | None = None,  # "auto" or explicit integer
-        var_u: str = "u",
-        var_v: str = "v",
+        var_u: str | None = "u",
+        var_v: str | None = "v",
+        da_u: xr.DataArray | None = None,
+        da_v: xr.DataArray | None = None,
         ax: Axes | None = None,
         opts: FvcomPlotOptions | None = None,
         **kwargs,
@@ -2778,6 +2793,27 @@ class FvcomPlotter(PlotHelperMixin):
         if opts is None:
             opts = FvcomPlotOptions()
         opts.extra.update(kwargs)
+        # ----------------------------------------------------------
+        # 0-2) Resolve input source for u,v
+        # ----------------------------------------------------------
+        # Allow either (da_u & da_v) **or** (var_u & var_v)
+        if (da_u is None) ^ (da_v is None):
+            raise ValueError("Both da_u and da_v must be supplied together.")
+        if (da_u is not None) and (var_u is not None or var_v is not None):
+            raise ValueError(
+                "Provide *either* DataArrays *or* variable names, not both."
+            )
+
+        if da_u is not None:  # DataArray branch
+            if not isinstance(da_u, xr.DataArray) or not isinstance(da_v, xr.DataArray):
+                raise TypeError("da_u / da_v must be xarray.DataArray objects.")
+            src_u, src_v = da_u, da_v
+        else:  # variable-name branch (back-compat)
+            if var_u is None or var_v is None:
+                raise ValueError(
+                    "var_u and var_v are required when da_u/v are not given."
+                )
+            src_u, src_v = self.ds[var_u], self.ds[var_v]
 
         # ----------------------------------------------------------
         # Sanitize kwargs: remove internal flags before quiver call
@@ -2800,8 +2836,8 @@ class FvcomPlotter(PlotHelperMixin):
 
         # 2) slice & reduce u,v
         uc, vc = self._select_and_reduce_uv(
-            self.ds[var_u],
-            self.ds[var_v],
+            src_u,
+            src_v,
             time_sel=time,
             siglay_sel=siglay,
             reduce=reduce,
@@ -2856,11 +2892,23 @@ class FvcomPlotter(PlotHelperMixin):
             self._make_colorbar(ax, cf, label="|U| (m/s)", opts=opts)
 
         # 6) quiver plot --------------------------------------------
+        # Ensure x, y, u, v are plain numpy arrays of identical shape
+        lonc = self.ds["lonc"].values[::skip_val].ravel()
+        latc = self.ds["latc"].values[::skip_val].ravel()
+
+        def _flat(arr):
+            return np.asarray(arr).squeeze().ravel()
+
+        # u_arr = uc.values[::skip_val] if isinstance(uc, xr.DataArray) else uc[::skip_val]
+        # v_arr = vc.values[::skip_val] if isinstance(vc, xr.DataArray) else vc[::skip_val]
+        u_arr = _flat(uc)[::skip_val]
+        v_arr = _flat(vc)[::skip_val]
+
         q = ax.quiver(
-            self.ds["lonc"][::skip_val],
-            self.ds["latc"][::skip_val],
-            uc[::skip_val],
-            vc[::skip_val],
+            lonc,
+            latc,
+            u_arr,
+            v_arr,
             transform=ccrs.PlateCarree(),
             zorder=opts.vec_zorder,
             **arrow_kwargs,
@@ -2902,6 +2950,8 @@ class FvcomPlotter(PlotHelperMixin):
         ylabel: str,
         post_process_func: Callable | None,
         save_path: str | None,
+        da: xr.DataArray | None = None,
+        frame_time=None,
     ) -> None:
         """
         Apply titles / labels / gridlines, run post-process hook, and
@@ -2952,7 +3002,20 @@ class FvcomPlotter(PlotHelperMixin):
 
         # 4) user hook ------------------------------------------------------
         if post_process_func is not None:
-            post_process_func(ax=ax)
+            params = inspect.signature(post_process_func).parameters
+            kw: dict[str, object] = {}
+
+            if "ax" in params:
+                kw["ax"] = ax
+            if "da" in params or "da_s" in params:
+                kw["da"] = da
+            if "time" in params or "frame_time" in params:
+                kw["time"] = frame_time
+            if "opts" in params:
+                kw["opts"] = opts
+
+            # Call with the subset that the user function actually accepts
+            post_process_func(**kw)
 
         # 5) save -----------------------------------------------------------
         if save_path is not None:

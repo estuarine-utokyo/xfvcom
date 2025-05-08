@@ -41,7 +41,8 @@ plotter = FvcomPlotter(fvcom.ds, FvcomPlotConfig())
 
 | Option | Type / default | Effect |
 | ------ | -------------- | ------ |
-| `use_latlon` | `bool`, auto‑detected | Treat coords as lon/lat |
+| `figsize`    | `tuple[float, float] \| None = None` | Matplotlib Figure size| 
+| `use_latlon` | `bool, auto‑detected` | Treat coords as lon/lat |
 | `with_mesh` | `bool = True` | Draw element edges |
 | `plot_vec2d` | `bool = False` | Overlay 2‑D velocity vectors |
 | `vec_siglay` | `int \| slice = "thickness"` | Which σ‑layer for vectors |
@@ -53,6 +54,10 @@ plotter = FvcomPlotter(fvcom.ds, FvcomPlotConfig())
 | `cmap` | Matplotlib colormap name or object | Colour map for scalar field |
 | `scalar_reduce` | `dict[str, str] \| None` | `None` | Reduction to apply to the scalar - field DataArray before plotting.<br/>Keys = dimension names (`"time"`, `"siglay"`…), values = NumPy reduction functions (`"mean"`, `"max"`, `"min"`, `"sum"`…). |
 | `vec_reduce`    | `dict[str, str] \| None` | `None` | Same as `scalar_reduce`, but applied to the vector components (`u`, `v`) **and** the derived magnitude \|U\|. |
+| `xlim`| `tuple[float \| str, float \| str] \| None = None` | x coordinate extent |
+| `ylim`| `tuple[float \| str, float \| str] \| None = None` | y coordinate extent |
+| `lon_tick_skip` | `int \| None = None` | Skip longitute axis label  (e.g., =2 → 1/2 ) |
+| `lat_tick_skip` | `int \| None = None` | Skip latitude axis label (e.g., =2 → 1/2 ) |
 
 
 *All* fields are documented in
@@ -152,8 +157,8 @@ opts = FvcomPlotOptions(
 # ------------------------------------------------------------
 ax = plotter.plot_2d(
     da     = da_s,   # scalar DataArray
-    var_u  = da_u,   # vector-U DataArray
-    var_v  = da_v,   # vector-V DataArray
+    da_u  = da_u,   # vector-U DataArray
+    da_v  = da_v,   # vector-V DataArray
     opts   = opts,
 )
 
