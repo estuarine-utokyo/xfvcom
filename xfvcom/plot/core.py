@@ -2272,6 +2272,11 @@ class FvcomPlotter(PlotHelperMixin):
         * If .sel() fails (KeyError), raise a clear ValueError for the user.
         """
 
+        # ---------- fast-path: full slice → no operation -------------
+        # e.g. idx == slice(None) corresponds to ":" (select all).
+        if isinstance(idx, slice) and idx == slice(None):
+            return da
+
         # --- 1) decide whether idx looks positional ------------------
         is_positional = False
         if isinstance(idx, (int, np.integer)):
@@ -2293,13 +2298,20 @@ class FvcomPlotter(PlotHelperMixin):
                 pass
 
         # --- 3) label-based sel() with error capture ----------------
-        try:
-            return da.sel({dim: idx})
-        except KeyError as e:
-            raise ValueError(
-                f"{dim!r} coordinate does not contain label/index {idx!r}. "
-                "Specify a valid label or use opts.vec_time (positional index)."
-            ) from e
+        # If a coordinate array exists, attempt label selection first.
+        if dim in da.coords:
+            try:
+                return da.sel({dim: idx})
+            except KeyError as e:
+                # Provide a clearer message before bubbling up.
+                raise ValueError(
+                    f"{dim!r} coordinate does not contain label/index {idx!r}. "
+                    "Specify a valid label or use a positional index."
+                ) from e
+
+        # Coordinate is absent → fall back to positional selection.
+        # This covers dimensions like "siglay" that are dims only.
+        return da.isel({dim: idx}, drop=False)
 
     def _label_to_index(
         self,
