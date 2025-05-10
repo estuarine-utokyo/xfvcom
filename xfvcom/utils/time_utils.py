@@ -29,3 +29,14 @@ def time_label(
     """
     ts = obj.time.isel(time=idx).values  # numpy.datetime64
     return pd.to_datetime(ts).strftime(fmt)
+
+
+def sliced_time_labels(
+    obj: xr.Dataset | xr.DataArray,
+    rng: slice,
+    fmt: str = "%Y-%m-%d %H:%M:%S",
+) -> list[str]:
+    """
+    Return all timestamps within *rng* formatted as strings.
+    """
+    return obj.sel(time=rng).time.dt.strftime(fmt).values.tolist()
