@@ -37,6 +37,8 @@ dependencies = [
   "moviepy>=1.0.3", 
   "imageio-ffmpeg>=0.4",
   "tqdm>=4.66",
+  "jinja2>=3.1",
+  "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -49,7 +51,8 @@ dev = [
   "types-tqdm>=4.66",
   "pandas-stubs",
   "matplotlib>=3.8",
-  "ruff>=0.3", 
+  "ruff>=0.3",
+  "types-PyYAML>=6.0.12",
 ]
 
 [tool.setuptools.packages.find]
@@ -70,3 +73,6 @@ strict_optional = true
 explicit_package_bases = true
 ignore_missing_imports = true
 no_implicit_optional = true
+
+[project.scripts]
+xfvcom-make-river-nml = "xfvcom.cli.make_river_nml:main"

@@ -1,0 +1,132 @@
+ &NML_RIVER
+  RIVER_NAME          = 'EastArakawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 310,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'CenterArakawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 241,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'WestArakawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 312,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'SouthArakawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 448,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'FirstSumidagawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 4,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'SecondSumidagawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 2,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'ThirdSumidagawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 12,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'OneEdogawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 506,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'TwoEdogawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 560,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'ThreeEdogawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 616,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'IchiTamagawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 1117,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'NiTamagawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 1058,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'SanTamagawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 1239,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'ATsurumigawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 1267,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'BTsurumigawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 1325,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'Mamagawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 145,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'Ebigawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 77,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'Yorogawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 412,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'Obitsugawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 1505,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'koitogawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 1734,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'Muratagawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 182,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+ &NML_RIVER
+  RIVER_NAME          = 'Hanamigawa',
+  RIVER_FILE          = 'TokyoBayfinal16_river.nc',
+  RIVER_GRID_LOCATION = 221,
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /

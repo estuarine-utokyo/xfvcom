@@ -45,7 +45,7 @@ This package is currently intended for **local development only** and is **not**
 conda create -n xfvcom python=3.12 -c conda-forge \
     numpy xarray pandas matplotlib cartopy pyproj \
     scipy scikit-learn imageio moviepy tqdm \
-    pytest mypy black isort
+    pytest mypy black isort jinja2 pyyaml types-pyyaml
 conda activate xfvcom
 ```
 

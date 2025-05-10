@@ -18,8 +18,10 @@ repos:
     rev: v1.15.0
     hooks:
       - id: mypy
-        # extra stubs you actually使っている場合だけ追加する
-        additional_dependencies: ["types-tqdm"]     # ← optional
+        # Stub packages required during the hook run
+        additional_dependencies:
+          - types-tqdm     # already present
+          - types-PyYAML   # added to satisfy import for `yaml`
         args:
           - "--explicit-package-bases"
-          - "--config-file=mypy.ini"                # use repo-root mypy.ini
+          - "--config-file=mypy.ini"
