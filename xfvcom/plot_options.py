@@ -15,6 +15,8 @@ class FvcomPlotOptions:
     All fields have sensible defaults so you can override only what you need.
     """
 
+    index_base: int = 0  # = 0: Python (default), = 1: Fortran
+
     # ------------------------------------------------------------
     # 1. Color & scaling
     # ------------------------------------------------------------
