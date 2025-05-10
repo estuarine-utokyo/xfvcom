@@ -1,0 +1,47 @@
+name: Build FVCOM inputs
+
+on:
+  push:
+    paths:
+      - '**/input/*.csv'        # e.g., goto2023/input/rivers.csv
+  pull_request:
+    paths:
+      - '**/input/*.csv'
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1) Check out the repository
+      - uses: actions/checkout@v4
+
+      # 2) Create and activate the conda environment via Micromamba
+      - name: Set up Micromamba
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          environment-file: environment.yml
+          init-shell: bash          # Ensure subsequent steps run inside the env
+          cache-downloads: true
+
+      # 3) Install xfvcom in editable mode
+      - name: Install xfvcom (editable)
+        shell: bash -l {0}          # -l → login shell, conda env is active
+        run: |
+          pip install -e .
+
+      # 4) Regenerate river.nml for every CSV found under */input/
+      - name: Rebuild river.nml files
+        shell: bash -l {0}
+        run: |
+          shopt -s globstar nullglob
+          for csv in **/input/*.csv; do
+            dir=$(dirname "$csv")
+            echo "Generating $dir/river.nml from $csv"
+            xfvcom-make-river-nml "$csv" -o "$dir/river.nml"
+          done
+
+      # 5) Fail the job if regenerated files differ from the committed ones
+      - name: Check diff
+        shell: bash -l {0}
+        run: git diff --exit-code
