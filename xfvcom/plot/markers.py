@@ -7,6 +7,7 @@ import cartopy.crs as ccrs
 import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
+from numpy.typing import NDArray
 
 from ..plot_options import FvcomPlotOptions
 from .core import FvcomPlotter
@@ -14,7 +15,7 @@ from .core import FvcomPlotter
 
 def _resolve_nodes(
     data: Any, *, index_base: int, n_nodes: int
-) -> tuple[np.ndarray, np.ndarray, list[str]]:
+) -> tuple[NDArray[Any], NDArray[Any] | None, list[str]]:
     """
     Return (node_idx[0-based], label_str) resolved from various inputs.
 
