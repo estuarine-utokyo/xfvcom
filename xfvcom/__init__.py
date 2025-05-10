@@ -3,9 +3,11 @@ xfvcom top-level package
 Re-export public APIs after file split.
 """
 
+from __future__ import annotations
+
 from .analysis import FvcomAnalyzer
 from .decorators import precedence
-from .io import FvcomDataLoader
+from .io import FvcomDataLoader, parse_river_namelist  # noqa: F401
 
 # ------------------------------------------------------------------
 # 1) new canonical location  (xfvcom.plot.core)
@@ -45,4 +47,5 @@ __all__ = [
     "create_anim_2d_plot",
     "FvcomPlotOptions",
     "precedence",
+    "parse_river_namelist",
 ]
