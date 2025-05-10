@@ -98,16 +98,32 @@ def make_node_marker_post(
         """Executed by `FvcomPlotter.plot_2d`."""
         if mode == "coord":  # A) lon/lat already resolved
             for x, y, lbl in zip(lon_direct, lat_direct, labels, strict=False):
-                ax.plot(x, y, **mkw)
-                ax.text(x, y, lbl, **tkw)
+                ax.plot(x, y, **_inject_transform(ax, mkw))
+                ax.text(x, y, lbl, **_inject_transform(ax, tkw))
         else:  # B) indices → lookup coords
             for i in idx:
                 x, y = lon_arr[i], lat_arr[i]
                 lbl = str(i + index_base)
-                ax.plot(x, y, **mkw)
-                ax.text(x, y, lbl, **tkw)
+                ax.plot(x, y, **_inject_transform(ax, mkw))
+                ax.text(x, y, lbl, **_inject_transform(ax, tkw))
 
     return _post
+
+
+def _inject_transform(ax: Axes, kw: dict[str, Any]) -> dict[str, Any]:
+    """Add PlateCarree transform only when `ax` is a Cartopy GeoAxes."""
+    if "transform" in kw:
+        return kw  # user already supplied
+    try:
+        proj = ax.projection  # Cartopy's GeoAxes has this attr
+    except AttributeError:
+        return kw  # Normal Matplotlib Axes
+    else:
+        import cartopy.crs as ccrs
+
+        if isinstance(proj, ccrs.Projection):
+            return {**kw, "transform": ccrs.PlateCarree()}
+        return kw
 
 
 __all__ = ["make_node_marker_post"]
