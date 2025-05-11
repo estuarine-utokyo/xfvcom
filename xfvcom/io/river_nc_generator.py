@@ -44,7 +44,7 @@ class RiverNetCDFGenerator(BaseGenerator):
             self.source
         )  # self.source is Path from BaseGenerator
         self.timeline = pd.date_range(
-            self.start, self.end, freq=f"{self.dt}S", inclusive="both"
+            self.start, self.end, freq=f"{self.dt}s", inclusive="both"
         )
 
     def validate(self) -> None:
