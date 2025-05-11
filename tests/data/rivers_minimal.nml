@@ -1,0 +1,5 @@
+ &NML_RIVER
+  RIVER_NAME = 'TestRiver',
+  RIVER_FILE = 'test_river.nc',
+  /
+
