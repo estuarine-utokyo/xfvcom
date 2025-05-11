@@ -28,6 +28,6 @@ def test_constant_nc(tmp_path: Path) -> None:
 
     # basic sanity check
     ds = xr.open_dataset(result_path)
-    assert list(ds.dims) == ["time"]
     assert ds.sizes["time"] == 4
-    assert "TestRiver_flow" in ds
+    assert ds.sizes["rivers"] == 1
+    assert "river_flux" in ds and "river_temp" in ds and "river_salinity" in ds
