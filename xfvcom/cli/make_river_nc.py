@@ -15,11 +15,13 @@ def main() -> None:
     p.add_argument("--flux", type=float, default=0.0)
     p.add_argument("--temp", type=float, default=20.0)
     p.add_argument("--salt", type=float, default=0.0)
+    p.add_argument("-o", "--output", type=Path, help="Output NetCDF file")
     args = p.parse_args()
 
     gen = RiverNetCDFGenerator(
         args.nml, args.start, args.end, args.dt, args.flux, args.temp, args.salt
     )
+
     out_path = args.output if args.output else args.nml.with_suffix(".nc")
     gen.write(out_path)
     print(f"Written: {out_path}")
