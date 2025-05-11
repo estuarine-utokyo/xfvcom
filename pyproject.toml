@@ -78,3 +78,4 @@ no_implicit_optional = true
 [project.scripts]
 xfvcom-make-river-nml = "xfvcom.cli.make_river_nml:main"
 xfvcom-make-river-nc = "xfvcom.cli.make_river_nc:main"
+xfvcom-make-met-nc = "xfvcom.cli.make_met_nc:main"
