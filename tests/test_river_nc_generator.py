@@ -11,7 +11,7 @@ from xfvcom.io.river_nc_generator import RiverNetCDFGenerator
 def test_constant_nc(tmp_path: Path) -> None:
     """Ensure a constant NetCDF is produced and has expected dims."""
     nml = Path(__file__).parent / "data" / "rivers_minimal.nml"
-    out = tmp_path / "river.nc"
+    result_path = tmp_path / "river.nc"
 
     gen = RiverNetCDFGenerator(
         nml_path=nml,
@@ -22,7 +22,8 @@ def test_constant_nc(tmp_path: Path) -> None:
         default_temp=10.0,
         default_salt=0.1,
     )
-    result_path = gen.generate()
+
+    gen.write(result_path)
     assert result_path.exists()
 
     # basic sanity check

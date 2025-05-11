@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 from typing import Dict, List
 
@@ -8,7 +9,7 @@ import xarray as xr
 from numpy.typing import NDArray
 
 from .base_generator import BaseGenerator
-from .rivers_nml_parser import parse_rivers_nml  # すぐ下で実装
+from .rivers_nml_parser import parse_rivers_nml
 from .sources.base import ConstantSource, RiverTimeSeriesSource
 
 
@@ -33,37 +34,39 @@ class RiverNetCDFGenerator(BaseGenerator):
         self.default_temp = default_temp
         self.default_salt = default_salt
 
-    # ---------- main ----------
-    def generate(self) -> Path:
-        rivers = parse_rivers_nml(self.source)
-        timeline = pd.date_range(
+    # --------------------------------------------------------------- #
+    # Abstract-method overrides                                      #
+    # --------------------------------------------------------------- #
+    def load(self) -> None:
+        """Parse rivers.nml and build timeline."""
+        self.rivers = parse_rivers_nml(
+            self.source
+        )  # self.source is Path from BaseGenerator
+        self.timeline = pd.date_range(
             self.start, self.end, freq=f"{self.dt}S", inclusive="both"
         )
 
+    def validate(self) -> None:
+        if not self.rivers:
+            raise ValueError("No river entries found in NML.")
+
+    def render(self) -> bytes:
+        """Return NetCDF binary (bytes) compatible with BaseGenerator.write()."""
         data_vars = {}
-        for rname in rivers:
+        for r in self.rivers:
             src: RiverTimeSeriesSource = ConstantSource(
                 self.default_flux, self.default_temp, self.default_salt
             )
-            data_vars[f"{rname}_flow"] = (
-                ("time",),
-                src.get_series("flux", timeline),
-            )
-            data_vars[f"{rname}_temp"] = (
-                ("time",),
-                src.get_series("temp", timeline),
-            )
-            data_vars[f"{rname}_salt"] = (
-                ("time",),
-                src.get_series("salt", timeline),
-            )
+            data_vars[f"{r}_flow"] = ("time", src.get_series("flux", self.timeline))
+            data_vars[f"{r}_temp"] = ("time", src.get_series("temp", self.timeline))
+            data_vars[f"{r}_salt"] = ("time", src.get_series("salt", self.timeline))
 
         ds = xr.Dataset(
             data_vars=data_vars,
-            coords={"time": timeline},
+            coords={"time": self.timeline},
             attrs={"title": "FVCOM river forcing (constant)"},
         )
 
-        out_path = self.source.with_suffix(".nc")
-        ds.to_netcdf(out_path, engine="netcdf4", format="NETCDF4")
-        return out_path
+        buffer = BytesIO()
+        ds.to_netcdf(buffer, engine="netcdf4", format="NETCDF4")
+        return buffer.getvalue()

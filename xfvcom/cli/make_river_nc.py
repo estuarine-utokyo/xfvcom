@@ -20,7 +20,8 @@ def main() -> None:
     gen = RiverNetCDFGenerator(
         args.nml, args.start, args.end, args.dt, args.flux, args.temp, args.salt
     )
-    out_path = gen.generate()
+    out_path = args.output if args.output else args.nml.with_suffix(".nc")
+    gen.write(out_path)
     print(f"Written: {out_path}")
 
 
