@@ -70,21 +70,36 @@ class RiverNetCDFGenerator(BaseGenerator):
         nt = self.timeline.size
 
         # time variables
-        time_mjd = self._to_mjd(self.timeline)
-        itime = time_mjd.astype(np.int32)
-        itime2 = ((time_mjd - itime) * 24 * 3600 * 1000).astype(np.int32)
+        # MJD (float32) + split parts
+        time_mjd = self._to_mjd(self.timeline).astype("float32")
+        itime = time_mjd.astype("int32")  # integer part
+        itime2 = ((time_mjd - itime) * 86400000).astype("int32")  # msec of day
 
+        # -- fixed-length dimensions : order must follow FVCOM spec --
         coords = {
-            "time": ("time", time_mjd),
-            "rivers": ("rivers", np.arange(nr, dtype="i4")),
             "namelen": ("namelen", np.arange(80, dtype="i4")),
+            "rivers": ("rivers", np.arange(1, nr + 1, dtype="i4")),  # 1-origin
+            "time": (
+                "time",
+                time_mjd,
+                {
+                    "long_name": "time",
+                    "units": "days since 1858-11-17 00:00:00",
+                    "format": "modified julian day (MJD)",
+                    "time_zone": "UTC",
+                },
+            ),
             "DateStrLen": ("DateStrLen", np.arange(26, dtype="i4")),
         }
 
         data_vars = {
             "Itime": ("time", itime),
             "Itime2": ("time", itime2),
-            "Times": (("time", "DateStrLen"), self._times_char(self.timeline)),
+            "Times": (
+                ("time", "DateStrLen"),
+                self._times_char(self.timeline),
+                {"long_name": "Times", "time_zone": "UTC"},
+            ),
             "river_names": (
                 ("rivers", "namelen"),
                 np.asarray([list(name.ljust(80)) for name in self.rivers], dtype="S1"),
@@ -98,7 +113,10 @@ class RiverNetCDFGenerator(BaseGenerator):
         data_vars["river_flux"] = (
             ("time", "rivers"),
             np.tile(
-                const_src.get_series("flux", self.timeline).reshape(nt, 1), (1, nr)
+                const_src.get_series("flux", self.timeline)
+                .astype("float32")
+                .reshape(nt, 1),
+                (1, nr),
             ),
         )
         data_vars["river_temp"] = (
@@ -107,7 +125,7 @@ class RiverNetCDFGenerator(BaseGenerator):
                 const_src.get_series("temp", self.timeline).reshape(nt, 1), (1, nr)
             ),
         )
-        data_vars["river_salinity"] = (
+        data_vars["river_salt"] = (
             ("time", "rivers"),
             np.tile(
                 const_src.get_series("salt", self.timeline).reshape(nt, 1), (1, nr)
@@ -123,11 +141,34 @@ class RiverNetCDFGenerator(BaseGenerator):
 
         ds = xr.Dataset(data_vars=data_vars, coords=coords, attrs=attrs)
 
+        # ------------------------------------------------------------------ #
+        # Variable-specific attributes  （FVCOM 仕様に必須）                 #
+        # ------------------------------------------------------------------ #
+        var_meta = {
+            "river_flux": ("river runoff volume flux", "m^3s^-1"),
+            "river_temp": ("river runoff temperature", "Celsius"),
+            "river_salt": ("river runoff salinity", "PSU"),
+        }
+        for v, (lname, units) in var_meta.items():
+            ds[v].attrs.update(long_name=lname, units=units, _FillValue=np.nan)
+
+        # Itime / Itime2 attributes
+        ds["Itime"].attrs.update(
+            units="days since 1858-11-17 00:00:00",
+            format="modified julian day (MJD)",
+            time_zone="UTC",
+        )
+        ds["Itime2"].attrs.update(units="msec since 00:00:00", time_zone="UTC")
+
         # xarray cannot write NETCDF4 directly to BytesIO; use a temp file then read.
         with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
             tmp_path = Path(tmp.name)
-
-        ds.to_netcdf(tmp_path, engine="netcdf4", format="NETCDF4_CLASSIC")
+        ds.to_netcdf(
+            tmp_path,
+            engine="netcdf4",
+            format="NETCDF4_CLASSIC",
+            unlimited_dims=["time"],
+        )
         data = tmp_path.read_bytes()
         tmp_path.unlink()  # cleanup
         return data

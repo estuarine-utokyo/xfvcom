@@ -27,7 +27,8 @@ def test_constant_nc(tmp_path: Path) -> None:
     assert result_path.exists()
 
     # basic sanity check
-    ds = xr.open_dataset(result_path)
+    # Disable CF-time decoding to avoid Itime2 --> datetime conversion
+    ds = xr.open_dataset(result_path, decode_times=False)
     assert ds.sizes["time"] == 4
     assert ds.sizes["rivers"] == 1
-    assert "river_flux" in ds and "river_temp" in ds and "river_salinity" in ds
+    assert "river_flux" in ds and "river_temp" in ds and "river_salt" in ds
