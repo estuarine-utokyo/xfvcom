@@ -11,6 +11,7 @@ from pathlib import Path
 import netCDF4 as nc
 import numpy as np
 import pandas as pd
+from numpy.typing import NDArray
 
 from .base_generator import BaseGenerator
 
@@ -62,14 +63,14 @@ class MetNetCDFGenerator(BaseGenerator):
     # helpers
     # ------------------------------------------------------------------
     @staticmethod
-    def _to_mjd(t: pd.DatetimeIndex) -> np.ndarray:
+    def _to_mjd(t: pd.DatetimeIndex) -> NDArray[np.float32]:
         origin = pd.Timestamp("1858-11-17T00:00:00Z")
-        return ((t - origin) / pd.Timedelta("1D")).astype("float32")
+        return ((t - origin) / pd.Timedelta("1D")).to_numpy("f4")
 
     @staticmethod
     def _itime_pair(mjd: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        itime = mjd.astype("int32")
-        itime2 = ((mjd - itime) * 86400000).astype("int32")
+        itime: NDArray[np.int32] = mjd.astype("int32")
+        itime2: NDArray[np.int32] = ((mjd - itime) * 86400000).astype("int32")
         return itime, itime2
 
     @staticmethod
@@ -106,7 +107,9 @@ class MetNetCDFGenerator(BaseGenerator):
         nele = len(self.mesh.dimensions["nele"])
         node = len(self.mesh.dimensions["node"])
 
-        mjd = self._to_mjd(self.timeline)
+        mjd: NDArray[np.float32] = self._to_mjd(self.timeline)
+        itime: NDArray[np.int32]
+        itime2: NDArray[np.int32]
         itime, itime2 = self._itime_pair(mjd)
 
         # --- write to temp file then return bytes --------------------
