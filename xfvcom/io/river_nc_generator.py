@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List
@@ -67,6 +68,11 @@ class RiverNetCDFGenerator(BaseGenerator):
             attrs={"title": "FVCOM river forcing (constant)"},
         )
 
-        buffer = BytesIO()
-        ds.to_netcdf(buffer, engine="netcdf4", format="NETCDF4")
-        return buffer.getvalue()
+        # xarray cannot write NETCDF4 directly to BytesIO; use a temp file then read.
+        with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+
+        ds.to_netcdf(tmp_path, engine="netcdf4", format="NETCDF4")
+        data = tmp_path.read_bytes()
+        tmp_path.unlink()  # cleanup
+        return data
