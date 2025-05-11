@@ -42,10 +42,10 @@ class RiverNetCDFGenerator(BaseGenerator):
     # --------------------------------------------------------------- #
     # --------------------------- helpers ---------------------------- #
     @staticmethod
-    def _to_mjd(times: pd.DatetimeIndex) -> np.ndarray:
-        """Convert pandas DateTimeIndex (UTC) to Modified Julian Day (float64)."""
+    def _to_mjd(times: pd.DatetimeIndex) -> NDArray[np.float64]:
+        """Return Modified Julian Day as a NumPy array (float64)."""
         mjd0 = pd.Timestamp("1858-11-17T00:00:00Z")
-        return (times - mjd0) / pd.Timedelta("1D")
+        return ((times - mjd0) / pd.Timedelta("1D")).to_numpy("f8")
 
     @staticmethod
     def _times_char(times: pd.DatetimeIndex) -> np.ndarray:
@@ -77,9 +77,11 @@ class RiverNetCDFGenerator(BaseGenerator):
         nt = self.timeline.size
 
         # Modified Julian Day (float32) and its split parts
-        time_mjd_f32 = self._to_mjd(self.timeline).astype("f4")
-        itime_i32 = time_mjd_f32.astype("i4")
-        itime2_i32 = ((time_mjd_f32 - itime_i32) * 86_400_000).astype("i4")
+        time_mjd_f32: NDArray[np.float32] = self._to_mjd(self.timeline).astype("f4")
+        itime_i32: NDArray[np.int32] = time_mjd_f32.astype("i4")
+        itime2_i32: NDArray[np.int32] = (
+            (time_mjd_f32 - itime_i32) * 86_400_000
+        ).astype("i4")
 
         # char arrays
         times_char = self._times_char(self.timeline)  # (nt, 26) S1
