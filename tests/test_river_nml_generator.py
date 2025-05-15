@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from xfvcom.io.river_generator import RiverNmlGenerator
+from xfvcom.io.river_nml_generator import RiverNmlGenerator
 
 
 def test_river_nml(tmp_path: Path) -> None:
