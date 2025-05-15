@@ -6,6 +6,7 @@
 # ------------------------------------------------------------------
 from .analysis import FvcomAnalyzer
 from .decorators import precedence
+from .grid import FvcomGrid, get_grid, read_grid
 from .io import FvcomDataLoader, parse_river_namelist  # noqa: F401
 
 # ------------------------------------------------------------------
@@ -52,6 +53,10 @@ __all__: list[str] = [
     "generate_test_data",
     # misc
     "precedence",
+    # grid
+    "FvcomGrid",
+    "get_grid",
+    "read_grid",
 ]
 
 __version__ = "0.2.0"
