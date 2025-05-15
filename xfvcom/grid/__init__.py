@@ -1,13 +1,14 @@
 """
 xfvcom.grid – FVCOM horizontal-grid utilities
 --------------------------------------------
-外部公開:
+Public:
     * FvcomGrid
     * get_grid
 """
 
 import importlib
 import sys
+from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING
 
@@ -22,16 +23,25 @@ def _load() -> ModuleType:
     return mod
 
 
-if TYPE_CHECKING:  # <-- Mypy / IDE 用
-    from .grid_obj import FvcomGrid, get_grid  # noqa
+if TYPE_CHECKING:  # <-- Mypy / IDE
+    from .grid_obj import FvcomGrid, get_grid, read_grid  # noqa
 else:
 
     def __getattr__(name: str):
         mod = _load()
         return getattr(mod, name)
 
+    # ---------- public helper (calls into grid_obj lazily) -----------------
+    def read_grid(path: str | Path, *, utm_zone: int, northern: bool = True):
+        """
+        Read a ``*_grd.dat`` file and return :class:`FvcomGrid`.
+        This thin wrapper keeps the lazy-import behaviour intact.
+        """
+        mod = _load()  # grid_obj is now imported
+        return mod.FvcomGrid.from_dat(path, utm_zone=utm_zone, northern=northern)
+
     def __dir__():
-        return sorted({"FvcomGrid", "get_grid"})
+        return sorted({"FvcomGrid", "get_grid", "read_grid"})
 
 
-__all__ = ["FvcomGrid", "get_grid"]
+__all__ = ["FvcomGrid", "get_grid", "read_grid"]
