@@ -3,17 +3,19 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import tempfile
 from datetime import timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 import netCDF4 as nc
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+from ..grid.grid_obj import FvcomGrid
 from .base_generator import BaseGenerator
 
 
@@ -49,16 +51,21 @@ class MetNetCDFGenerator(BaseGenerator):
 
     def __init__(
         self,
-        grid_nc: Path,
+        grid_nc: Path | str,
         start: str,
         end: str,
         dt_seconds: int = 3600,
+        *,
+        utm_zone: int | None = None,
+        northern: bool = True,
         **consts: float,
     ) -> None:
         super().__init__(grid_nc)
         self.start = pd.Timestamp(start, tz="UTC")
         self.end = pd.Timestamp(end, tz="UTC")
         self.dt = dt_seconds
+        self.utm_zone = utm_zone
+        self.northern = northern
         self.consts = {**self._DEFAULTS, **consts}
 
     # ------------------------------------------------------------------
@@ -96,10 +103,22 @@ class MetNetCDFGenerator(BaseGenerator):
     def load(self) -> None:
         # Accept .dat or .nc
         if self.source.suffix.lower() == ".dat":
-            from .grid_reader import GridASCII
-
-            grid = GridASCII(self.source)
-            self.mesh_ds = grid.to_xarray()
+            grid = FvcomGrid.from_dat(
+                self.source,
+                utm_zone=self.utm_zone,
+                northern=self.northern,
+            )
+            ds = grid.to_xarray()
+            # ------------------------------------------------------
+            # lonc / latc が無ければノード平均で補完
+            # ------------------------------------------------------
+            if "lonc" not in ds:
+                lonc = ds["lon"].values[ds["nv"].values].mean(axis=-1)
+                ds["lonc"] = ("nele", lonc.astype("f8"))
+            if "latc" not in ds:
+                latc = ds["lat"].values[ds["nv"].values].mean(axis=-1)
+                ds["latc"] = ("nele", latc.astype("f8"))
+            self.mesh_ds = ds
         else:  # assume NetCDF grid
             import xarray as xr
 
@@ -191,11 +210,16 @@ class MetNetCDFGenerator(BaseGenerator):
                 if "units" not in v_out.ncattrs():
                     v_out.units = "meters" if name in ("xc", "yc") else "degrees"
 
-            v_nv_in = self.mesh_ds["nv"]
+            nv_in = self.mesh_ds["nv"].values
             v_nv_out = ds_out.createVariable(
                 "nv", "i4", ("three", "nele"), fill_value=False
             )
-            v_nv_out[:, :] = v_nv_in.values.T  # (3, nele)
+            if nv_in.shape == (3, nele):
+                v_nv_out[:, :] = nv_in
+            elif nv_in.shape == (nele, 3):
+                v_nv_out[:, :] = nv_in.T
+            else:
+                raise ValueError(f"Unexpected nv shape: {nv_in.shape}")
             v_nv_out.long_name = "nodes surrounding element"
 
             # ---------------------------------------------------------
@@ -223,15 +247,15 @@ class MetNetCDFGenerator(BaseGenerator):
                 v = ds_out.createVariable(name, "f4", dims, fill_value=False)
                 v[:] = self.consts[key]
                 v.long_name = long_name
-                v.units = units
-                v.grid = "fvcom_grid"
-                v.type = "data"
                 if std_name:
                     v.standard_name = std_name
                 if desc:
                     v.description = desc
+                v.units = units
+                v.grid = "fvcom_grid"
                 if "node" in dims:
                     v.coordinates = "FVCOM cartesian coordinates"
+                v.type = "data"
 
             _make(
                 "uwind_speed",
@@ -311,3 +335,27 @@ class MetNetCDFGenerator(BaseGenerator):
         data = tmp_path.read_bytes()
         tmp_path.unlink()  # remove temp file
         return data
+
+    def write(self, dest: Path | None = None) -> Path:  # noqa: D401
+        """
+        NetCDF をファイルに書き出す。
+
+        Parameters
+        ----------
+        dest : pathlib.Path, optional
+            出力先パス。未指定なら
+
+            1. ソースが ``*_grd.dat`` の場合 → ``*_wnd.nc``
+            2. それ以外の拡張子         → ``<stem>.nc``
+
+        Returns
+        -------
+        pathlib.Path
+            書き出した NetCDF ファイルのパス。
+        """
+        if dest is None:
+            stem = self.source.stem
+            if stem.endswith("_grd"):
+                stem = stem[:-4] + "_wnd"  # *_grd → *_wnd
+            dest = self.source.with_name(f"{stem}.nc")
+        return super().write(dest)
