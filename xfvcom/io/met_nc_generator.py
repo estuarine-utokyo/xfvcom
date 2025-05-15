@@ -7,6 +7,7 @@ import tempfile
 from datetime import timezone
 from io import BytesIO
 from pathlib import Path
+from typing import Sequence
 
 import netCDF4 as nc
 import numpy as np
@@ -43,6 +44,7 @@ class MetNetCDFGenerator(BaseGenerator):
         swrad=200.0,  # W m-2
         lwrad=300.0,  # W m-2
         precip=0.0,  # kg m-2 s-1 (= mm s-1)
+        cloud=0.0,  # fraction
     )
 
     def __init__(
@@ -78,6 +80,16 @@ class MetNetCDFGenerator(BaseGenerator):
         s = t.strftime("%Y-%m-%dT%H:%M:%S.000000")
         return np.asarray([list(i.ljust(26)) for i in s], dtype="S1")
 
+    # --- crude xy→lon/lat fallback (identity) ------------------------
+    @staticmethod
+    def _xy_to_lonlat(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """
+        If the grid file lacks geographic coordinates, fall back to dummy
+        values that satisfy variable/attribute requirements.  Replace with a
+        proper projection if lon/lat are essential for the simulation.
+        """
+        return x.copy(), y.copy()
+
     # ------------------------------------------------------------------
     # BaseGenerator interface
     # ------------------------------------------------------------------
@@ -98,14 +110,14 @@ class MetNetCDFGenerator(BaseGenerator):
         )
 
     def validate(self) -> None:
-        missing = [v for v in ("x", "y", "nv") if v not in self.mesh.variables]
-        if missing:
-            raise ValueError(f"grid file missing variables: {missing}")
+        for req in ("x", "y", "nv"):
+            if req not in self.mesh_ds:
+                raise ValueError(f"grid file missing variable: {req}")
 
     def render(self) -> bytes:
         nt = self.timeline.size
-        nele = len(self.mesh.dimensions["nele"])
-        node = len(self.mesh.dimensions["node"])
+        nele: int = int(self.mesh_ds.sizes["nele"])
+        node: int = int(self.mesh_ds.sizes["node"])
 
         mjd: NDArray[np.float32] = self._to_mjd(self.timeline)
         itime: NDArray[np.int32]
@@ -119,31 +131,72 @@ class MetNetCDFGenerator(BaseGenerator):
             # ---------------------------------------------------------
             # dimensions  (order is important for FVCOM reader)
             # ---------------------------------------------------------
-            ds_out.createDimension("time", None)  # unlimited
-            ds_out.createDimension("DateStrLen", 26)
-            ds_out.createDimension("node", node)
+            # order: nele, node, three, time, DateStrLen
             ds_out.createDimension("nele", nele)
+            ds_out.createDimension("node", node)
             ds_out.createDimension("three", 3)
+            ds_out.createDimension("time", None)
+            ds_out.createDimension("DateStrLen", 26)
 
             # ---------------------------------------------------------
-            # static mesh variables  –  copied verbatim
+            # static mesh variables (copied verbatim, float64/int32)
             # ---------------------------------------------------------
             for name in ("x", "y", "lon", "lat"):
-                v_in = self.mesh.variables[name]
-                v_out = ds_out.createVariable(name, v_in.dtype, ("node",))
-                v_out[:] = v_in[:]
-                v_out.setncatts({k: v_in.getncattr(k) for k in v_in.ncattrs()})
+                if name not in self.mesh_ds:
+                    continue
+                v_in = self.mesh_ds[name]
+                v_out = ds_out.createVariable(
+                    name, v_in.dtype, ("node",), fill_value=False
+                )
+                v_out[:] = v_in.values
+                v_out.setncatts(v_in.attrs)
+                if "long_name" not in v_out.ncattrs():  # fallback
+                    v_out.long_name = (
+                        "nodal x-coordinate"
+                        if name == "x"
+                        else (
+                            "nodal y-coordinate"
+                            if name == "y"
+                            else (
+                                "nodal longitude" if name == "lon" else "nodal latitude"
+                            )
+                        )
+                    )
+                if "units" not in v_out.ncattrs():
+                    v_out.units = "meters" if name in ("x", "y") else "degrees"
 
             for name in ("xc", "yc", "lonc", "latc"):
-                v_in = self.mesh.variables[name]
-                v_out = ds_out.createVariable(name, v_in.dtype, ("nele",))
-                v_out[:] = v_in[:]
-                v_out.setncatts({k: v_in.getncattr(k) for k in v_in.ncattrs()})
+                if name not in self.mesh_ds:
+                    continue
+                v_in = self.mesh_ds[name]
+                v_out = ds_out.createVariable(
+                    name, v_in.dtype, ("nele",), fill_value=False
+                )
+                v_out[:] = v_in.values
+                v_out.setncatts(v_in.attrs)
+                if "long_name" not in v_out.ncattrs():
+                    v_out.long_name = (
+                        "zonal x-coordinate"
+                        if name == "xc"
+                        else (
+                            "zonal y-coordinate"
+                            if name == "yc"
+                            else (
+                                "zonal longitude"
+                                if name == "lonc"
+                                else "zonal latitude"
+                            )
+                        )
+                    )
+                if "units" not in v_out.ncattrs():
+                    v_out.units = "meters" if name in ("xc", "yc") else "degrees"
 
-            v_nv_in = self.mesh.variables["nv"]
-            v_nv_out = ds_out.createVariable("nv", v_nv_in.dtype, ("three", "nele"))
-            v_nv_out[:, :] = v_nv_in[:, :]
-            v_nv_out.setncatts({k: v_nv_in.getncattr(k) for k in v_nv_in.ncattrs()})
+            v_nv_in = self.mesh_ds["nv"]
+            v_nv_out = ds_out.createVariable(
+                "nv", "i4", ("three", "nele"), fill_value=False
+            )
+            v_nv_out[:, :] = v_nv_in.values.T  # (3, nele)
+            v_nv_out.long_name = "nodes surrounding element"
 
             # ---------------------------------------------------------
             # time variables
@@ -155,48 +208,105 @@ class MetNetCDFGenerator(BaseGenerator):
             v_time.format = "modified julian day (MJD)"
             v_time.time_zone = "UTC"
 
-            v_itime = ds_out.createVariable("Itime", "i4", ("time",))
-            v_itime[:] = itime
-            v_itime.units = "days since 1858-11-17 00:00:00"
-            v_itime.format = "modified julian day (MJD)"
-            v_itime.time_zone = "UTC"
-
-            v_itime2 = ds_out.createVariable("Itime2", "i4", ("time",))
-            v_itime2[:] = itime2
-            v_itime2.units = "msec since 00:00:00"
-            v_itime2.time_zone = "UTC"
-
-            v_times = ds_out.createVariable("Times", "S1", ("time", "DateStrLen"))
-            v_times[:, :] = self._times_char(self.timeline)
-
             # ---------------------------------------------------------
-            # dynamic fields (constant in both space & time)
-            # element-centred
+            # dynamic fields – constant, dims & attrs match reference
             # ---------------------------------------------------------
-            def _make(name: str, long_name: str, units: str) -> None:
-                v = ds_out.createVariable(
-                    name, "f4", ("time", "nele"), fill_value=np.nan
-                )
-                v[:, :] = self.consts[name]  # broadcast
+            def _make(
+                name: str,
+                key: str,
+                dims: tuple[str, ...],
+                long_name: str,
+                units: str,
+                std_name: str | None = None,
+                desc: str | None = None,
+            ) -> None:
+                v = ds_out.createVariable(name, "f4", dims, fill_value=False)
+                v[:] = self.consts[key]
                 v.long_name = long_name
                 v.units = units
+                v.grid = "fvcom_grid"
+                v.type = "data"
+                if std_name:
+                    v.standard_name = std_name
+                if desc:
+                    v.description = desc
+                if "node" in dims:
+                    v.coordinates = "FVCOM cartesian coordinates"
 
-            _make("uwind_speed", "eastward wind speed", "m s-1")
-            _make("vwind_speed", "northward wind speed", "m s-1")
-            _make("air_temperature", "surface air temperature", "Celsius")
-            _make("relative_humidity", "relative humidity", "%")
-            _make("surface_pressure", "mean sea level pressure", "hPa")
-            _make("surface_short_wave_flux", "downward short-wave radiation", "W m-2")
-            _make("surface_long_wave_flux", "downward long-wave radiation", "W m-2")
-            _make("precip_rate", "precipitation rate", "kg m-2 s-1")
+            _make(
+                "uwind_speed",
+                "uwind",
+                ("time", "nele"),
+                "Eastward Wind Speed",
+                "m/s",
+                "Wind Speed",
+            )
+            _make(
+                "vwind_speed",
+                "vwind",
+                ("time", "nele"),
+                "Northward Wind Speed",
+                "m/s",
+                "Wind Speed",
+            )
+            _make(
+                "air_temperature",
+                "air_temp",
+                ("time", "node"),
+                "Surface air temperature",
+                "Celsius Degree",
+            )
+            _make("cloud_cover", "cloud", ("time", "node"), "Cloud cover", "-")
+            _make(
+                "short_wave",
+                "swrad",
+                ("time", "node"),
+                "Downward solar shortwave radiation flux",
+                "Watts meter-2",
+            )
+            _make(
+                "long_wave",
+                "lwrad",
+                ("time", "node"),
+                "Downward solar longwave radiation flux",
+                "Watts meter-2",
+            )
+            _make(
+                "relative_humidity",
+                "rh",
+                ("time", "node"),
+                "surface air relative humidity",
+                "percentage",
+            )
+            _make(
+                "air_pressure", "prmsl", ("time", "node"), "Surface air pressure", "hPa"
+            )
+            _make(
+                "Precipitation",
+                "precip",
+                ("time", "node"),
+                "Precipitation",
+                "m s-1",
+                desc="Precipitation, ocean lose water is negative",
+            )
 
             # ---------------------------------------------------------
             # global attrs
             # ---------------------------------------------------------
-            ds_out.type = "FVCOM METEOROLOGY FORCING FILE"
-            ds_out.title = "Constant meteorological forcing (prototype)"
-            ds_out.history = "generated by xfvcom"
-            ds_out.info = ", ".join(f"{k}={v}" for k, v in self.consts.items())
+            ds_out.type = "FVCOM Forcing File"
+            ds_out.title = "FVCOM Forcing File"
+            ds_out.institution = "Sasaki Lab, The University of Tokyo"
+            ds_out.source = "FVCOM grid (unstructured) surface forcing"
+            ds_out.history = (
+                "File created with write_FVCOM_forcing from the MATLAB " "fvcom-toolbox"
+            )
+            ds_out.references = (
+                "http://fvcom.smast.umassd.edu, http://codfish.smast.umassd.edu"
+            )
+            ds_out.Conventions = "CF-1.0"
+            ds_out.infos = "GWO atmospheric forcing data"
+            ds_out.CoordinateSystem = "cartesian"
+            ds_out.CoordinateProjection = "init=WGS84"
 
         data = tmp_path.read_bytes()
         tmp_path.unlink()  # remove temp file
