@@ -95,16 +95,24 @@ class FvcomGrid:
         kw: dict[str, Any] = {
             "x": np.asarray(ds["x"].values, dtype=float),
             "y": np.asarray(ds["y"].values, dtype=float),
-            "nv": np.asarray(ds["nv"].values, dtype=int),
         }
+        # ------------------------------------------------------------------
+        # nv: ensure (3, nele) shape & 0-based
+        nv_raw = np.asarray(ds["nv"].values, dtype=int)
+        if nv_raw.shape[0] != 3 and nv_raw.shape[1] == 3:
+            nv_raw = nv_raw.T  # (nele,3) → (3,nele)
+        # 1-based → 0-based
+        if nv_raw.min() == 1:
+            nv_raw = nv_raw - 1
+        kw["nv"] = nv_raw
+
         for name in ("lon", "lat", "lonc", "latc"):
             if name in ds:
                 kw[name] = np.asarray(ds[name].values, dtype=float)
-        # compute element centres if not in dataset
-        if "nv" in ds and "x" in ds and "y" in ds:
-            nv = kw["nv"]
-            kw["xc"] = kw["x"][nv].mean(axis=0)
-            kw["yc"] = kw["y"][nv].mean(axis=0)
+        # compute element centres
+        nv = kw["nv"]
+        kw["xc"] = kw["x"][nv].mean(axis=0)
+        kw["yc"] = kw["y"][nv].mean(axis=0)
 
         return cls(**kw)  # type: ignore[arg-type]
 
