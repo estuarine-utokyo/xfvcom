@@ -25,6 +25,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 import xarray as xr
+from numpy.typing import NDArray
 
 from .dat_reader import read_dat
 from .geo_utils import utm_to_lonlat
@@ -50,19 +51,21 @@ class FvcomGrid:
     """FVCOM horizontal grid (unstructured triangular mesh)."""
 
     # core arrays ---------------------------------------------------------
-    x: np.ndarray  # node x (UTM metres)
-    y: np.ndarray  # node y (UTM metres)
-    nv: np.ndarray  # connectivity (3, nele) – **zero‑based**
+    x: NDArray[np.float64]  # node x (UTM metres)
+    y: NDArray[np.float64]  # node y (UTM metres)
+    nv: NDArray[np.int_]  # connectivity (3, nele) – **zero-based**
 
     # projection meta -----------------------------------------------------
     zone: int | None = None  # UTM zone number (1‑60)
     northern: bool = True  # hemisphere flag
 
     # optional geographic -----------------------------------------------
-    lon: np.ndarray | None = field(default=None, repr=False)
-    lat: np.ndarray | None = field(default=None, repr=False)
-    lonc: np.ndarray | None = field(default=None, repr=False)
-    latc: np.ndarray | None = field(default=None, repr=False)
+    lon: NDArray[np.float64] | None = field(default=None, repr=False)
+    lat: NDArray[np.float64] | None = field(default=None, repr=False)
+    lonc: NDArray[np.float64] | None = field(default=None, repr=False)
+    latc: NDArray[np.float64] | None = field(default=None, repr=False)
+    xc: NDArray[np.float64] | None = field(default=None, repr=False)
+    yc: NDArray[np.float64] | None = field(default=None, repr=False)
 
     # ------------------------------------------------------------------
     # Constructors
@@ -83,6 +86,12 @@ class FvcomGrid:
         for name in ("lon", "lat", "lonc", "latc"):
             if name in ds:
                 kw[name] = np.asarray(ds[name].values, dtype=float)
+        # compute element centres if not in dataset
+        if "nv" in ds and "x" in ds and "y" in ds:
+            nv = kw["nv"]
+            kw["xc"] = kw["x"][nv].mean(axis=0)
+            kw["yc"] = kw["y"][nv].mean(axis=0)
+
         return cls(**kw)  # type: ignore[arg-type]
 
     @classmethod
@@ -129,6 +138,8 @@ class FvcomGrid:
             lat=lat,
             lonc=lonc,
             latc=latc,
+            xc=xc,
+            yc=yc,
         )
 
     # ------------------------------------------------------------------
@@ -168,6 +179,11 @@ class FvcomGrid:
             ds["lonc"] = ("nele", self.lonc)
         if self.latc is not None:
             ds["latc"] = ("nele", self.latc)
+        if self.xc is not None:
+            ds["xc"] = ("nele", self.xc)
+        if self.yc is not None:
+            ds["yc"] = ("nele", self.yc)
+
         return ds
 
     # ------------------------------------------------------------------
