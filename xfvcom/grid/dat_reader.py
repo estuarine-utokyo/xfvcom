@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TypedDict
 
 import numpy as np
+from numpy.typing import NDArray
 
 __all__ = ["read_dat"]
 
@@ -59,7 +60,7 @@ def read_dat(path: str | Path) -> _GridData:
         raise ValueError("Node/Cell counts not found in DAT file")
 
     # ----------------------------------------------------- element block (comes first)
-    nv = np.empty((3, nele), dtype=int)
+    nv: NDArray[np.int_] = np.empty((3, nele), dtype=np.int_)
     read_elem = 0
     while read_elem < nele and idx < len(lines):
         parts = lines[idx].split()
@@ -72,8 +73,8 @@ def read_dat(path: str | Path) -> _GridData:
         raise ValueError(f"Element block ended prematurely ({read_elem}/{nele})")
 
     # -------------------------------------------------------- node block (after elem)
-    x = np.empty(node, dtype=float)
-    y = np.empty(node, dtype=float)
+    x: NDArray[np.float64] = np.empty(node, dtype=np.float64)
+    y: NDArray[np.float64] = np.empty(node, dtype=np.float64)
     read_node = 0
     while read_node < node and idx < len(lines):
         parts = lines[idx].split()
