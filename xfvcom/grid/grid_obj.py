@@ -78,6 +78,20 @@ class FvcomGrid:
         if miss and validate:
             raise KeyError("Dataset missing grid vars: " + ", ".join(miss))
 
+        # ---- fallback for loose validation --------------------------------
+        if not validate:
+            # nv_zero → nv
+            if "nv" not in ds and "nv_zero" in ds:
+                ds = ds.assign(nv=ds["nv_zero"])
+            # if planar x/y missing but lon/lat present, copy for plotting
+            if "x" not in ds and "lon" in ds:
+                ds = ds.assign(x=ds["lon"])
+            if "y" not in ds and "lat" in ds:
+                ds = ds.assign(y=ds["lat"])
+            miss = [n for n in req if n not in ds]
+            if miss:
+                raise KeyError("Dataset still missing vars: " + ", ".join(miss))
+
         kw: dict[str, Any] = {
             "x": np.asarray(ds["x"].values, dtype=float),
             "y": np.asarray(ds["y"].values, dtype=float),
@@ -207,7 +221,11 @@ def get_grid(obj: "FvcomGrid | xr.Dataset | str | Path") -> FvcomGrid:  # type: 
     if isinstance(obj, (str, Path)):
         return FvcomGrid.from_dat(obj)
     if isinstance(obj, xr.Dataset):
-        return FvcomGrid.from_dataset(obj)
+        # try strict first; if fails, fallback to loose
+        try:
+            return FvcomGrid.from_dataset(obj)
+        except KeyError:
+            return FvcomGrid.from_dataset(obj, validate=False)
     raise TypeError(
         f"Unsupported object type for grid extraction: {type(obj).__name__}"
     )
