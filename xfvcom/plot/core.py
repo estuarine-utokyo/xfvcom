@@ -30,6 +30,7 @@ from scipy.spatial import KDTree
 
 from ..analysis import FvcomAnalyzer
 from ..decorators import precedence
+from ..grid.grid_obj import get_grid
 from ..io import FvcomDataLoader
 from ..plot_options import FvcomPlotOptions
 from ..utils.helpers import PlotHelperMixin, pick_first
@@ -80,6 +81,18 @@ class FvcomPlotter(PlotHelperMixin):
         """
         self.ds = dataset
         self.cfg = plot_config
+        # Accept Dataset | FvcomGrid | path. get_grid() returns FvcomGrid.
+        self.grid = get_grid(dataset)
+        # Convenience aliases (back-compat helpers)
+        self.nv_zero = self.grid.nv.T  # (nele,3) 0-based — old name kept
+        self.lon = self.grid.lon
+        self.lat = self.grid.lat
+        self.x = self.grid.x
+        self.y = self.grid.y
+        self.lonc = self.grid.lonc
+        self.latc = self.grid.latc
+        self.xc = self.grid.xc
+        self.yc = self.grid.yc
 
     def plot_timeseries(
         self,
@@ -986,13 +999,13 @@ class FvcomPlotter(PlotHelperMixin):
         if ylim is not None:
             ylim = tuple(_parse(v) for v in ylim)  # type: ignore[assignment]
 
-        # Extract coordinates
+        # -------- NEW: coordinates from common grid ----------
         if self.use_latlon:
-            x = self.ds["lon"].values
-            y = self.ds["lat"].values
+            x = self.lon
+            y = self.lat
         else:
-            x = self.ds["x"].values
-            y = self.ds["y"].values
+            x = self.x
+            y = self.y
 
         if da is not None:
             values = da.values
@@ -1002,9 +1015,9 @@ class FvcomPlotter(PlotHelperMixin):
             cbar_label = extra.get("cbar_label", default_cbar_label)
         else:
             with_mesh = True
-        # Extract triangle connectivity
-        # nv = self.ds["nv"].values.T - 1  # Convert to 0-based indexing
-        nv = self.ds["nv_zero"]
+
+        # Extract triangle connectivity (0-based, (nele,3))
+        nv = self.nv_zero
         # Output ranges and connectivity
         if xlim is None:
             xmin, xmax = x.min(), x.max()

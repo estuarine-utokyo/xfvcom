@@ -25,6 +25,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 import xarray as xr
+from numpy.typing import NDArray
 
 from .dat_reader import read_dat
 from .geo_utils import utm_to_lonlat
@@ -50,19 +51,21 @@ class FvcomGrid:
     """FVCOM horizontal grid (unstructured triangular mesh)."""
 
     # core arrays ---------------------------------------------------------
-    x: np.ndarray  # node x (UTM metres)
-    y: np.ndarray  # node y (UTM metres)
-    nv: np.ndarray  # connectivity (3, nele) – **zero‑based**
+    x: NDArray[np.float64]  # node x (UTM metres)
+    y: NDArray[np.float64]  # node y (UTM metres)
+    nv: NDArray[np.int_]  # connectivity (3, nele) – **zero-based**
 
     # projection meta -----------------------------------------------------
     zone: int | None = None  # UTM zone number (1‑60)
     northern: bool = True  # hemisphere flag
 
     # optional geographic -----------------------------------------------
-    lon: np.ndarray | None = field(default=None, repr=False)
-    lat: np.ndarray | None = field(default=None, repr=False)
-    lonc: np.ndarray | None = field(default=None, repr=False)
-    latc: np.ndarray | None = field(default=None, repr=False)
+    lon: NDArray[np.float64] | None = field(default=None, repr=False)
+    lat: NDArray[np.float64] | None = field(default=None, repr=False)
+    lonc: NDArray[np.float64] | None = field(default=None, repr=False)
+    latc: NDArray[np.float64] | None = field(default=None, repr=False)
+    xc: NDArray[np.float64] | None = field(default=None, repr=False)
+    yc: NDArray[np.float64] | None = field(default=None, repr=False)
 
     # ------------------------------------------------------------------
     # Constructors
@@ -75,14 +78,42 @@ class FvcomGrid:
         if miss and validate:
             raise KeyError("Dataset missing grid vars: " + ", ".join(miss))
 
+        # ---- fallback for loose validation --------------------------------
+        if not validate:
+            # nv_zero → nv
+            if "nv" not in ds and "nv_zero" in ds:
+                ds = ds.assign(nv=ds["nv_zero"])
+            # if planar x/y missing but lon/lat present, copy for plotting
+            if "x" not in ds and "lon" in ds:
+                ds = ds.assign(x=ds["lon"])
+            if "y" not in ds and "lat" in ds:
+                ds = ds.assign(y=ds["lat"])
+            miss = [n for n in req if n not in ds]
+            if miss:
+                raise KeyError("Dataset still missing vars: " + ", ".join(miss))
+
         kw: dict[str, Any] = {
             "x": np.asarray(ds["x"].values, dtype=float),
             "y": np.asarray(ds["y"].values, dtype=float),
-            "nv": np.asarray(ds["nv"].values, dtype=int),
         }
+        # ------------------------------------------------------------------
+        # nv: ensure (3, nele) shape & 0-based
+        nv_raw = np.asarray(ds["nv"].values, dtype=int)
+        if nv_raw.shape[0] != 3 and nv_raw.shape[1] == 3:
+            nv_raw = nv_raw.T  # (nele,3) → (3,nele)
+        # 1-based → 0-based
+        if nv_raw.min() == 1:
+            nv_raw = nv_raw - 1
+        kw["nv"] = nv_raw
+
         for name in ("lon", "lat", "lonc", "latc"):
             if name in ds:
                 kw[name] = np.asarray(ds[name].values, dtype=float)
+        # compute element centres
+        nv = kw["nv"]
+        kw["xc"] = kw["x"][nv].mean(axis=0)
+        kw["yc"] = kw["y"][nv].mean(axis=0)
+
         return cls(**kw)  # type: ignore[arg-type]
 
     @classmethod
@@ -129,6 +160,8 @@ class FvcomGrid:
             lat=lat,
             lonc=lonc,
             latc=latc,
+            xc=xc,
+            yc=yc,
         )
 
     # ------------------------------------------------------------------
@@ -168,6 +201,11 @@ class FvcomGrid:
             ds["lonc"] = ("nele", self.lonc)
         if self.latc is not None:
             ds["latc"] = ("nele", self.latc)
+        if self.xc is not None:
+            ds["xc"] = ("nele", self.xc)
+        if self.yc is not None:
+            ds["yc"] = ("nele", self.yc)
+
         return ds
 
     # ------------------------------------------------------------------
@@ -191,7 +229,11 @@ def get_grid(obj: "FvcomGrid | xr.Dataset | str | Path") -> FvcomGrid:  # type: 
     if isinstance(obj, (str, Path)):
         return FvcomGrid.from_dat(obj)
     if isinstance(obj, xr.Dataset):
-        return FvcomGrid.from_dataset(obj)
+        # try strict first; if fails, fallback to loose
+        try:
+            return FvcomGrid.from_dataset(obj)
+        except KeyError:
+            return FvcomGrid.from_dataset(obj, validate=False)
     raise TypeError(
         f"Unsupported object type for grid extraction: {type(obj).__name__}"
     )
