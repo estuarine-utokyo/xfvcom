@@ -7,6 +7,7 @@ import datetime as dt
 import tempfile
 from datetime import timezone
 from io import BytesIO
+from os import PathLike
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -51,7 +52,7 @@ class MetNetCDFGenerator(BaseGenerator):
 
     def __init__(
         self,
-        grid_nc: Path | str,
+        grid_nc: Path | str | PathLike[str],
         start: str,
         end: str,
         dt_seconds: int = 3600,
@@ -60,9 +61,15 @@ class MetNetCDFGenerator(BaseGenerator):
         northern: bool = True,
         **consts: float,
     ) -> None:
-        super().__init__(grid_nc)
         self.start = pd.Timestamp(start, tz="UTC")
         self.end = pd.Timestamp(end, tz="UTC")
+        source = Path(grid_nc)
+
+        # 2) 親クラスへは Path 型で渡す
+        super().__init__(source)
+
+        # 3) 以降、インスタンス属性として保持
+        self.source: Path = source
         self.dt = dt_seconds
         self.utm_zone = utm_zone
         self.northern = northern
