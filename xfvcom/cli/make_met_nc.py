@@ -20,6 +20,17 @@ def main() -> None:
         p.add_argument(f"--{key}", type=float)
 
     p.add_argument("-o", "--output", type=Path, help="Output NetCDF")
+    p.add_argument(
+        "--utm-zone",
+        type=int,
+        required=True,
+        help="UTM zone number (e.g. 54 for Tokyo Bay)",
+    )
+    p.add_argument(
+        "--southern",
+        action="store_true",
+        help="Use southern hemisphere UTM (default: northern)",
+    )
     args = p.parse_args()
 
     gen = MetNetCDFGenerator(
@@ -27,6 +38,8 @@ def main() -> None:
         start=args.start,
         end=args.end,
         dt_seconds=args.dt,
+        utm_zone=args.utm_zone,
+        northern=not args.southern,
         **{k: getattr(args, k) for k in MetNetCDFGenerator._DEFAULTS},
     )
 
