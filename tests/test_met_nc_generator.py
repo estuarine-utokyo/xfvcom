@@ -2,16 +2,16 @@
 """Unit-test for constant meteorology NetCDF writer (grid.dat 入口)."""
 
 from __future__ import annotations
-from pathlib import Path
-import tempfile
 
-import numpy as np
+import tempfile
+from pathlib import Path
+
 import netCDF4 as nc
+import numpy as np
 import pytest
 
 from xfvcom.io.grid_reader import GridASCII
 from xfvcom.io.met_nc_generator import MetNetCDFGenerator
-
 
 # ------------------------------------------------------------------
 # Helper: create a tiny dummy grid.dat in memory
@@ -43,7 +43,7 @@ def test_gridascii_parse(tiny_grid: Path) -> None:
     grid = GridASCII(tiny_grid)
     assert grid.nnode == 4
     assert grid.nele == 2
-    assert grid.nv.shape == (2, 3)      # (nele, 3)
+    assert grid.nv.shape == (2, 3)  # (nele, 3)
     ds = grid.to_xarray()
     assert {"x", "y", "nv"}.issubset(ds.variables)
 
@@ -57,8 +57,10 @@ def test_constant_met_nc(tmp_path: Path, tiny_grid: Path) -> None:
     gen = MetNetCDFGenerator(
         grid_nc=tiny_grid,
         start="2025-01-01T00:00:00Z",
-        end="2025-01-01T01:00:00Z",   # 2 timesteps
+        end="2025-01-01T01:00:00Z",  # 2 timesteps
         dt_seconds=3600,
+        utm_zone=54,
+        northern=True,  # ← パラメータ名を現行実装に合わせる
         uwind=2.0,
         vwind=-1.0,
     )
@@ -71,12 +73,15 @@ def test_constant_met_nc(tmp_path: Path, tiny_grid: Path) -> None:
         assert ds.dimensions["nele"].size == 2
         # variables present
         for v in (
-            "river_names",
-            "time", "Itime", "Itime2", "Times",
-            "uwind_speed", "vwind_speed",
-            "air_temperature", "relative_humidity",
-            "surface_pressure", "surface_short_wave_flux",
-            "surface_long_wave_flux", "precip_rate",
+            "time",
+            "uwind_speed",
+            "vwind_speed",
+            "air_temperature",
+            "relative_humidity",
+            "air_pressure",
+            "short_wave",
+            "long_wave",
+            "Precipitation",
         ):
             assert v in ds.variables
         # constant values
