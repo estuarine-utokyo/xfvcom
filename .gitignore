@@ -163,6 +163,7 @@ cython_debug/
 *.png
 *.gif
 *.mp4
+*.txt
 /examples/*.nc
 /examples/*.html
 /examples/html
