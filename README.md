@@ -29,6 +29,7 @@
 * [2-D Horizontal Plotting](docs/plot_2d.md)
 * [Time-series & Depth-profiles](docs/plot_ts.md)
 * [Vertical Sections](docs/plot_section.md)
+* [Forcing File Generator](docs/forcing_generator.md)
 
 ## Installation
 
