@@ -364,9 +364,10 @@ class RiverNetCDFGenerator(BaseGenerator):
             )
 
             # write column j
-            flux_f4[:, j] = src_flux.get_series("flux", self.timeline.to_numpy())
-            temp_f4[:, j] = src_temp.get_series("temp", self.timeline.to_numpy())
-            salt_f4[:, j] = src_salt.get_series("salt", self.timeline.to_numpy())
+            # mypy expects the second argument to be a `pd.DatetimeIndex`
+            flux_f4[:, j] = src_flux.get_series("flux", self.timeline)
+            temp_f4[:, j] = src_temp.get_series("temp", self.timeline)
+            salt_f4[:, j] = src_salt.get_series("salt", self.timeline)
 
         # ---- 2. Write with netCDF4 - low level ---------------------------
         with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
