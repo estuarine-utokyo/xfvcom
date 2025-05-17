@@ -28,3 +28,22 @@ class ConstantSource(RiverTimeSeriesSource):
     def get_series(self, variable: str, times: pd.DatetimeIndex) -> np.ndarray:
         val = self.constants[variable]
         return np.full(times.size, val, dtype="f4")
+
+
+class BaseForcingSource(RiverTimeSeriesSource):  # type: ignore[misc]
+    """
+    Generic abstract base for any forcing source (river, met, open boundary).
+
+    This is simply an *alias* to the existing RiverTimeSeriesSource so that
+    future non-river modules can depend on a neutral name.  All concrete
+    implementations should inherit from this class.
+    """
+
+    # get_series() は親クラスで abstract 定義済みなので pass で良い
+    pass
+
+
+__all__ = [
+    "BaseForcingSource",
+    "ConstantSource",
+]

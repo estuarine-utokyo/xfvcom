@@ -1,0 +1,13 @@
+# ─── simplified static YAML for tests ───
+defaults:
+  # global fallback for every river
+  flux: 2
+
+# keep only the salt constant for Arakawa; flux comes from `defaults`
+rivers:
+  - name: Arakawa
+    const: {salt: 0.05}
+
+# interpolation settings (same for all current tests)
+interp:
+  method: linear

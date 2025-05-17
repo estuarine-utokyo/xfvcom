@@ -103,6 +103,18 @@ create_anim_2d_plot(
 )
 ```
 
+### Extended forcing inputs
+
+#### CLI one-liner
+
+```bash
+make_river_nc.py \
+  --ts Arakawa=arakawa_flux.csv:flux \
+  --ts global_temp.tsv:temp \
+  --const Arakawa.salt=0.05 \
+  --const flux=30
+
+
 ## Dependencies
 
 All runtime dependencies are listed in **pyproject.toml** under `[project.dependencies]`. To add new packages, use:
