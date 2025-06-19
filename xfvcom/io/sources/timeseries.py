@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -12,11 +12,12 @@ from .utils import load_timeseries_table
 
 class TimeSeriesSource(BaseForcingSource):
     """
-    Read a CSV/TSV time-series table and provide raw (non-interpolated) data.
+    Read a CSV/TSV time-series table and supply interpolated values.
 
-    *No interpolation is performed at this stage.*  Values are simply re-indexed
-    to *out_times*; missing timestamps remain NaN.  A separate interpolation
-    layer will be introduced in Step 3.
+    The data are linearly interpolated over the union of the input index and
+    the requested timestamps.  Any request falling outside the available time
+    span raises a :class:`ValueError`. NaNs are propagated, and if NaNs remain
+    within the data range after interpolation an error is raised.
     """
 
     def __init__(
