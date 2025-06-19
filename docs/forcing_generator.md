@@ -104,7 +104,7 @@ time,flux
 
 ```python
 from pathlib import Path
-from xfvcom.io import RiverNetCDFGenerator
+from xfvcom.io.river_nc_generator import RiverNetCDFGenerator
 
 gen = RiverNetCDFGenerator(
     nml_path       = Path("rivers_minimal.nml"),
