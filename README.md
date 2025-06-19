@@ -109,12 +109,15 @@ create_anim_2d_plot(
 #### CLI one-liner
 
 ```bash
-make_river_nc.py \
-  --ts Arakawa=arakawa_flux.csv:flux \
-  --ts global_temp.tsv:temp \
-  --const Arakawa.salt=0.05 \
-  --const flux=30
+make_river_nc.py rivers_minimal.nml \
+  --start 2025-01-01T00:00Z \
+  --end   2025-01-02T00:00Z \
+  --dt    3600 \
+```
 
+Input time-series values are interpreted as **JST (UTC+9)** and converted
+to UTC in the output NetCDF file. For example, a timestamp of
+`2025-01-01T00:00` in your CSV becomes `2024-12-31T15:00Z`.
 
 ## Dependencies
 
