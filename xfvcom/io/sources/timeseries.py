@@ -28,9 +28,12 @@ class TimeSeriesSource(BaseForcingSource):
         col_map: Mapping[str, str] | None = None,
         na_values: Sequence[str | float] | None = None,
         interp_method: str = "linear",
+        input_tz: str = "Asia/Tokyo",
     ) -> None:
         # Load table (encoding / delimiter / NA markers handled inside)
-        df = load_timeseries_table(Path(path), na_values=na_values)
+        df = load_timeseries_table(
+            Path(path), na_values=na_values, input_tz=input_tz
+        )
 
         # ------------------------------------------------------------ #
         # 1) Ensure the DataFrame is indexed by a “time” DatetimeIndex
@@ -71,7 +74,7 @@ class TimeSeriesSource(BaseForcingSource):
         # If the CSV/TSV contained tz-aware datetimes, just strip the tz-info
         # and keep the clock-time unchanged.
         # If timestamps are tz-aware convert to UTC, then strip tz-info
-        if df.index.tz is not None:  # JST(UTC+9) → UTC → naïve
+        if df.index.tz is not None:
             df.index = df.index.tz_convert("UTC").tz_localize(None)
 
         # If a river_name column exists and a filter is requested, apply it

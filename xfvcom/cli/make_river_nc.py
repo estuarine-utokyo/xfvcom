@@ -13,6 +13,11 @@ def main() -> None:
     p.add_argument("nml", type=Path, help="rivers.nml file")
     p.add_argument("--start", required=True, help="ISO time, UTC")
     p.add_argument("--end", required=True, help="ISO time, UTC")
+    p.add_argument(
+        "--start-tz",
+        default="UTC",
+        help="Timezone for naive start/end (default: UTC)",
+    )
     p.add_argument("--dt", type=int, default=3600, help="time step [s]")
 
     # Default constants (CLI fallback)
@@ -39,6 +44,11 @@ def main() -> None:
         metavar="PATH",
         help="YAML config with defaults and river definitions",
     )
+    p.add_argument(
+        "--data-tz",
+        default="Asia/Tokyo",
+        help="Timezone of CSV/TSV data (default: Asia/Tokyo)",
+    )
 
     p.add_argument("-o", "--output", type=Path, help="Output NetCDF file")
 
@@ -55,6 +65,8 @@ def main() -> None:
         ts_specs=args.ts,
         const_specs=args.const,
         config=args.config,
+        start_tz=args.start_tz,
+        data_tz=args.data_tz,
     )
 
     out_path = args.output if args.output else args.nml.with_suffix(".nc")

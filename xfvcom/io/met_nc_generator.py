@@ -59,10 +59,17 @@ class MetNetCDFGenerator(BaseGenerator):
         *,
         utm_zone: int | None = None,
         northern: bool = True,
+        start_tz: str = "UTC",
         **consts: float,
     ) -> None:
-        self.start = pd.Timestamp(start, tz="UTC")
-        self.end = pd.Timestamp(end, tz="UTC")
+        t0 = pd.Timestamp(start)
+        t1 = pd.Timestamp(end)
+        if t0.tzinfo is None:
+            t0 = t0.tz_localize(start_tz)
+        if t1.tzinfo is None:
+            t1 = t1.tz_localize(start_tz)
+        self.start = t0.tz_convert("UTC")
+        self.end = t1.tz_convert("UTC")
         source = Path(grid_nc)
 
         # 2) 親クラスへは Path 型で渡す

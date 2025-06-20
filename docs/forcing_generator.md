@@ -31,7 +31,7 @@ xfvcom/io/river_nml_generator.py  ← namelist writer
 
 | Path | Description | Sample |
 |------|-------------|--------|
-| `tests/data/arakawa_flux.csv` | Discharge time series (UTC) | `time,flux` |
+| `tests/data/arakawa_flux.csv` | Discharge time series | `time,flux` |
 | `tests/data/global_temp.tsv` | Water temperature time series (UTF-8/TSV) | `time\ttemp` |
 | `tests/data/rivers_minimal.nml` | Base namelist shipped with the grid | — |
 | `river_cfg.yaml` (optional) | YAML overrides (defaults / const values) | see below |
@@ -50,6 +50,11 @@ make_river_nc.py   --nml rivers_minimal.nml   --start 2025‑01‑01T00:00Z   --
 * `--ts path:column` (without a river name) defines a global file shared by all rivers.
 * `--const RIVER.var=value` sets a river‑specific constant.
 * `--const var=value` sets a global fallback.
+
+Input tables are interpreted in ``Asia/Tokyo`` timezone unless you pass
+``--data-tz``.  The ``--start-tz`` option defines the timezone for
+``--start``/``--end`` when those arguments are given without explicit
+timezone information.
 
 ### 2.2  Example **YAML**
 

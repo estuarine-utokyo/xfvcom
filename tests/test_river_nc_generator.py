@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import xarray as xr
 
 from xfvcom.io.river_nc_generator import RiverNetCDFGenerator
@@ -34,3 +35,15 @@ def test_constant_nc(tmp_path: Path) -> None:
     assert ds.sizes["time"] == 4
     assert ds.sizes["rivers"] == 1
     assert "river_flux" in ds and "river_temp" in ds and "river_salt" in ds
+
+
+def test_start_tz_parsing() -> None:
+    nml = DATA / "rivers_minimal.nml"
+    gen = RiverNetCDFGenerator(
+        nml_path=nml,
+        start="2025-01-01 09:00",
+        end="2025-01-01 09:00",
+        dt_seconds=3600,
+        start_tz="Asia/Tokyo",
+    )
+    assert gen.timeline[0] == pd.Timestamp("2025-01-01T00:00Z")
