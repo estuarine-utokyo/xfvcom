@@ -18,6 +18,52 @@ from numpy.typing import NDArray
 
 from ..grid.grid_obj import FvcomGrid
 from .base_generator import BaseGenerator
+from .sources.base import BaseForcingSource
+from .sources.timeseries import TimeSeriesSource
+
+
+class _ScalarConstantSource(BaseForcingSource):
+    """Return the same constant value for exactly one variable."""
+
+    def __init__(self, var: str, value: float) -> None:
+        self._var = var
+        self._val = float(value)
+
+    def get_series(self, var_name: str, times: pd.DatetimeIndex) -> NDArray[np.float64]:  # type: ignore[override]
+        if var_name != self._var:
+            raise KeyError(
+                f"Unsupported variable {var_name!r} (expected {self._var!r})"
+            )
+        return np.full(times.size, self._val, dtype=float)
+
+
+def _parse_ts_spec(tokens: Iterable[str], variables: Iterable[str]) -> dict[str, str]:
+    """Return mapping ``{var: path}`` from CLI --ts tokens."""
+
+    mapping: dict[str, str] = {}
+    for tok in tokens:
+        path, _, vars_part = tok.partition(":")
+        path = path.strip()
+        vars_list = (
+            [v.strip() for v in vars_part.split(",") if v.strip()] if vars_part else []
+        )
+        if vars_list:
+            for var in vars_list:
+                mapping.setdefault(var, path)
+        else:
+            for var in variables:
+                mapping.setdefault(var, path)
+    return mapping
+
+
+def _choose_source(
+    var: str, ts_map: Mapping[str, str], const_val: float, *, data_tz: str
+) -> BaseForcingSource:
+    """Return a TimeSeriesSource or constant fallback for *var*."""
+
+    if var in ts_map:
+        return TimeSeriesSource(Path(ts_map[var]), input_tz=data_tz)
+    return _ScalarConstantSource(var, const_val)
 
 
 class MetNetCDFGenerator(BaseGenerator):
@@ -60,6 +106,8 @@ class MetNetCDFGenerator(BaseGenerator):
         utm_zone: int | None = None,
         northern: bool = True,
         start_tz: str = "UTC",
+        ts_specs: list[str] | None = None,
+        data_tz: str = "Asia/Tokyo",
         **consts: float,
     ) -> None:
         t0 = pd.Timestamp(start)
@@ -81,6 +129,17 @@ class MetNetCDFGenerator(BaseGenerator):
         self.utm_zone = utm_zone
         self.northern = northern
         self.consts = {**self._DEFAULTS, **consts}
+        self._data_tz = data_tz
+
+        self._ts_map = _parse_ts_spec(ts_specs or [], self._DEFAULTS)
+        self._sources: dict[str, BaseForcingSource] = {}
+        for var in self._DEFAULTS:
+            self._sources[var] = _choose_source(
+                var,
+                self._ts_map,
+                self.consts[var],
+                data_tz=self._data_tz,
+            )
 
         # Build timeline in UTC (mirrors `load()` behaviour)
         self.timeline = pd.date_range(
@@ -260,18 +319,7 @@ class MetNetCDFGenerator(BaseGenerator):
             # ---------------------------------------------------------
             # dynamic fields – from sources or constant fallback
             # ---------------------------------------------------------
-            class _ConstSource:
-                def __init__(self, val: float) -> None:
-                    self.val = float(val)
-
-                def get_series(
-                    self, var_name: str, times: pd.DatetimeIndex
-                ) -> NDArray[np.float64]:
-                    return np.full(times.size, self.val, dtype=float)
-
-            srcs: dict[str, Any] = {
-                k: _ConstSource(self.consts[k]) for k in self.consts
-            }
+            srcs: Mapping[str, BaseForcingSource] = self._sources
 
             def _write(
                 name: str,
