@@ -105,7 +105,7 @@ def test_start_tz_parsing(tiny_grid: Path) -> None:
 def test_ts_short_wave(tmp_path: Path, tiny_grid: Path) -> None:
     csv = tmp_path / "swrad.csv"
     csv.write_text(
-        "time,swrad\n2025-01-01T00:00,10\n2025-01-01T01:00,20\n",
+        "time,swrad\n2025-01-01T09:00,10\n2025-01-01T10:00,20\n",
         encoding="utf-8",
     )
     out_nc = tmp_path / "met.nc"
