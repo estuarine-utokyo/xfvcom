@@ -11,7 +11,7 @@ def test_yaml_over_cli(tmp_path):
     yaml_cfg = tmp_path / "river_cfg.yaml"
     yaml_cfg.write_text("defaults:\n  flux: 2\n", encoding="utf-8")
     gen = RiverNetCDFGenerator(
-        nml_path=DATA / "data" / "rivers_minimal.nml",
+        nml_path=DATA / "rivers_minimal.nml",
         start="2025-01-01T00:00:00Z",
         end="2025-01-01T00:00:00Z",
         dt_seconds=3600,
