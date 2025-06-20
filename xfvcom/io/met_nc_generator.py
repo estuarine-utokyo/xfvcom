@@ -339,7 +339,7 @@ class MetNetCDFGenerator(BaseGenerator):
                         raise
 
                 v = ds_out.createVariable(name, "f4", dims, fill_value=False)
-                data_f4 = data.astype("f4")
+                data_f4: NDArray[np.float32] = data.astype("f4")
                 if dims == ("time",):
                     v[:] = data_f4
                 else:
