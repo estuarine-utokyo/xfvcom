@@ -20,6 +20,18 @@ def main() -> None:
     )
     p.add_argument("--dt", type=int, default=3600, help="Δt [s]")
 
+    p.add_argument(
+        "--ts",
+        action="append",
+        metavar="SPEC",
+        help="CSV/TSV time-series path[:var1,var2,…]",
+    )
+    p.add_argument(
+        "--data-tz",
+        default="Asia/Tokyo",
+        help="Timezone of CSV/TSV data (default: Asia/Tokyo)",
+    )
+
     # constant parameters (any omitted key falls back to default)
     for key in MetNetCDFGenerator._DEFAULTS:
         p.add_argument(f"--{key}", type=float)
@@ -46,6 +58,8 @@ def main() -> None:
         utm_zone=args.utm_zone,
         northern=not args.southern,
         start_tz=args.start_tz,
+        ts_specs=args.ts,
+        data_tz=args.data_tz,
         **{k: getattr(args, k) for k in MetNetCDFGenerator._DEFAULTS},
     )
 
