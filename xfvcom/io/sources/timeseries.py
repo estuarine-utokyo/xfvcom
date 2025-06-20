@@ -31,9 +31,7 @@ class TimeSeriesSource(BaseForcingSource):
         input_tz: str = "Asia/Tokyo",
     ) -> None:
         # Load table (encoding / delimiter / NA markers handled inside)
-        df = load_timeseries_table(
-            Path(path), na_values=na_values, input_tz=input_tz
-        )
+        df = load_timeseries_table(Path(path), na_values=na_values, input_tz=input_tz)
 
         # ------------------------------------------------------------ #
         # 1) Ensure the DataFrame is indexed by a “time” DatetimeIndex
