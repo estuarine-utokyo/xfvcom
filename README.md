@@ -115,6 +115,12 @@ make_river_nc.py rivers_minimal.nml \
   --dt    3600 \
 ```
 
+```bash
+make_met_nc.py grid.dat --utm-zone 54 \
+  --start 2025-01-01T00:00Z --end 2025-01-02T00:00Z \
+  --ts met.csv:uwind,vwind --data-tz Asia/Tokyo
+```
+
 The NML file given above must exist on disk; otherwise
 ``RiverNetCDFGenerator`` will raise ``FileNotFoundError``.
 

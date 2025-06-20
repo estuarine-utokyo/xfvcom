@@ -3,7 +3,7 @@
 
 
 This document explains how to create river forcing NetCDF files and the accompanying `river.nml` namelist with **xfvcom**.
-Functions for creating atmospheric forcing files will come soon.
+It also covers generation of constant meteorology NetCDF files.
 
 ---
 
@@ -13,6 +13,7 @@ Functions for creating atmospheric forcing files will come soon.
 |-----------|--------|-------------|
 | **`RiverNetCDFGenerator`** | `river_forcing.nc` (NetCDF-4) | River discharge (`river_flux`), temperature (`river_temp`), salinity (`river_salt`) |
 | **`RiverNmlGenerator`** | `rivers.nml` (FVCOM namelist) | Geometric / static info for each river source |
+| **`MetNetCDFGenerator`** | `met.nc` (NetCDF-4) | Constant or time-series atmospheric fields |
 
 The same **time-series CSV / TSV** can be reused for both.
 
@@ -82,6 +83,18 @@ Run with:
 make_river_nc.py   --nml rivers_minimal.nml   --start 2025‑01‑01T00:00Z   --end   2025‑01‑01T12:00Z   --dt    21600   --config river_cfg.yaml
 ```
 
+### 2.3  Constant meteorology CLI
+
+```bash
+make_met_nc.py grid.dat --utm-zone 54 \
+  --start 2025-01-01T00:00Z --end 2025-01-02T00:00Z \
+  --ts met.csv:uwind,vwind --data-tz Asia/Tokyo
+```
+
+The `--ts` option may be repeated to provide CSV/TSV files with
+time-series data.  Any variable not supplied by `--ts` falls back to the
+corresponding command-line constant (e.g. `--uwind`).
+
 ---
 
 ## 3. Time‑series format
@@ -112,6 +125,7 @@ time,flux
 
 ```python
 from pathlib import Path
+
 from xfvcom.io.river_nc_generator import RiverNetCDFGenerator
 
 gen = RiverNetCDFGenerator(
@@ -149,4 +163,4 @@ nc_bytes = gen.render()          # → bytes; write() or open with xarray
 
 ---
 
-*Last updated: 2025‑05‑18*
+*Last updated: 2025‑06‑20*
