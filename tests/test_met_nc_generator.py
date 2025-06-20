@@ -100,3 +100,59 @@ def test_start_tz_parsing(tiny_grid: Path) -> None:
         start_tz="Asia/Tokyo",
     )
     assert gen.timeline[0] == pd.Timestamp("2025-01-01T00:00Z")
+
+
+def test_ts_short_wave(tmp_path: Path, tiny_grid: Path) -> None:
+    csv = tmp_path / "swrad.csv"
+    csv.write_text(
+        "time,swrad\n2025-01-01T00:00,10\n2025-01-01T01:00,20\n",
+        encoding="utf-8",
+    )
+    out_nc = tmp_path / "met.nc"
+    gen = MetNetCDFGenerator(
+        grid_nc=tiny_grid,
+        start="2025-01-01T00:00Z",
+        end="2025-01-01T01:00Z",
+        dt_seconds=3600,
+        utm_zone=54,
+        ts_specs=[f"{csv}:swrad"],
+    )
+    gen.write(out_nc)
+    with nc.Dataset(out_nc) as ds:
+        assert ds.variables["short_wave"][0, 0] == 10
+        assert ds.variables["short_wave"][1, 0] == 20
+        assert np.all(ds.variables["air_temperature"][:, 0] == 20.0)
+
+
+def test_data_tz(tmp_path: Path, tiny_grid: Path) -> None:
+    csv = tmp_path / "met.csv"
+    csv.write_text(
+        "time,swrad\n2025-01-01 09:00,100\n2025-01-01 10:00,200\n",
+        encoding="utf-8",
+    )
+    gen = MetNetCDFGenerator(
+        grid_nc=tiny_grid,
+        start="2025-01-01T00:00Z",
+        end="2025-01-01T01:00Z",
+        dt_seconds=3600,
+        utm_zone=54,
+        ts_specs=[f"{csv}:swrad"],
+        data_tz="Asia/Tokyo",
+    )
+    ds_path = tmp_path / "met_tz.nc"
+    gen.write(ds_path)
+    with nc.Dataset(ds_path) as ds:
+        assert ds.variables["short_wave"][0, 0] == 100
+        assert ds.variables["short_wave"][1, 0] == 200
+
+    gen_bad = MetNetCDFGenerator(
+        grid_nc=tiny_grid,
+        start="2025-01-01T00:00Z",
+        end="2025-01-01T01:00Z",
+        dt_seconds=3600,
+        utm_zone=54,
+        ts_specs=[f"{csv}:swrad"],
+        data_tz="UTC",
+    )
+    with pytest.raises(ValueError, match="outside the available data range"):
+        gen_bad.render()

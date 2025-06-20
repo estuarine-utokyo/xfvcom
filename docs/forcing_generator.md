@@ -95,7 +95,17 @@ The `--ts` option may be repeated to provide CSV/TSV files with
 time-series data.  Any variable not supplied by `--ts` falls back to the
 corresponding command-line constant (e.g. `--uwind`).
 
-### 2.4  MetNetCDFGenerator with constant overrides
+### 2.4  Mixed constants and time-series
+
+```bash
+make_met_nc.py grid.dat --utm-zone 54 \
+  --start 2025-01-01T00:00Z --end 2025-01-01T06:00Z \
+  --ts swrad.csv:swrad \
+  --uwind 2 --vwind -1
+```
+
+This mixes a short‑wave radiation table with constant wind components.
+### 2.5  MetNetCDFGenerator with constant overrides
 
 ```bash
 make_met_nc.py grid.dat --utm-zone 54 \

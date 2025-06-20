@@ -121,6 +121,13 @@ make_met_nc.py grid.dat --utm-zone 54 \
   --ts met.csv:uwind,vwind --data-tz Asia/Tokyo
 ```
 
+```bash
+make_met_nc.py grid.dat --utm-zone 54 \
+  --start 2025-01-01T00:00Z --end 2025-01-01T06:00Z \
+  --ts swrad.csv:swrad \
+  --uwind 2 --vwind -1
+```
+
 The NML file given above must exist on disk; otherwise
 ``RiverNetCDFGenerator`` will raise ``FileNotFoundError``.
 
