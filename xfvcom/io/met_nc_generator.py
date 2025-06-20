@@ -82,6 +82,15 @@ class MetNetCDFGenerator(BaseGenerator):
         self.northern = northern
         self.consts = {**self._DEFAULTS, **consts}
 
+        # Build timeline in UTC (mirrors `load()` behaviour)
+        self.timeline = pd.date_range(
+            self.start,
+            self.end,
+            freq=f"{self.dt}s",
+            inclusive="both",
+            tz="UTC",
+        )
+
     # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
@@ -148,6 +157,8 @@ class MetNetCDFGenerator(BaseGenerator):
                 raise ValueError(f"grid file missing variable: {req}")
 
     def render(self) -> bytes:
+        if not hasattr(self, "mesh_ds"):
+            self.load()
         nt = self.timeline.size
         nele: int = int(self.mesh_ds.sizes["nele"])
         node: int = int(self.mesh_ds.sizes["node"])
