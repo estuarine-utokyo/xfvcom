@@ -129,6 +129,24 @@ converted to UTC.  Use ``--data-tz`` to override this.  For example a
 timestamp ``2025-01-01T00:00`` with ``--data-tz Asia/Tokyo`` becomes
 ``2024-12-31T15:00Z`` in the output NetCDF file.
 
+#### Programmatic example
+
+```python
+from xfvcom.io.met_nc_generator import MetNetCDFGenerator
+
+gen = MetNetCDFGenerator(
+    grid_nc="grid.dat",
+    start="2025-01-01T00:00Z",
+    end="2025-01-02T00:00Z",
+    dt_seconds=3600,
+    ts_specs=["met.csv:uwind,vwind"],
+    data_tz="Asia/Tokyo",
+    uwind=2.0,
+    vwind=-1.0,
+)
+gen.write("met.nc")
+```
+
 ## Dependencies
 
 All runtime dependencies are listed in **pyproject.toml** under `[project.dependencies]`. To add new packages, use:

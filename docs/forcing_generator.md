@@ -95,6 +95,20 @@ The `--ts` option may be repeated to provide CSV/TSV files with
 time-series data.  Any variable not supplied by `--ts` falls back to the
 corresponding command-line constant (e.g. `--uwind`).
 
+### 2.4  MetNetCDFGenerator with constant overrides
+
+```bash
+make_met_nc.py grid.dat --utm-zone 54 \
+  --start 2025-01-01T00:00Z --end 2025-01-02T00:00Z \
+  --ts met.csv:uwind,vwind --data-tz Asia/Tokyo \
+  --air_temp 26 --rh 70
+```
+
+Input tables are interpreted in ``Asia/Tokyo`` timezone unless you pass
+``--data-tz``.  The ``--start-tz`` option defines the timezone for
+``--start``/``--end`` when those arguments are given without explicit
+timezone information.
+
 ---
 
 ## 3. Time‑series format
