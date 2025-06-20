@@ -13,6 +13,11 @@ def main() -> None:
 
     p.add_argument("--start", required=True, help="UTC ISO time")
     p.add_argument("--end", required=True, help="UTC ISO time")
+    p.add_argument(
+        "--start-tz",
+        default="UTC",
+        help="Timezone for naive start/end (default: UTC)",
+    )
     p.add_argument("--dt", type=int, default=3600, help="Δt [s]")
 
     # constant parameters (any omitted key falls back to default)
@@ -40,6 +45,7 @@ def main() -> None:
         dt_seconds=args.dt,
         utm_zone=args.utm_zone,
         northern=not args.southern,
+        start_tz=args.start_tz,
         **{k: getattr(args, k) for k in MetNetCDFGenerator._DEFAULTS},
     )
 

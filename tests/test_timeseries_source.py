@@ -27,3 +27,10 @@ def test_nearest_interp():
     with pytest.raises(ValueError, match="interp_method must be 'linear'"):
         TimeSeriesSource(TEST_FILE, interp_method="nearest")
     # nearest は禁止なので以降の out 解析は不要
+
+
+def test_input_timezone():
+    src_tokyo = TimeSeriesSource(TEST_FILE)
+    src_utc = TimeSeriesSource(TEST_FILE, input_tz="UTC")
+    assert src_tokyo._df.index[0] == pd.Timestamp("2024-12-31 15:00")
+    assert src_utc._df.index[0] == pd.Timestamp("2025-01-01 00:00")

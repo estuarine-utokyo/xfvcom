@@ -1,0 +1,7 @@
+ &NML_RIVER
+  RIVER_NAME          = 'Arakawa',
+  RIVER_FILE          = 'river.nc',
+  RIVER_GRID_LOCATION = 310,             # example index
+  RIVER_VERTICAL_DISTRIBUTION = 'uniform'
+  /
+

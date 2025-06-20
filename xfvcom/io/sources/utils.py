@@ -102,6 +102,7 @@ def load_timeseries_table(
     *,
     na_values: Iterable[str | float] | None = None,
     strip_inline_comments: bool = True,
+    input_tz: str = "Asia/Tokyo",
 ) -> pd.DataFrame:
     """Load a CSV or TSV time‑series table with robust encoding / NA handling.
 
@@ -116,11 +117,11 @@ def load_timeseries_table(
     Returns
     -------
     pandas.DataFrame
-        Parsed table.  Column ``time`` (required) is converted to
-        :class:`~pandas.DatetimeIndex` in UTC internally; original timezone is
-        assumed to be *JST (UTC+9)* as per project convention.  The detected file
-        encoding is stored under ``df.attrs["encoding"]`` for downstream
-        provenance / reproducibility.
+        Parsed table.  Column ``time`` (required) is converted to naïve
+        :class:`~pandas.DatetimeIndex` in **UTC**.  If the input column lacks
+        timezone information, values are interpreted as ``input_tz`` (default
+        ``Asia/Tokyo``).  The detected file encoding is stored under
+        ``df.attrs["encoding"]`` for downstream provenance / reproducibility.
 
     Raises
     ------
@@ -166,10 +167,13 @@ def load_timeseries_table(
     if "time" not in df.columns:
         raise ValueError("Column 'time' not found in the input table.")
 
-    # Standardise timezone: input is JST (UTC+9) → convert to UTC naive.
-    df["time"] = (
-        df["time"].dt.tz_localize("Asia/Tokyo", ambiguous="NaT").dt.tz_convert("UTC")
-    )
+    # ------------------------------------------------------------------
+    #  Standardise timezone → always naïve UTC
+    # ------------------------------------------------------------------
+    times = pd.to_datetime(df["time"], errors="coerce")
+    if times.dt.tz is None:
+        times = times.dt.tz_localize(input_tz, ambiguous="NaT")
+    df["time"] = times.dt.tz_convert("UTC").dt.tz_localize(None)
 
     # Store provenance info.
     df.attrs["encoding"] = enc

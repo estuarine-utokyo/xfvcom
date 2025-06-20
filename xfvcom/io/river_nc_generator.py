@@ -49,6 +49,7 @@ def _choose_source(
     ts_map: dict[str, str],
     const_map: dict[str, dict[str, float]],
     interp_opts: dict[str, str | bool],
+    data_tz: str,
 ) -> BaseForcingSource:
     """
     Return a constant-value source for *var*.
@@ -72,6 +73,7 @@ def _choose_source(
                 Path(path),
                 river_name=river_name,
                 interp_method=str(interp_opts.get("method", "linear")),
+                input_tz=data_tz,
             )
 
     # ------------------------------------------------------------------
@@ -89,6 +91,7 @@ def _choose_source(
                 Path(path),
                 river_name=None,  # global
                 interp_method=str(interp_opts.get("method", "linear")),
+                input_tz=data_tz,
             )
 
     # 2) YAML const priority
@@ -122,6 +125,9 @@ class RiverNetCDFGenerator(BaseGenerator):
         ts_specs: list[str] | None = None,  # ← NEW (from --ts)
         const_specs: list[str] | None = None,  # ← NEW (from --const)
         config: Path | None = None,
+        *,
+        start_tz: str = "UTC",
+        data_tz: str = "Asia/Tokyo",
     ) -> None:
         # store path & call BaseGenerator
         self.nml_path = nml_path
@@ -141,9 +147,16 @@ class RiverNetCDFGenerator(BaseGenerator):
             "method": "linear",
         }
 
-        self.start = pd.Timestamp(start, tz="UTC")
-        self.end = pd.Timestamp(end, tz="UTC")
+        t0 = pd.Timestamp(start)
+        t1 = pd.Timestamp(end)
+        if t0.tzinfo is None:
+            t0 = t0.tz_localize(start_tz)
+        if t1.tzinfo is None:
+            t1 = t1.tz_localize(start_tz)
+        self.start = t0.tz_convert("UTC")
+        self.end = t1.tz_convert("UTC")
         self.dt = dt_seconds
+        self._data_tz = data_tz
 
         # timeline used by render()
         self.timeline = pd.date_range(
@@ -344,6 +357,7 @@ class RiverNetCDFGenerator(BaseGenerator):
                 ts_map=self._ts_map,
                 const_map=self._const_map,
                 interp_opts=self._interp_opts,
+                data_tz=self._data_tz,
             )
             src_temp = _choose_source(
                 "temp",
@@ -353,6 +367,7 @@ class RiverNetCDFGenerator(BaseGenerator):
                 ts_map=self._ts_map,
                 const_map=self._const_map,
                 interp_opts=self._interp_opts,
+                data_tz=self._data_tz,
             )
             src_salt = _choose_source(
                 "salt",
@@ -362,6 +377,7 @@ class RiverNetCDFGenerator(BaseGenerator):
                 ts_map=self._ts_map,
                 const_map=self._const_map,
                 interp_opts=self._interp_opts,
+                data_tz=self._data_tz,
             )
 
             # write column j
