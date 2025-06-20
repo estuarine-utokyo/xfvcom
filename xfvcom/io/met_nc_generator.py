@@ -11,9 +11,6 @@ from os import PathLike
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from .sources.base import BaseForcingSource
-from .sources.timeseries import TimeSeriesSource
-
 import netCDF4 as nc
 import numpy as np
 import pandas as pd
@@ -21,6 +18,8 @@ from numpy.typing import NDArray
 
 from ..grid.grid_obj import FvcomGrid
 from .base_generator import BaseGenerator
+from .sources.base import BaseForcingSource
+from .sources.timeseries import TimeSeriesSource
 
 
 class _ScalarConstantSource(BaseForcingSource):
@@ -45,7 +44,9 @@ def _parse_ts_spec(tokens: Iterable[str], variables: Iterable[str]) -> dict[str,
     for tok in tokens:
         path, _, vars_part = tok.partition(":")
         path = path.strip()
-        vars_list = [v.strip() for v in vars_part.split(",") if v.strip()] if vars_part else []
+        vars_list = (
+            [v.strip() for v in vars_part.split(",") if v.strip()] if vars_part else []
+        )
         if vars_list:
             for var in vars_list:
                 mapping.setdefault(var, path)
@@ -55,7 +56,9 @@ def _parse_ts_spec(tokens: Iterable[str], variables: Iterable[str]) -> dict[str,
     return mapping
 
 
-def _choose_source(var: str, ts_map: Mapping[str, str], const_val: float, *, data_tz: str) -> BaseForcingSource:
+def _choose_source(
+    var: str, ts_map: Mapping[str, str], const_val: float, *, data_tz: str
+) -> BaseForcingSource:
     """Return a TimeSeriesSource or constant fallback for *var*."""
 
     if var in ts_map:
