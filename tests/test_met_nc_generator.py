@@ -8,6 +8,7 @@ from pathlib import Path
 
 import netCDF4 as nc
 import numpy as np
+import pandas as pd
 import pytest
 
 from xfvcom.io.grid_reader import GridASCII
@@ -88,3 +89,14 @@ def test_constant_met_nc(tmp_path: Path, tiny_grid: Path) -> None:
         assert np.all(ds.variables["uwind_speed"][:] == 2.0)
         assert np.all(ds.variables["vwind_speed"][:] == -1.0)
         assert np.all(ds.variables["air_temperature"][:] == 20.0)  # default
+
+
+def test_start_tz_parsing(tiny_grid: Path) -> None:
+    gen = MetNetCDFGenerator(
+        grid_nc=tiny_grid,
+        start="2025-01-01 09:00",
+        end="2025-01-01 09:00",
+        dt_seconds=3600,
+        start_tz="Asia/Tokyo",
+    )
+    assert gen.timeline[0] == pd.Timestamp("2025-01-01T00:00Z")
