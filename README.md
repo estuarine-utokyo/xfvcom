@@ -150,6 +150,7 @@ timestamp ``2025-01-01T00:00`` with ``--data-tz Asia/Tokyo`` becomes
 #### Programmatic example
 
 ```python
+from pathlib import Path
 from xfvcom.io.met_nc_generator import MetNetCDFGenerator
 
 gen = MetNetCDFGenerator(
@@ -162,7 +163,7 @@ gen = MetNetCDFGenerator(
     uwind=2.0,
     vwind=-1.0,
 )
-gen.write("met.nc")
+gen.write(Path("met.nc"))
 ```
 
 ## Dependencies
