@@ -247,9 +247,22 @@ class MetNetCDFGenerator(BaseGenerator):
             v_time.time_zone = "UTC"
 
             # ---------------------------------------------------------
-            # dynamic fields – constant, dims & attrs match reference
+            # dynamic fields – from sources or constant fallback
             # ---------------------------------------------------------
-            def _make(
+            class _ConstSource:
+                def __init__(self, val: float) -> None:
+                    self.val = float(val)
+
+                def get_series(
+                    self, var_name: str, times: pd.DatetimeIndex
+                ) -> NDArray[np.float64]:
+                    return np.full(times.size, self.val, dtype=float)
+
+            srcs: dict[str, Any] = {
+                k: _ConstSource(self.consts[k]) for k in self.consts
+            }
+
+            def _write(
                 name: str,
                 key: str,
                 dims: tuple[str, ...],
@@ -258,8 +271,20 @@ class MetNetCDFGenerator(BaseGenerator):
                 std_name: str | None = None,
                 desc: str | None = None,
             ) -> None:
+                try:
+                    data = srcs[key].get_series(key, self.timeline)
+                except ValueError as exc:
+                    if str(exc).startswith("Column '"):
+                        data = np.full(nt, self.consts[key], dtype=float)
+                    else:
+                        raise
+
                 v = ds_out.createVariable(name, "f4", dims, fill_value=False)
-                v[:] = self.consts[key]
+                data_f4 = data.astype("f4")
+                if dims == ("time",):
+                    v[:] = data_f4
+                else:
+                    v[:, :] = data_f4[:, None]
                 v.long_name = long_name
                 if std_name:
                     v.standard_name = std_name
@@ -271,7 +296,7 @@ class MetNetCDFGenerator(BaseGenerator):
                     v.coordinates = "FVCOM cartesian coordinates"
                 v.type = "data"
 
-            _make(
+            _write(
                 "uwind_speed",
                 "uwind",
                 ("time", "nele"),
@@ -279,7 +304,7 @@ class MetNetCDFGenerator(BaseGenerator):
                 "m/s",
                 "Wind Speed",
             )
-            _make(
+            _write(
                 "vwind_speed",
                 "vwind",
                 ("time", "nele"),
@@ -287,39 +312,39 @@ class MetNetCDFGenerator(BaseGenerator):
                 "m/s",
                 "Wind Speed",
             )
-            _make(
+            _write(
                 "air_temperature",
                 "air_temp",
                 ("time", "node"),
                 "Surface air temperature",
                 "Celsius Degree",
             )
-            _make("cloud_cover", "cloud", ("time", "node"), "Cloud cover", "-")
-            _make(
+            _write("cloud_cover", "cloud", ("time", "node"), "Cloud cover", "-")
+            _write(
                 "short_wave",
                 "swrad",
                 ("time", "node"),
                 "Downward solar shortwave radiation flux",
                 "Watts meter-2",
             )
-            _make(
+            _write(
                 "long_wave",
                 "lwrad",
                 ("time", "node"),
                 "Downward solar longwave radiation flux",
                 "Watts meter-2",
             )
-            _make(
+            _write(
                 "relative_humidity",
                 "rh",
                 ("time", "node"),
                 "surface air relative humidity",
                 "percentage",
             )
-            _make(
+            _write(
                 "air_pressure", "prmsl", ("time", "node"), "Surface air pressure", "hPa"
             )
-            _make(
+            _write(
                 "Precipitation",
                 "precip",
                 ("time", "node"),
