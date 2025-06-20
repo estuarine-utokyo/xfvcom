@@ -88,3 +88,74 @@ def test_constant_met_nc(tmp_path: Path, tiny_grid: Path) -> None:
         assert np.all(ds.variables["uwind_speed"][:] == 2.0)
         assert np.all(ds.variables["vwind_speed"][:] == -1.0)
         assert np.all(ds.variables["air_temperature"][:] == 20.0)  # default
+
+
+@pytest.mark.filterwarnings("ignore:Ambiguous reference date")
+def test_timeseries_met_nc(tmp_path: Path, tiny_grid: Path) -> None:
+    csv = tmp_path / "met.csv"
+    csv.write_text(
+        """time,uwind,air_temp
+2025-01-01 09:00,1.0,14.0
+2025-01-01 10:00,2.0,15.0
+""",
+        encoding="utf-8",
+    )
+
+    gen = MetNetCDFGenerator(
+        grid_nc=tiny_grid,
+        start="2025-01-01T00:00Z",
+        end="2025-01-01T01:00Z",
+        dt_seconds=3600,
+        utm_zone=54,
+        northern=True,
+        ts_specs=[str(csv)],
+    )
+    nc_path = tmp_path / "met_ts.nc"
+    gen.write(nc_path)
+
+    with nc.Dataset(nc_path) as ds:
+        assert np.all(ds["uwind_speed"][:, 0] == np.array([1.0, 2.0], dtype=float))
+        assert np.all(ds["air_temperature"][:, 0] == np.array([14.0, 15.0], dtype=float))
+
+
+def test_met_data_tz(tmp_path: Path, tiny_grid: Path) -> None:
+    csv = tmp_path / "met_tz.csv"
+    csv.write_text(
+        """time,uwind
+2025-01-01 00:00,1.0
+2025-01-01 01:00,2.0
+""",
+        encoding="utf-8",
+    )
+
+    gen_bad = MetNetCDFGenerator(
+        grid_nc=tiny_grid,
+        start="2025-01-01T00:00Z",
+        end="2025-01-01T01:00Z",
+        dt_seconds=3600,
+        utm_zone=54,
+        northern=True,
+        ts_specs=[str(csv)],
+    )
+
+    with pytest.raises(ValueError, match="outside the available data range"):
+        gen_bad.render()
+
+    gen_ok = MetNetCDFGenerator(
+        grid_nc=tiny_grid,
+        start="2025-01-01T00:00Z",
+        end="2025-01-01T01:00Z",
+        dt_seconds=3600,
+        utm_zone=54,
+        northern=True,
+        ts_specs=[str(csv)],
+        data_tz="UTC",
+    )
+
+    out_nc = tmp_path / "met_tz.nc"
+    gen_ok.write(out_nc)
+    with nc.Dataset(out_nc) as ds:
+        assert np.all(
+            ds["uwind_speed"][:, 0] == np.array([1.0, 2.0], dtype=float)
+        )
+

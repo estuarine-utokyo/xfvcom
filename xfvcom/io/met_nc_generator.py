@@ -18,6 +18,56 @@ from numpy.typing import NDArray
 
 from ..grid.grid_obj import FvcomGrid
 from .base_generator import BaseGenerator
+from .sources.base import BaseForcingSource
+from .sources.timeseries import TimeSeriesSource
+
+
+class _ScalarConstantSource(BaseForcingSource):
+    """Return the same constant value for exactly one variable."""
+
+    def __init__(self, var: str, value: float) -> None:
+        self._var = var
+        self._val = float(value)
+
+    def get_series(self, var_name: str, out_times: np.ndarray) -> np.ndarray:  # type: ignore[override]
+        if var_name != self._var:
+            raise KeyError(
+                f"Unsupported variable {var_name!r} (expected {self._var!r})"
+            )
+        return np.full(out_times.size, self._val, dtype=float)
+
+
+def _parse_ts_spec(tokens: list[str]) -> dict[str, str]:
+    """Parse CLI --ts tokens into a variable→spec mapping."""
+
+    out: dict[str, str] = {}
+    for tok in tokens:
+        if "=" in tok:
+            var, spec = tok.split("=", 1)
+            out[var.strip()] = spec.strip()
+        else:
+            out["GLOBAL"] = tok.strip()
+    return out
+
+
+def _choose_source(var: str, const_val: float, *, ts_map: dict[str, str], data_tz: str) -> BaseForcingSource:
+    """Return a TimeSeriesSource or constant fallback for *var*."""
+
+    if var in ts_map:
+        file_part = ts_map[var]
+        path, _, vars_part = file_part.partition(":")
+        vars_list = [v.strip() for v in vars_part.split(",")] if vars_part else []
+        if not vars_list or var in vars_list:
+            return TimeSeriesSource(Path(path), input_tz=data_tz)
+
+    if "GLOBAL" in ts_map:
+        file_part = ts_map["GLOBAL"]
+        path, _, vars_part = file_part.partition(":")
+        vars_list = [v.strip() for v in vars_part.split(",")] if vars_part else []
+        if not vars_list or var in vars_list:
+            return TimeSeriesSource(Path(path), input_tz=data_tz)
+
+    return _ScalarConstantSource(var, const_val)
 
 
 class MetNetCDFGenerator(BaseGenerator):
@@ -60,6 +110,8 @@ class MetNetCDFGenerator(BaseGenerator):
         utm_zone: int | None = None,
         northern: bool = True,
         start_tz: str = "UTC",
+        ts_specs: list[str] | None = None,
+        data_tz: str = "Asia/Tokyo",
         **consts: float,
     ) -> None:
         t0 = pd.Timestamp(start)
@@ -81,6 +133,8 @@ class MetNetCDFGenerator(BaseGenerator):
         self.utm_zone = utm_zone
         self.northern = northern
         self.consts = {**self._DEFAULTS, **consts}
+        self._ts_map: dict[str, str] = _parse_ts_spec(ts_specs or [])
+        self._data_tz = data_tz
 
     # ------------------------------------------------------------------
     # helpers
@@ -247,9 +301,14 @@ class MetNetCDFGenerator(BaseGenerator):
             v_time.time_zone = "UTC"
 
             # ---------------------------------------------------------
-            # dynamic fields – constant, dims & attrs match reference
+            # dynamic fields – constant or time-series
             # ---------------------------------------------------------
-            def _make(
+            srcs = {
+                var: _choose_source(var, self.consts[var], ts_map=self._ts_map, data_tz=self._data_tz)
+                for var in self._DEFAULTS
+            }
+
+            def _write(
                 name: str,
                 key: str,
                 dims: tuple[str, ...],
@@ -258,8 +317,16 @@ class MetNetCDFGenerator(BaseGenerator):
                 std_name: str | None = None,
                 desc: str | None = None,
             ) -> None:
+                series = srcs[key].get_series(key, self.timeline)
+                if "nele" in dims:
+                    data_arr = np.tile(series[:, None], (1, nele)).astype("f4")
+                elif "node" in dims:
+                    data_arr = np.tile(series[:, None], (1, node)).astype("f4")
+                else:
+                    data_arr = series.astype("f4")
+
                 v = ds_out.createVariable(name, "f4", dims, fill_value=False)
-                v[:] = self.consts[key]
+                v[:] = data_arr
                 v.long_name = long_name
                 if std_name:
                     v.standard_name = std_name
@@ -271,7 +338,7 @@ class MetNetCDFGenerator(BaseGenerator):
                     v.coordinates = "FVCOM cartesian coordinates"
                 v.type = "data"
 
-            _make(
+            _write(
                 "uwind_speed",
                 "uwind",
                 ("time", "nele"),
@@ -279,7 +346,7 @@ class MetNetCDFGenerator(BaseGenerator):
                 "m/s",
                 "Wind Speed",
             )
-            _make(
+            _write(
                 "vwind_speed",
                 "vwind",
                 ("time", "nele"),
@@ -287,39 +354,43 @@ class MetNetCDFGenerator(BaseGenerator):
                 "m/s",
                 "Wind Speed",
             )
-            _make(
+            _write(
                 "air_temperature",
                 "air_temp",
                 ("time", "node"),
                 "Surface air temperature",
                 "Celsius Degree",
             )
-            _make("cloud_cover", "cloud", ("time", "node"), "Cloud cover", "-")
-            _make(
+            _write("cloud_cover", "cloud", ("time", "node"), "Cloud cover", "-")
+            _write(
                 "short_wave",
                 "swrad",
                 ("time", "node"),
                 "Downward solar shortwave radiation flux",
                 "Watts meter-2",
             )
-            _make(
+            _write(
                 "long_wave",
                 "lwrad",
                 ("time", "node"),
                 "Downward solar longwave radiation flux",
                 "Watts meter-2",
             )
-            _make(
+            _write(
                 "relative_humidity",
                 "rh",
                 ("time", "node"),
                 "surface air relative humidity",
                 "percentage",
             )
-            _make(
-                "air_pressure", "prmsl", ("time", "node"), "Surface air pressure", "hPa"
+            _write(
+                "air_pressure",
+                "prmsl",
+                ("time", "node"),
+                "Surface air pressure",
+                "hPa",
             )
-            _make(
+            _write(
                 "Precipitation",
                 "precip",
                 ("time", "node"),
