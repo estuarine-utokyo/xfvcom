@@ -36,6 +36,9 @@ xfvcom/io/river_nml_generator.py  ← namelist writer
 | `tests/data/rivers_minimal.nml` | Base namelist shipped with the grid | — |
 | `river_cfg.yaml` (optional) | YAML overrides (defaults / const values) | see below |
 
+**The NML file is mandatory and must exist.** A ``FileNotFoundError`` is raised
+if the path does not point to a real file.
+
 
 ### 2.1  One‑liner CLI
 

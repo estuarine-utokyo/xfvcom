@@ -115,6 +115,9 @@ make_river_nc.py rivers_minimal.nml \
   --dt    3600 \
 ```
 
+The NML file given above must exist on disk; otherwise
+``RiverNetCDFGenerator`` will raise ``FileNotFoundError``.
+
 Input time-series values are interpreted as **JST (UTC+9)** and converted
 to UTC in the output NetCDF file. For example, a timestamp of
 `2025-01-01T00:00` in your CSV becomes `2024-12-31T15:00Z`.
