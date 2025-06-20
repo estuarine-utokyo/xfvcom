@@ -258,7 +258,8 @@ class RiverNetCDFGenerator(BaseGenerator):
     def _extract_river_names(path: Path) -> list[str]:
         """
         Very lightweight parser to pull `river_name = ...` entries out of an
-        NML file.  Falls back to a single placeholder if no names found.
+        NML file.  Falls back to a single placeholder if the file contains no
+        names.  Raises ``FileNotFoundError`` when *path* does not exist.
         """
         import re
 
@@ -266,7 +267,7 @@ class RiverNetCDFGenerator(BaseGenerator):
         key = re.compile(r"river_name", re.IGNORECASE)
 
         if not path.exists():
-            return ["river1"]
+            raise FileNotFoundError(path)
 
         with path.open(encoding="utf-8") as fh:
             for line in fh:
