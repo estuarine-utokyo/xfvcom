@@ -106,7 +106,15 @@ create_anim_2d_plot(
 
 ### Extended forcing inputs
 
-#### CLI one-liner
+#### Groundwater forcing
+
+```bash
+xfvcom-make-groundwater-nc grid.nc \
+  --start 2025-01-01T00:00Z --end 2025-01-07T00:00Z \
+  --flux 0.001 --temperature 15.0 --salinity 0.0
+```
+
+#### River forcing
 
 ```bash
 make_river_nc.py rivers_minimal.nml \

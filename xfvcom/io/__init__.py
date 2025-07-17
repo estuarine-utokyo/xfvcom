@@ -23,9 +23,12 @@ _core_all: list[str] | None = globals().get("__all__")  # after star-import
 if _core_all:  # truthy & already a list[str]
     __all__.extend(_core_all)
 
+from .groundwater_nc_generator import GroundwaterNetCDFGenerator  # noqa: F401
+
 # ---------------------------------------------------------------------
 # New helper(s)
 # ---------------------------------------------------------------------
 from .river_nml import parse_river_namelist  # noqa: F401
 
 __all__.append("parse_river_namelist")
+__all__.append("GroundwaterNetCDFGenerator")
