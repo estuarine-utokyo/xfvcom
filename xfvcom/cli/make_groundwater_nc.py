@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -48,7 +49,7 @@ def parse_forcing_value(
             # For now, return mean values - full time series support would need enhancement
             data_cols = [col for col in df.columns if col != time_col]
             if len(data_cols) == 1:
-                return df[data_cols[0]].mean()
+                return float(df[data_cols[0]].mean())
             else:
                 # Multiple nodes
                 return np.asarray(df[data_cols].mean().values)
@@ -60,7 +61,7 @@ def parse_forcing_value(
                 return np.asarray(df.iloc[:, 0].values)
             else:
                 # Multiple columns = assume each column is a node
-                return df.values.T
+                return np.asarray(df.values.T)
     else:
         # Single constant value
         return float(value_str)
