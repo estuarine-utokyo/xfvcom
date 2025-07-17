@@ -52,13 +52,13 @@ def parse_forcing_value(
                 return float(df[data_cols[0]].mean())
             else:
                 # Multiple nodes
-                return df[data_cols].mean().to_numpy(dtype=np.float64)
+                return df[data_cols].mean().to_numpy(dtype=np.float64)  # type: ignore[return-value]
         else:
             # Simple CSV with node values
             df = pd.read_csv(value_str, header=None)
             if df.shape[1] == 1:
                 # Single column = values for each node
-                return df.iloc[:, 0].to_numpy(dtype=np.float64)
+                return df.iloc[:, 0].to_numpy(dtype=np.float64)  # type: ignore[return-value]
             else:
                 # Multiple columns = assume each column is a node
                 return df.to_numpy(dtype=np.float64).T
