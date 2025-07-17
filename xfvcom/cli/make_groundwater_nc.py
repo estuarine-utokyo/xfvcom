@@ -51,13 +51,13 @@ def parse_forcing_value(
                 return df[data_cols[0]].mean()
             else:
                 # Multiple nodes
-                return df[data_cols].mean().values
+                return np.asarray(df[data_cols].mean().values)
         else:
             # Simple CSV with node values
             df = pd.read_csv(value_str, header=None)
             if df.shape[1] == 1:
                 # Single column = values for each node
-                return df.iloc[:, 0].values
+                return np.asarray(df.iloc[:, 0].values)
             else:
                 # Multiple columns = assume each column is a node
                 return df.values.T
