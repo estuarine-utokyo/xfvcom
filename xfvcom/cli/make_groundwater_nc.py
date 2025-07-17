@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -52,16 +52,16 @@ def parse_forcing_value(
                 return float(df[data_cols[0]].mean())
             else:
                 # Multiple nodes
-                return df[data_cols].mean().to_numpy(dtype=np.float64)  # type: ignore[return-value]
+                return cast(np.ndarray, df[data_cols].mean().to_numpy(dtype=np.float64))
         else:
             # Simple CSV with node values
             df = pd.read_csv(value_str, header=None)
             if df.shape[1] == 1:
                 # Single column = values for each node
-                return df.iloc[:, 0].to_numpy(dtype=np.float64)  # type: ignore[return-value]
+                return cast(np.ndarray, df.iloc[:, 0].to_numpy(dtype=np.float64))
             else:
                 # Multiple columns = assume each column is a node
-                return df.to_numpy(dtype=np.float64).T
+                return cast(np.ndarray, df.to_numpy(dtype=np.float64).T)
     else:
         # Single constant value
         return float(value_str)
