@@ -146,13 +146,14 @@ def parse_forcing_value(
                     data_array = np.zeros((node_count or pivot_df.shape[1], time_count))
 
                     # Fill data for available nodes
-                    for node_idx in pivot_df.columns:
+                    for col_val in pivot_df.columns:
+                        node_idx = int(col_val)
                         if node_count is None or node_idx < node_count:
                             # Interpolate to expected times
-                            data_array[int(node_idx), :] = np.interp(
+                            data_array[node_idx, :] = np.interp(
                                 expected_times.astype(np.int64) / 1e9,
                                 pivot_df.index.astype(np.int64) / 1e9,
-                                pivot_df[node_idx].values,
+                                pivot_df[col_val].values,
                             )
 
                     return data_array
