@@ -6,9 +6,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 xfvcom is a Python package for preprocessing and postprocessing data from the Finite Volume Community Ocean Model (FVCOM). It's built on xarray and specializes in ocean model data analysis and visualization.
 
+## Environment Setup for Claude Code
+
+### Quick Start
+```bash
+# Initialize conda in the shell (required for Claude Code)
+source ~/miniforge3/etc/profile.d/conda.sh
+
+# Activate the existing fvcom environment
+conda activate fvcom
+
+# Verify environment is active
+python --version  # Should show Python 3.12.x
+```
+
+### Available Environments
+- `fvcom` - Main development environment with xfvcom installed
+- `xfvcom-docs` - Documentation building environment
+- Other project-specific environments: `era_dl`, `moewq`, `pylag`, `river_dl`
+
 ## Essential Commands
 
-### Development Setup
+### Development Setup (if creating new environment)
 ```bash
 # Create and activate conda environment
 conda create -n xfvcom python=3.12 -c conda-forge numpy xarray pandas matplotlib cartopy pyproj scipy scikit-learn imageio moviepy tqdm pytest mypy black isort jinja2 pyyaml types-pyyaml

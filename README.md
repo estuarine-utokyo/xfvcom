@@ -108,10 +108,28 @@ create_anim_2d_plot(
 
 #### Groundwater forcing
 
+Basic usage with constant values:
 ```bash
 xfvcom-make-groundwater-nc grid.nc \
   --start 2025-01-01T00:00Z --end 2025-01-07T00:00Z \
   --flux 0.001 --temperature 15.0 --salinity 0.0
+```
+
+Using CSV files for spatio-temporal data:
+```bash
+# Wide format CSV (columns: datetime, node_100, node_200, ...)
+xfvcom-make-groundwater-nc grid.nc \
+  --start 2025-01-01T00:00Z --end 2025-12-31T23:00Z \
+  --flux flux_timeseries.csv:datetime \
+  --temperature temp_timeseries.csv:datetime \
+  --salinity 0.0
+
+# Long format CSV (columns: datetime, node_id, value)
+xfvcom-make-groundwater-nc grid.nc \
+  --start 2025-01-01T00:00Z --end 2025-12-31T23:00Z \
+  --flux groundwater.csv:datetime,node_id,flux \
+  --temperature groundwater.csv:datetime,node_id,temperature \
+  --salinity 0.0
 ```
 
 #### River forcing
