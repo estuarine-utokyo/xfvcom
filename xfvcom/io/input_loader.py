@@ -131,6 +131,9 @@ class FvcomInputLoader:
         self, data_vars: Dict[str, Any], coords: Dict[str, Any], attrs: Dict[str, Any]
     ) -> None:
         """Load grid file and add mesh variables to dataset."""
+        if self.grid_path is None:
+            raise ValueError("grid_path is None")
+
         if not self.grid_path.exists():
             raise FileNotFoundError(f"Grid file not found: {self.grid_path}")
 
