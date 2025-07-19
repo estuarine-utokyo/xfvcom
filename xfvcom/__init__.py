@@ -7,7 +7,7 @@
 from .analysis import FvcomAnalyzer
 from .decorators import precedence
 from .grid import FvcomGrid, get_grid, read_grid
-from .io import FvcomDataLoader, parse_river_namelist  # noqa: F401
+from .io import FvcomDataLoader, FvcomInputLoader, parse_river_namelist  # noqa: F401
 
 # ------------------------------------------------------------------
 # 2) plotting sub-package (ordered: config → core → utils)
@@ -41,6 +41,7 @@ __all__: list[str] = [
     "make_node_marker_post",
     # analysis / I/O
     "FvcomDataLoader",
+    "FvcomInputLoader",
     "FvcomAnalyzer",
     "parse_river_namelist",
     # helpers

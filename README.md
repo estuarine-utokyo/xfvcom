@@ -7,19 +7,22 @@
 ## Features
 
 * **Load FVCOM data**
-  Easily load NetCDF-format FVCOM input and output files.
+  * Load NetCDF-format FVCOM output files
+  * Load FVCOM input files (grid, OBC, forcing) with `FvcomInputLoader`
+  * Support for both geographic and Cartesian coordinate systems
 * **Coordinate transformation**
   Convert between UTM coordinates and geographic coordinates (longitude/latitude).
 * **Depth calculation**
   Add depth variables based on water levels, sigma layers, and bathymetry.
 * **Analysis tools**
-
   * Find nearest nodes
   * Filter variables based on specific dimensions
+  * Calculate layer averages and perform tidal decomposition
 * **Visualization**
-
   * Create time-series plots
   * Generate 2D contour and vector plots
+  * Plot triangular meshes for both input and output data
+  * Support for both geographic (with map projections) and Cartesian coordinates
   * Produce animated GIFs and MP4s for 2D spatial data
 
 ---

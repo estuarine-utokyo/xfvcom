@@ -1040,7 +1040,9 @@ class FvcomPlotter(PlotHelperMixin):
 
         # Create Triangulation
         try:
-            triang = mtri.Triangulation(x, y, triangles=nv)
+            # Ensure nv is a numpy array (fix for bug where DataArray was passed)
+            nv_array = nv.values if hasattr(nv, "values") else nv
+            triang = mtri.Triangulation(x, y, triangles=nv_array)
             if verbose:
                 logger.debug("Number of triangles: %d", len(triang.triangles))
         except ValueError as e:
@@ -2658,13 +2660,25 @@ class FvcomPlotter(PlotHelperMixin):
         # 1. element edges
         # ---------------------------------------------------
         if with_mesh:
-            ax.triplot(
-                triang,
-                color=mesh_color,
-                lw=mesh_lw,
-                transform=transform,
-                zorder=2,
-            )
+            # For Cartesian coordinates, don't pass transform=None to triplot
+            # as it causes rendering issues
+            if transform is None:  # Cartesian mode
+                ax.triplot(
+                    triang,
+                    color=mesh_color,
+                    linewidth=mesh_lw,
+                    zorder=2,
+                    # Note: NOT passing transform parameter for Cartesian
+                )
+            else:
+                # For geographic coordinates, pass the transform
+                ax.triplot(
+                    triang,
+                    color=mesh_color,
+                    linewidth=mesh_lw,
+                    transform=transform,
+                    zorder=2,
+                )
 
         # ---------------------------------------------------
         # 2. coastline segments  (nv where neighbour = -1)
