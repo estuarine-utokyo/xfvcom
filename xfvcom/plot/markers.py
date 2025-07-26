@@ -53,12 +53,10 @@ def make_node_marker_post(
 ) -> Callable[[Axes], None]:
     """Return a post_process_func that plots node markers / labels."""
 
-    transform = ccrs.PlateCarree()
     mkw: dict[str, Any] = {  # marker defaults
         "marker": "o",
         "color": "red",
         "markersize": 3,
-        "transform": transform,
         "zorder": 4,
         "clip_on": True,
     } | dict(marker_kwargs or {})
@@ -68,13 +66,15 @@ def make_node_marker_post(
         "color": "yellow",
         "ha": "center",
         "va": "bottom",
-        "transform": transform,
         "zorder": 5,
         "clip_on": True,
     } | dict(text_kwargs or {})
 
+    # Store references to coordinate arrays - we'll determine which to use later
     lon_arr = plotter.ds.lon.values
     lat_arr = plotter.ds.lat.values
+    x_arr = plotter.ds.x.values if "x" in plotter.ds else lon_arr
+    y_arr = plotter.ds.y.values if "y" in plotter.ds else lat_arr
 
     # -- resolve input --------------------------------------------------
     # 1) iterable of indices → ndarray[int]
@@ -82,28 +82,45 @@ def make_node_marker_post(
         idx = np.asarray(nodes, dtype=int)
         if idx.ndim == 1 and idx.size > 0:
             mode = "index"
-        else:  # fallback to treat as lon/lat
+        else:  # fallback to treat as coordinates
             raise ValueError
     except (TypeError, ValueError):
-        # 2) DataFrame or alike with lon/lat
+        # 2) DataFrame or alike with coordinates
         df = pd.DataFrame(nodes)
-        if not {"lon", "lat"}.issubset(df):
-            raise ValueError("nodes must be 1-D indices or DataFrame with lon/lat.")
-        mode = "coord"
-        lon_direct = df["lon"].to_numpy(float)
-        lat_direct = df["lat"].to_numpy(float)
+        # We'll check for both coordinate types and use what's available
+        if {"lon", "lat"}.issubset(df):
+            lon_direct = df["lon"].to_numpy(float)
+            lat_direct = df["lat"].to_numpy(float)
+            mode = "coord_lonlat"
+        elif {"x", "y"}.issubset(df):
+            x_direct = df["x"].to_numpy(float)
+            y_direct = df["y"].to_numpy(float)
+            mode = "coord_xy"
+        else:
+            raise ValueError(
+                "nodes must be 1-D indices or DataFrame with lon/lat or x/y."
+            )
         labels = df.get("label", pd.Series(range(len(df)))).astype(str).to_list()
 
     # -- post-processor -------------------------------------------------
     def _post(ax: Axes, *, opts: FvcomPlotOptions | None = None, **__) -> None:
         """Executed by `FvcomPlotter.plot_2d`."""
-        if mode == "coord":  # A) lon/lat already resolved
+        # Determine which coordinates to use based on opts
+        use_latlon = opts.use_latlon if opts else True
+
+        if mode == "coord_lonlat":  # DataFrame with lon/lat
             for x, y, lbl in zip(lon_direct, lat_direct, labels, strict=False):
                 ax.plot(x, y, **_inject_transform(ax, mkw))
                 ax.text(x, y, lbl, **_inject_transform(ax, tkw))
-        else:  # B) indices → lookup coords
+        elif mode == "coord_xy":  # DataFrame with x/y
+            for x, y, lbl in zip(x_direct, y_direct, labels, strict=False):
+                ax.plot(x, y, **_inject_transform(ax, mkw))
+                ax.text(x, y, lbl, **_inject_transform(ax, tkw))
+        else:  # indices → lookup coords based on use_latlon
+            coord_x = lon_arr if use_latlon else x_arr
+            coord_y = lat_arr if use_latlon else y_arr
             for i in idx:
-                x, y = lon_arr[i], lat_arr[i]
+                x, y = coord_x[i], coord_y[i]
                 lbl = str(i + index_base)
                 ax.plot(x, y, **_inject_transform(ax, mkw))
                 ax.text(x, y, lbl, **_inject_transform(ax, tkw))
