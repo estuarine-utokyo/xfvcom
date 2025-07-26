@@ -53,12 +53,10 @@ def make_node_marker_post(
 ) -> Callable[[Axes], None]:
     """Return a post_process_func that plots node markers / labels."""
 
-    transform = ccrs.PlateCarree()
     mkw: dict[str, Any] = {  # marker defaults
         "marker": "o",
         "color": "red",
         "markersize": 3,
-        "transform": transform,
         "zorder": 4,
         "clip_on": True,
     } | dict(marker_kwargs or {})
@@ -68,7 +66,6 @@ def make_node_marker_post(
         "color": "yellow",
         "ha": "center",
         "va": "bottom",
-        "transform": transform,
         "zorder": 5,
         "clip_on": True,
     } | dict(text_kwargs or {})
