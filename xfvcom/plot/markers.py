@@ -50,8 +50,30 @@ def make_node_marker_post(
     marker_kwargs: Mapping[str, Any] | None = None,
     text_kwargs: Mapping[str, Any] | None = None,
     index_base: int = 0,
+    use_latlon: bool | None = None,
 ) -> Callable[[Axes], None]:
-    """Return a post_process_func that plots node markers / labels."""
+    """Return a post_process_func that plots node markers / labels.
+
+    Parameters
+    ----------
+    nodes : array-like or DataFrame
+        Node indices or coordinates to mark. When providing indices:
+        - If index_base=0: use 0-based indices (e.g., [0, 1, 2])
+        - If index_base=1: use 1-based indices (e.g., [1, 2, 3])
+        The indices should match the numbering system you want displayed.
+    plotter : FvcomPlotter
+        The plotter instance to get coordinate data from
+    marker_kwargs : dict, optional
+        Keyword arguments for marker styling
+    text_kwargs : dict, optional
+        Keyword arguments for text labels
+    index_base : int, default 0
+        Base for node numbering (0 for Python, 1 for Fortran/FVCOM)
+        This affects both input interpretation and label display.
+    use_latlon : bool, optional
+        Whether to use lat/lon coordinates. If None, will be determined
+        from opts parameter when the function is called.
+    """
 
     mkw: dict[str, Any] = {  # marker defaults
         "marker": "o",
@@ -75,6 +97,7 @@ def make_node_marker_post(
     lat_arr = plotter.ds.lat.values
     x_arr = plotter.ds.x.values if "x" in plotter.ds else lon_arr
     y_arr = plotter.ds.y.values if "y" in plotter.ds else lat_arr
+    n_nodes = len(lon_arr)
 
     # -- resolve input --------------------------------------------------
     # 1) iterable of indices → ndarray[int]
@@ -82,6 +105,23 @@ def make_node_marker_post(
         idx = np.asarray(nodes, dtype=int)
         if idx.ndim == 1 and idx.size > 0:
             mode = "index"
+            # Validate input indices before conversion
+            if idx.min() < index_base or idx.max() > n_nodes - 1 + index_base:
+                if index_base == 1 and idx.min() == 0:
+                    raise IndexError(
+                        f"Node indices out of range. You provided 0-based indices "
+                        f"(starting from {idx.min()}) but index_base=1 expects 1-based indices. "
+                        f"Valid range is 1 to {n_nodes}. "
+                        f"Use range(1, {n_nodes + 1}) or nodes=[1, 2, 3, ...]"
+                    )
+                else:
+                    raise IndexError(
+                        f"Node indices out of range. With index_base={index_base}, "
+                        f"valid range is {index_base} to {n_nodes - 1 + index_base}. "
+                        f"You provided indices from {idx.min()} to {idx.max()}."
+                    )
+            # Convert from user's index_base to 0-based for internal use
+            idx = idx - index_base
         else:  # fallback to treat as coordinates
             raise ValueError
     except (TypeError, ValueError):
@@ -102,36 +142,52 @@ def make_node_marker_post(
             )
         labels = df.get("label", pd.Series(range(len(df)))).astype(str).to_list()
 
+    # Store the use_latlon preference
+    stored_use_latlon = use_latlon
+
     # -- post-processor -------------------------------------------------
     def _post(ax: Axes, *, opts: FvcomPlotOptions | None = None, **__) -> None:
         """Executed by `FvcomPlotter.plot_2d`."""
-        # Determine which coordinates to use based on opts
-        use_latlon = opts.use_latlon if opts else True
+        # Determine which coordinates to use based on opts or stored preference
+        if stored_use_latlon is not None:
+            use_latlon = stored_use_latlon
+        else:
+            use_latlon = opts.use_latlon if opts else True
 
         if mode == "coord_lonlat":  # DataFrame with lon/lat
             for x, y, lbl in zip(lon_direct, lat_direct, labels, strict=False):
-                ax.plot(x, y, **_inject_transform(ax, mkw))
-                ax.text(x, y, lbl, **_inject_transform(ax, tkw))
+                ax.plot(x, y, **_inject_transform(ax, mkw, use_latlon))
+                if text_kwargs is not None:
+                    ax.text(x, y, lbl, **_inject_transform(ax, tkw, use_latlon))
         elif mode == "coord_xy":  # DataFrame with x/y
             for x, y, lbl in zip(x_direct, y_direct, labels, strict=False):
-                ax.plot(x, y, **_inject_transform(ax, mkw))
-                ax.text(x, y, lbl, **_inject_transform(ax, tkw))
+                ax.plot(x, y, **_inject_transform(ax, mkw, use_latlon))
+                if text_kwargs is not None:
+                    ax.text(x, y, lbl, **_inject_transform(ax, tkw, use_latlon))
         else:  # indices → lookup coords based on use_latlon
             coord_x = lon_arr if use_latlon else x_arr
             coord_y = lat_arr if use_latlon else y_arr
             for i in idx:
                 x, y = coord_x[i], coord_y[i]
                 lbl = str(i + index_base)
-                ax.plot(x, y, **_inject_transform(ax, mkw))
-                ax.text(x, y, lbl, **_inject_transform(ax, tkw))
+                ax.plot(x, y, **_inject_transform(ax, mkw, use_latlon))
+                if text_kwargs is not None:
+                    ax.text(x, y, lbl, **_inject_transform(ax, tkw, use_latlon))
 
     return _post
 
 
-def _inject_transform(ax: Axes, kw: dict[str, Any]) -> dict[str, Any]:
-    """Add PlateCarree transform only when `ax` is a Cartopy GeoAxes."""
+def _inject_transform(
+    ax: Axes, kw: dict[str, Any], use_latlon: bool = True
+) -> dict[str, Any]:
+    """Add PlateCarree transform only when `ax` is a Cartopy GeoAxes and using lat/lon coordinates."""
     if "transform" in kw:
         return kw  # user already supplied
+
+    # If we're using Cartesian coordinates, don't inject any transform
+    if not use_latlon:
+        return kw
+
     try:
         proj = ax.projection  # Cartopy's GeoAxes has this attr
     except AttributeError:
@@ -140,6 +196,8 @@ def _inject_transform(ax: Axes, kw: dict[str, Any]) -> dict[str, Any]:
         import cartopy.crs as ccrs
 
         if isinstance(proj, ccrs.Projection):
+            # When use_latlon=True, we're always using geographic coordinates
+            # which need PlateCarree transform for any projection
             return {**kw, "transform": ccrs.PlateCarree()}
         return kw
 
