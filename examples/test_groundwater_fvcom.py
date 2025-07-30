@@ -112,10 +112,10 @@ def test_groundwater_generator():
     nt = len(generator.timeline)
     node = generator.mesh_ds.sizes["node"]
 
-    flux_array = np.zeros((node, nt), dtype=np.float64)
+    flux_array = np.zeros((nt, node), dtype=np.float64)
     for node_idx in active_nodes:
         if node_idx <= node:  # Check if node is in range
-            flux_array[node_idx - 1, :] = 1e-6  # Convert to 0-based and set flux
+            flux_array[:, node_idx - 1] = 1e-6  # Convert to 0-based and set flux
 
     generator.flux_data = flux_array
 
@@ -163,14 +163,14 @@ def test_groundwater_generator():
     print("\n=== Test 3: Time-Varying Flux ===")
 
     # Create time-varying flux (e.g., tidal variation)
-    flux_varying = np.zeros((node, nt), dtype=np.float64)
+    flux_varying = np.zeros((nt, node), dtype=np.float64)
     time_hours = np.arange(nt)
 
     for i, node_idx in enumerate(active_nodes):
         if node_idx <= node:
             # Sinusoidal variation with different phase for each node
             phase = i * np.pi / 4  # Different phase for each node
-            flux_varying[node_idx - 1, :] = 1e-6 * (
+            flux_varying[:, node_idx - 1] = 1e-6 * (
                 1 + 0.5 * np.sin(2 * np.pi * time_hours / 24 + phase)
             )
 
@@ -206,9 +206,12 @@ def test_groundwater_generator():
 
                     # Check flux at active nodes
                     flux = ds.variables["groundwater_flux"][:]
+                    # Note: flux dimensions are (time, node)
                     for node_idx in active_nodes[:3]:  # Check first 3 nodes
                         if node_idx <= ds.dimensions["node"].size:
-                            flux_at_node = flux[node_idx - 1, 0]  # First time step
+                            flux_at_node = flux[
+                                0, node_idx - 1
+                            ]  # First time step, correct node
                             print(
                                 f"  Flux velocity at node {node_idx}: {flux_at_node:.3e} m/s"
                             )

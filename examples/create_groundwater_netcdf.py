@@ -135,27 +135,27 @@ def create_groundwater_netcdf(
 
     # Prepare data arrays
     # Initialize all fluxes to zero
-    flux_array: np.ndarray = np.zeros((node_count, n_times), dtype=np.float32)
+    flux_array: np.ndarray = np.zeros((n_times, node_count), dtype=np.float32)
     temp_array: np.ndarray = np.full(
-        (node_count, n_times), temperature_value, dtype=np.float32
+        (n_times, node_count), temperature_value, dtype=np.float32
     )
     salt_array: np.ndarray = np.full(
-        (node_count, n_times), salinity_value, dtype=np.float32
+        (n_times, node_count), salinity_value, dtype=np.float32
     )
 
     # Set non-zero flux only at active nodes
     for node_idx in active_nodes_0based:
         if 0 <= node_idx < node_count:
-            flux_array[node_idx, :] = flux_value
+            flux_array[:, node_idx] = flux_value
         else:
             print(f"Warning: Node {node_idx + 1} is out of range (max {node_count})")
 
     if dye_value is not None:
-        dye_array: np.ndarray = np.zeros((node_count, n_times), dtype=np.float32)
+        dye_array: np.ndarray = np.zeros((n_times, node_count), dtype=np.float32)
         # Set dye concentration at active nodes
         for node_idx in active_nodes_0based:
             if 0 <= node_idx < node_count:
-                dye_array[node_idx, :] = dye_value
+                dye_array[:, node_idx] = dye_value
 
     # Calculate time variables for FVCOM
     # Modified Julian Day reference: November 17, 1858
@@ -245,24 +245,24 @@ def create_groundwater_netcdf(
         times_var[:] = times_char
 
         # Create groundwater forcing variables
-        flux_var = ds.createVariable("groundwater_flux", "f4", ("node", "time"))
+        flux_var = ds.createVariable("groundwater_flux", "f4", ("time", "node"))
         flux_var.long_name = "Ground Water Flux"
         flux_var.units = "m s-1"
         flux_var[:] = flux_array
 
-        temp_var = ds.createVariable("groundwater_temp", "f4", ("node", "time"))
+        temp_var = ds.createVariable("groundwater_temp", "f4", ("time", "node"))
         temp_var.long_name = "Ground Water Temperature"
         temp_var.units = "degree C"
         temp_var[:] = temp_array
 
-        salt_var = ds.createVariable("groundwater_salt", "f4", ("node", "time"))
+        salt_var = ds.createVariable("groundwater_salt", "f4", ("time", "node"))
         salt_var.long_name = "Ground Water Salinity"
         salt_var.units = "psu"
         salt_var[:] = salt_array
 
         # Create dye variable if requested
         if dye_value is not None:
-            dye_var = ds.createVariable("groundwater_dye", "f4", ("node", "time"))
+            dye_var = ds.createVariable("groundwater_dye", "f4", ("time", "node"))
             dye_var.long_name = "Ground Water Dye Concentration"
             dye_var.units = "concentration units"
             dye_var[:] = dye_array
