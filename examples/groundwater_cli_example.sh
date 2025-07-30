@@ -10,7 +10,7 @@ echo
 # Example 1: Basic constant groundwater forcing
 echo "Example 1: Constant groundwater forcing"
 echo "--------------------------------------"
-cat > groundwater_config.yml << EOF
+cat > groundwater_config.yaml << EOF
 # Groundwater forcing configuration
 grid_file: ../FVCOM/Tests/GroundwaterDye/input/chn_grd.dat
 output_file: groundwater_constant.nc
@@ -34,16 +34,16 @@ utm_zone: 33
 northern: true
 EOF
 
-echo "Configuration saved to groundwater_config.yml"
+echo "Configuration saved to groundwater_config.yaml"
 echo
 echo "To generate the NetCDF file, run:"
-echo "  xfvcom-make-groundwater-nc groundwater_config.yml"
+echo "  xfvcom-make-groundwater-nc groundwater_config.yaml"
 echo
 
 # Example 2: Time-varying groundwater
 echo "Example 2: Time-varying groundwater forcing"
 echo "------------------------------------------"
-cat > groundwater_timevar.yml << EOF
+cat > groundwater_timevar.yaml << EOF
 # Time-varying groundwater forcing
 grid_file: ../FVCOM/Tests/GroundwaterDye/input/chn_grd.dat
 output_file: groundwater_timevar.nc
@@ -62,7 +62,7 @@ groundwater:
   salinity: 0.0
 EOF
 
-echo "Time-varying configuration saved to groundwater_timevar.yml"
+echo "Time-varying configuration saved to groundwater_timevar.yaml"
 echo
 
 # Example 3: Using Python API directly
