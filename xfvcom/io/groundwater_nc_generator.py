@@ -43,14 +43,18 @@ class GroundwaterNetCDFGenerator(BaseGenerator):
     start_tz : str
         Timezone for start/end if not specified.
     flux : array-like or float
-        Groundwater flux (m³/s). Can be:
+        Groundwater flux velocity (m/s). Can be:
         - Single float: constant value for all nodes/times
         - 1D array (node,): constant in time, varies by node
         - 2D array (node, time): varies by node and time
+        Note: This is a velocity (m/s), not volumetric flux. FVCOM multiplies
+        this by the node's bottom area internally.
     temperature : array-like or float
         Groundwater temperature (°C). Same format options as flux.
     salinity : array-like or float
         Groundwater salinity (PSU). Same format options as flux.
+    dye : array-like or float, optional
+        Groundwater dye concentration (tracer units). Same format options as flux.
     ideal : bool
         If True, use ideal time format (days since 0.0).
         If False, use modified Julian day format.
@@ -69,6 +73,7 @@ class GroundwaterNetCDFGenerator(BaseGenerator):
         flux: float | NDArray[np.float64] = 0.0,
         temperature: float | NDArray[np.float64] = 0.0,
         salinity: float | NDArray[np.float64] = 0.0,
+        dye: float | NDArray[np.float64] | None = None,
         ideal: bool = False,
     ) -> None:
         # Parse timestamps
@@ -94,6 +99,7 @@ class GroundwaterNetCDFGenerator(BaseGenerator):
         self.flux_data = flux
         self.temp_data = temperature
         self.salt_data = salinity
+        self.dye_data = dye
 
         # Build timeline in UTC
         self.timeline = pd.date_range(
@@ -140,7 +146,7 @@ class GroundwaterNetCDFGenerator(BaseGenerator):
         self, data: float | NDArray[np.float64], node: int, nt: int
     ) -> NDArray[np.float64]:
         """
-        Prepare forcing data array with shape (node, time).
+        Prepare forcing data array with shape (time, node) for FVCOM.
 
         Parameters
         ----------
@@ -154,11 +160,11 @@ class GroundwaterNetCDFGenerator(BaseGenerator):
         Returns
         -------
         NDArray
-            Array with shape (node, nt)
+            Array with shape (nt, node) following Fortran convention
         """
         if isinstance(data, (float, int)):
             # Constant value for all nodes and times
-            return np.full((node, nt), float(data), dtype=np.float64)
+            return np.full((nt, node), float(data), dtype=np.float64)
 
         data_arr = np.asarray(data, dtype=np.float64)
 
@@ -169,16 +175,23 @@ class GroundwaterNetCDFGenerator(BaseGenerator):
                     f"1D array must have length {node} (number of nodes), "
                     f"got {len(data_arr)}"
                 )
-            # Broadcast to all time steps
-            return np.tile(data_arr[:, np.newaxis], (1, nt))
+            # Broadcast to all time steps - shape (nt, node)
+            return np.tile(data_arr[np.newaxis, :], (nt, 1))
 
         elif data_arr.ndim == 2:
             # 2D array: varies by node and time
-            if data_arr.shape != (node, nt):
+            # Accept either (node, nt) or (nt, node) and transpose if needed
+            if data_arr.shape == (node, nt):
+                # Input is (node, time), transpose to (time, node)
+                return data_arr.T
+            elif data_arr.shape == (nt, node):
+                # Already in correct shape
+                return data_arr
+            else:
                 raise ValueError(
-                    f"2D array must have shape ({node}, {nt}), " f"got {data_arr.shape}"
+                    f"2D array must have shape ({node}, {nt}) or ({nt}, {node}), "
+                    f"got {data_arr.shape}"
                 )
-            return data_arr
 
         else:
             raise ValueError(
@@ -245,6 +258,9 @@ class GroundwaterNetCDFGenerator(BaseGenerator):
         flux_array = self._prepare_forcing_data(self.flux_data, node, nt)
         temp_array = self._prepare_forcing_data(self.temp_data, node, nt)
         salt_array = self._prepare_forcing_data(self.salt_data, node, nt)
+        dye_array = None
+        if self.dye_data is not None:
+            dye_array = self._prepare_forcing_data(self.dye_data, node, nt)
 
         # Determine coordinate system based on original MATLAB logic
         # MATLAB code checks coordinate type, but for FVCOM compatibility
@@ -324,17 +340,23 @@ class GroundwaterNetCDFGenerator(BaseGenerator):
             # ---------------------------------------------------------
             # Groundwater forcing variables
             # ---------------------------------------------------------
-            v_flux = ds_out.createVariable("groundwater_flux", "f4", ("node", "time"))
-            v_flux.long_name = "Ground Water Flux"
-            v_flux.units = "m3 s-1"
+            v_flux = ds_out.createVariable("groundwater_flux", "f4", ("time", "node"))
+            v_flux.long_name = "Ground Water Flux Velocity"
+            v_flux.units = "m s-1"
 
-            v_temp = ds_out.createVariable("groundwater_temp", "f4", ("node", "time"))
+            v_temp = ds_out.createVariable("groundwater_temp", "f4", ("time", "node"))
             v_temp.long_name = "Ground Water Temperature"
             v_temp.units = "degree C"
 
-            v_salt = ds_out.createVariable("groundwater_salt", "f4", ("node", "time"))
+            v_salt = ds_out.createVariable("groundwater_salt", "f4", ("time", "node"))
             v_salt.long_name = "Ground Water Salinity"
             v_salt.units = "psu"
+
+            # Optional dye variable
+            if dye_array is not None:
+                v_dye = ds_out.createVariable("groundwater_dye", "f4", ("time", "node"))
+                v_dye.long_name = "Ground Water Dye Concentration"
+                v_dye.units = "tracer units"
 
             # ---------------------------------------------------------
             # Global attributes
@@ -355,6 +377,8 @@ class GroundwaterNetCDFGenerator(BaseGenerator):
             v_flux[:] = flux_array
             v_temp[:] = temp_array
             v_salt[:] = salt_array
+            if dye_array is not None:
+                v_dye[:] = dye_array
 
         # Read file contents and cleanup
         content = tmp_path.read_bytes()

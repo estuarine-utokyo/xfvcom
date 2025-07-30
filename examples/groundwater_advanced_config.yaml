@@ -1,0 +1,29 @@
+# Advanced groundwater configuration with time series data
+
+grid_nc: "../../FVCOM/Tests/GroundwaterDye/input/chn_grd.dat"
+utm_zone: 33
+northern: true
+
+start: "2024-01-01T00:00:00Z"
+end: "2024-01-10T00:00:00Z"
+dt_seconds: 3600
+
+output: "groundwater_advanced.nc"
+
+# Active nodes where groundwater enters
+active_nodes: [637, 638, 639, 662]
+
+# Time-varying flux from CSV file
+flux: "flux_timeseries.csv"
+
+# Time-varying temperature from CSV file
+temperature: "temperature_timeseries.csv"
+
+# Time-varying salinity from CSV file
+salinity: "salinity_timeseries.csv"
+
+# Optional: constant dye concentration
+dye: 100.0
+
+# Input timezone (CSV files)
+timezone: "UTC"

@@ -1,0 +1,16 @@
+# Time-varying groundwater forcing
+grid_file: ../FVCOM/Tests/GroundwaterDye/input/chn_grd.dat
+output_file: groundwater_timevar.nc
+start_time: "2024-01-01T00:00:00Z"
+end_time: "2024-01-10T00:00:00Z"
+time_interval: 1800  # 30 minutes
+
+# This would read from a data file with time series
+groundwater_kind: "variable"
+groundwater_file: "groundwater_timeseries.csv"
+
+# OR specify a function (tidal variation example)
+groundwater:
+  flux_function: "1e-6 * (1 + 0.5 * sin(2*pi*t/24))"  # Diurnal variation
+  temperature: 10.0
+  salinity: 0.0

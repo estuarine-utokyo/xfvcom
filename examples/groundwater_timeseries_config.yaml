@@ -1,0 +1,68 @@
+# Groundwater forcing configuration with time series data
+# This example shows how to provide time-varying temperature and salinity
+
+# Grid file (can be .dat or .nc)
+grid_nc: "../../FVCOM/Tests/GroundwaterDye/input/chn_grd.dat"
+
+# UTM zone for .dat files (optional for .nc files)
+utm_zone: 33
+northern: true
+
+# Time configuration
+start: "2024-01-01T00:00:00Z"
+end: "2024-01-10T00:00:00Z"
+dt_seconds: 3600  # hourly data
+
+# Output file
+output: "groundwater_timeseries.nc"
+
+# Active nodes (1-based Fortran indices)
+# These are the nodes where groundwater discharge occurs
+active_nodes: [637, 638, 639, 662]
+
+# Groundwater flux velocity (m/s) - NOT volumetric flux!
+# Can be:
+# 1. Single value (constant for all nodes and times)
+flux: 1.0e-6
+
+# 2. List of values (one per active node, constant in time)
+# flux: [1.0e-6, 2.0e-6, 1.5e-6, 3.0e-6]
+
+# 3. CSV file with time series (see format below)
+# flux: "flux_timeseries.csv"
+
+# Temperature (°C)
+# Same options as flux:
+# 1. Single value
+temperature: 10.0
+
+# 2. List (one per active node)
+# temperature: [10.0, 12.0, 11.0, 9.5]
+
+# 3. CSV file with time series
+# temperature: "temperature_timeseries.csv"
+
+# Salinity (PSU)
+# Same options as flux:
+# 1. Single value
+salinity: 0.5
+
+# 2. List (one per active node)
+# salinity: [0.0, 0.5, 0.3, 1.0]
+
+# 3. CSV file with time series
+# salinity: "salinity_timeseries.csv"
+
+# Optional: Dye concentration
+# dye: 100.0
+# dye: [100.0, 150.0, 120.0, 200.0]
+# dye: "dye_timeseries.csv"
+
+# Time zone for input data (output is always UTC)
+# Default: "Asia/Tokyo" (following xfvcom convention)
+timezone: "UTC"
+
+# Notes:
+# - All times in output NetCDF are in UTC
+# - Input times in CSV files are interpreted in the specified timezone
+# - Active nodes use 1-based (Fortran) indexing

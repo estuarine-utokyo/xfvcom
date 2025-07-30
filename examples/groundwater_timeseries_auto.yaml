@@ -1,0 +1,22 @@
+# Groundwater configuration using time series data
+grid_nc: "../../FVCOM/Tests/GroundwaterDye/input/chn_grd.dat"
+utm_zone: 54
+northern: true
+
+start: "2021-01-01T00:00:00Z"
+end: "2021-01-10T00:00:00Z"
+dt_seconds: 3600
+
+output: "chn_gw.nc"
+
+active_nodes: [637, 638, 639, 662]
+
+# Time series data files
+flux: "chn_gw.csv"
+temperature: "temperature_timeseries.csv"
+salinity: "salinity_timeseries.csv"
+
+# Optional dye
+dye: 100.0
+
+timezone: "UTC"

@@ -1,0 +1,24 @@
+! Add this section to your FVCOM namelist file
+
+&NML_GROUNDWATER
+GROUNDWATER_ON       = T,               ! Enable groundwater
+GROUNDWATER_TEMP_ON  = T,               ! Include temperature
+GROUNDWATER_SALT_ON  = T,               ! Include salinity  
+GROUNDWATER_DYE_ON   = T,               ! Include dye tracer
+GROUNDWATER_KIND     = 'variable',      ! Read from NetCDF file
+GROUNDWATER_FILE     = 'groundwater_constant.nc',
+! These are used as defaults/fallbacks:
+GROUNDWATER_FLOW     = 0.0,
+GROUNDWATER_TEMP     = 10.0,
+GROUNDWATER_SALT     = 0.0,
+GROUNDWATER_DYE      = 100.0
+/
+
+! Also ensure dye module is enabled:
+&NML_DYE_RELEASE  
+DYE_ON = T,
+DYE_RELEASE_START = '2024-01-01 00:00:00',
+DYE_RELEASE_STOP  = '2024-01-03 00:00:00',
+KSPE_DYE = 0,  ! No point sources
+MSPE_DYE = 0   ! No point sources
+/

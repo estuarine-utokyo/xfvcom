@@ -1,0 +1,21 @@
+# Groundwater forcing configuration
+grid_file: ../FVCOM/Tests/GroundwaterDye/input/chn_grd.dat
+output_file: groundwater_constant.nc
+start_time: "2024-01-01T00:00:00Z"
+end_time: "2024-01-03T00:00:00Z"
+time_interval: 3600  # seconds
+
+# Active nodes (1-based Fortran indices)
+active_nodes: [637, 638, 639, 662]
+
+# Constant values
+groundwater:
+  flux: 1.0e-6      # m/s (velocity, not volumetric flux!)
+  temperature: 10.0  # degC
+  salinity: 0.0     # PSU
+  dye: 100.0        # concentration (optional)
+
+# Coordinate system
+coordinate_system: "Cartesian"
+utm_zone: 33
+northern: true

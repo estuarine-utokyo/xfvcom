@@ -170,3 +170,46 @@ cython_debug/
 /examples/sliced
 /docs/_build/
 /.tmp_matfvcom/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+
+# Generated files
+docs/_build/
+*.nc
+!examples/sliced*.nc
+!examples/sliced/*.nc
+!tests/data/*.nc
+
+# Tokyo Bay NetCDF files (kept locally but not in git)
+examples/sliced_TokyoBay18_2020_wnd.nc
+examples/sliced_TokyoBay2020final_river.nc
+examples/sliced_TokyoBay2020final_sewer.nc
+examples/sliced_TokyoBay2020final_tsobc.nc
+examples/sliced_TokyoBay2020julian_obc.nc
+examples/sliced_TokyoBay2020kisarazufinal_sewer.nc
+
+# Temporary files
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Generated outputs
+examples/PNG/
+examples/html/
+examples/frames/
+*.png
+!tests/baseline/*.png
+*.gif
+*.csv
+!tests/data/*.csv
+!examples/groundwater_data.csv
+!examples/arakawa_flux.csv
+!examples/short_wave.csv

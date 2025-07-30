@@ -1,0 +1,21 @@
+&NML_GROUNDWATER
+ GROUNDWATER_ON       = T,
+ GROUNDWATER_TEMP_ON  = T,
+ GROUNDWATER_SALT_ON  = T,
+ GROUNDWATER_DYE_ON   = T,
+ GROUNDWATER_KIND     = 'variable',
+ GROUNDWATER_FILE     = 'chn_gw_const.nc',
+ GROUNDWATER_FLOW     = 0.000000E+00,
+ GROUNDWATER_TEMP     = 2.000000E+01,
+ GROUNDWATER_SALT     = 3.000000E+01,
+ GROUNDWATER_DYE      = 1.000000E+01
+/
+
+! Also ensure dye module is enabled:
+&NML_DYE_RELEASE
+ DYE_ON = T,
+ DYE_RELEASE_START = 'model start time',  ! Update this
+ DYE_RELEASE_STOP  = 'model end time',    ! Update this
+ KSPE_DYE = 0,  ! No point sources (using groundwater)
+ MSPE_DYE = 0   ! No point sources (using groundwater)
+/

@@ -165,16 +165,123 @@ def parse_forcing_value(
                 raise ValueError(f"Unrecognized time series format: {value_str}")
         else:
             # Simple CSV with node values
-            df = pd.read_csv(value_str, header=None)
-            if df.shape[1] == 1:
-                # Single column = values for each node
-                return cast(np.ndarray, df.iloc[:, 0].to_numpy(dtype=np.float64))
+            df = pd.read_csv(value_str)
+
+            # Check if it has node_id column (sparse format)
+            if "node_id" in df.columns:
+                # Sparse format: only specified nodes have values
+                value_col = [col for col in df.columns if col != "node_id"][0]
+                if node_count is not None:
+                    # Create array with zeros
+                    data = np.zeros(node_count, dtype=np.float64)
+                    # Fill in specified nodes (convert from 1-based to 0-based)
+                    for _, row in df.iterrows():
+                        node_idx = int(row["node_id"]) - 1
+                        if 0 <= node_idx < node_count:
+                            data[node_idx] = row[value_col]
+                    return data
+                else:
+                    # Return just the values
+                    return cast(np.ndarray, df[value_col].to_numpy(dtype=np.float64))
             else:
-                # Multiple columns = assume each column is a node
-                return cast(np.ndarray, df.to_numpy(dtype=np.float64).T)
+                # Dense format
+                df_values = pd.read_csv(value_str, header=None)
+                if df_values.shape[1] == 1:
+                    # Single column = values for each node
+                    return cast(
+                        np.ndarray, df_values.iloc[:, 0].to_numpy(dtype=np.float64)
+                    )
+                else:
+                    # Multiple columns = assume each column is a node
+                    return cast(np.ndarray, df_values.to_numpy(dtype=np.float64).T)
     else:
         # Single constant value
         return float(value_str)
+
+
+def generate_groundwater_namelist(
+    nc_file: Path,
+    has_dye: bool,
+    constant_flux: float | None = None,
+    constant_temp: float | None = None,
+    constant_salt: float | None = None,
+    constant_dye: float | None = None,
+) -> str:
+    """
+    Generate FVCOM namelist snippet for groundwater module.
+
+    Parameters
+    ----------
+    nc_file : Path
+        Path to the generated NetCDF file
+    has_dye : bool
+        Whether dye data is included
+    constant_flux : float, optional
+        Constant flux value if uniform
+    constant_temp : float, optional
+        Constant temperature value if uniform
+    constant_salt : float, optional
+        Constant salinity value if uniform
+    constant_dye : float, optional
+        Constant dye value if uniform
+
+    Returns
+    -------
+    str
+        Namelist content
+    """
+    # Determine groundwater kind
+    if all(v is not None for v in [constant_flux, constant_temp, constant_salt]):
+        # Check if truly constant (non-zero flux only at specific nodes still counts as variable)
+        if isinstance(constant_flux, (int, float)) and constant_flux > 0:
+            groundwater_kind = "constant"
+        else:
+            groundwater_kind = "variable"
+    else:
+        groundwater_kind = "variable"
+
+    # Format values for Fortran
+    def format_fortran_real(value):
+        if value is None:
+            return "0.0"
+        return f"{float(value):.6E}"
+
+    # Build namelist
+    nml = "&NML_GROUNDWATER\n"
+    nml += " GROUNDWATER_ON       = T,\n"
+    nml += " GROUNDWATER_TEMP_ON  = T,\n"
+    nml += " GROUNDWATER_SALT_ON  = T,\n"
+
+    if has_dye:
+        nml += " GROUNDWATER_DYE_ON   = T,\n"
+    else:
+        nml += " GROUNDWATER_DYE_ON   = F,\n"
+
+    nml += f" GROUNDWATER_KIND     = '{groundwater_kind}',\n"
+    nml += f" GROUNDWATER_FILE     = '{nc_file.name}',\n"
+
+    # Default values (used as fallback)
+    nml += f" GROUNDWATER_FLOW     = {format_fortran_real(constant_flux if constant_flux else 0.0)},\n"
+    nml += f" GROUNDWATER_TEMP     = {format_fortran_real(constant_temp if constant_temp else 0.0)},\n"
+    nml += f" GROUNDWATER_SALT     = {format_fortran_real(constant_salt if constant_salt else 0.0)}"
+
+    if has_dye and constant_dye is not None:
+        nml += f",\n GROUNDWATER_DYE      = {format_fortran_real(constant_dye)}"
+
+    nml += "\n/\n"
+
+    # Add dye release namelist if needed
+    if has_dye:
+        nml += "\n! Also ensure dye module is enabled:\n"
+        nml += "&NML_DYE_RELEASE\n"
+        nml += " DYE_ON = T,\n"
+        nml += " DYE_RELEASE_START = 'model start time',  ! Update this\n"
+        nml += " DYE_RELEASE_STOP  = 'model end time',    ! Update this\n"
+        nml += " KSPE_DYE = 0,  ! No point sources (using groundwater)\n"
+        nml += " MSPE_DYE = 0   ! No point sources (using groundwater)\n"
+        nml += "/\n"
+
+    return nml
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -209,6 +316,10 @@ Examples:
   %(prog)s grid.nc --start 2025-01-01 --end 2025-01-07 \\
     --start-tz Asia/Tokyo --dt 3600 \\
     --flux flux_timeseries.csv:datetime --temperature 15.0 --salinity 0.0
+    
+  # Include dye concentration
+  %(prog)s grid.dat --utm-zone 54 --start 2025-01-01T00:00Z --end 2025-01-10T00:00Z \\
+    --flux 1.0 --temperature 20.0 --salinity 30.0 --dye 10.0
 """,
     )
 
@@ -258,7 +369,7 @@ Examples:
     parser.add_argument(
         "--flux",
         default="0.0",
-        help="Groundwater flux (m³/s): constant, CSV file, or time series CSV (e.g., flux.csv:datetime)",
+        help="Groundwater flux velocity (m/s): constant, CSV file, or time series CSV (e.g., flux.csv:datetime)",
     )
     parser.add_argument(
         "--temperature",
@@ -269,6 +380,11 @@ Examples:
         "--salinity",
         default="0.0",
         help="Groundwater salinity (PSU): constant, CSV file, or time series CSV",
+    )
+    parser.add_argument(
+        "--dye",
+        default=None,
+        help="Groundwater dye concentration (tracer units): constant, CSV file, or time series CSV",
     )
 
     # Time format
@@ -284,6 +400,12 @@ Examples:
         "--output",
         type=Path,
         help="Output NetCDF file (default: groundwater_forcing.nc)",
+    )
+    parser.add_argument(
+        "--nml",
+        "--namelist",
+        action="store_true",
+        help="Also generate FVCOM namelist snippet (.nml file)",
     )
 
     args = parser.parse_args(argv)
@@ -358,6 +480,16 @@ Examples:
             end_time=args.end,
             dt_seconds=args.dt,
         )
+        dye = None
+        if args.dye is not None:
+            dye = parse_forcing_value(
+                args.dye,
+                node_count=node_count,
+                time_count=time_count,
+                start_time=args.start,
+                end_time=args.end,
+                dt_seconds=args.dt,
+            )
     except Exception as e:
         parser.error(f"Error parsing forcing values: {e}")
 
@@ -374,6 +506,7 @@ Examples:
             flux=flux,
             temperature=temperature,
             salinity=salinity,
+            dye=dye,
             ideal=args.ideal,
         )
 
@@ -382,6 +515,33 @@ Examples:
         generator.write(output_path)
 
         print(f"Groundwater forcing file written to: {output_path}")
+
+        # Generate namelist if requested
+        if args.nml:
+            # Determine if values are constant
+            const_flux = flux if isinstance(flux, (int, float)) else None
+            const_temp = temperature if isinstance(temperature, (int, float)) else None
+            const_salt = salinity if isinstance(salinity, (int, float)) else None
+            const_dye = (
+                dye if dye is not None and isinstance(dye, (int, float)) else None
+            )
+
+            # Generate namelist
+            nml_content = generate_groundwater_namelist(
+                nc_file=output_path,
+                has_dye=(dye is not None),
+                constant_flux=const_flux,
+                constant_temp=const_temp,
+                constant_salt=const_salt,
+                constant_dye=const_dye,
+            )
+
+            # Write namelist file
+            nml_path = output_path.with_suffix(".nml")
+            nml_path.write_text(nml_content)
+            print(f"Groundwater namelist written to: {nml_path}")
+            print("\nNamelist content:")
+            print(nml_content)
 
     except Exception as e:
         parser.error(f"Error generating groundwater forcing: {e}")
