@@ -22,6 +22,7 @@ repos:
         additional_dependencies:
           - types-tqdm     # already present
           - types-PyYAML   # added to satisfy import for `yaml`
+          - types-pytz     # added for pytz timezone support
         args:
           - "--explicit-package-bases"
           - "--config-file=mypy.ini"

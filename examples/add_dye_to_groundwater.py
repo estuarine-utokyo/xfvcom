@@ -63,7 +63,7 @@ def add_dye_to_groundwater(
             dye_var = ds.variables["groundwater_dye"]
 
         # Initialize with zeros
-        dye_data = np.zeros((node_dim, time_dim), dtype=np.float32)
+        dye_data: np.ndarray = np.zeros((node_dim, time_dim), dtype=np.float32)
 
         if dye_csv:
             # Read time-varying dye from CSV
@@ -93,10 +93,13 @@ def add_dye_to_groundwater(
         dye_var[:] = dye_data
 
         # Update global attribute
-        if hasattr(ds, "variables"):
-            var_list = ds.variables
+        if hasattr(ds, "variables_list"):
+            var_list = ds.variables_list
             if "groundwater_dye" not in var_list:
-                ds.variables = var_list + " groundwater_dye"
+                ds.variables_list = var_list + " groundwater_dye"
+        else:
+            # Add a note about the dye variable
+            ds.setncattr("groundwater_dye_added", "true")
 
         print(f"Dye variable added to {nc_file}")
 

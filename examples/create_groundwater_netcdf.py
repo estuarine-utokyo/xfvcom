@@ -135,9 +135,13 @@ def create_groundwater_netcdf(
 
     # Prepare data arrays
     # Initialize all fluxes to zero
-    flux_array = np.zeros((node_count, n_times), dtype=np.float32)
-    temp_array = np.full((node_count, n_times), temperature_value, dtype=np.float32)
-    salt_array = np.full((node_count, n_times), salinity_value, dtype=np.float32)
+    flux_array: np.ndarray = np.zeros((node_count, n_times), dtype=np.float32)
+    temp_array: np.ndarray = np.full(
+        (node_count, n_times), temperature_value, dtype=np.float32
+    )
+    salt_array: np.ndarray = np.full(
+        (node_count, n_times), salinity_value, dtype=np.float32
+    )
 
     # Set non-zero flux only at active nodes
     for node_idx in active_nodes_0based:
@@ -147,7 +151,7 @@ def create_groundwater_netcdf(
             print(f"Warning: Node {node_idx + 1} is out of range (max {node_count})")
 
     if dye_value is not None:
-        dye_array = np.zeros((node_count, n_times), dtype=np.float32)
+        dye_array: np.ndarray = np.zeros((node_count, n_times), dtype=np.float32)
         # Set dye concentration at active nodes
         for node_idx in active_nodes_0based:
             if 0 <= node_idx < node_count:
@@ -234,7 +238,7 @@ def create_groundwater_netcdf(
         times_var = ds.createVariable("Times", "S1", ("time", "DateStrLen"))
         times_var.time_zone = "UTC"
         # Convert strings to character array
-        times_char = np.zeros((n_times, 26), dtype="S1")
+        times_char: np.ndarray = np.zeros((n_times, 26), dtype="S1")
         for i, time_str in enumerate(times_str):
             for j, char in enumerate(time_str.ljust(26)):
                 times_char[i, j] = char.encode("ascii")

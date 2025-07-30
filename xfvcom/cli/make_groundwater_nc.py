@@ -173,7 +173,7 @@ def parse_forcing_value(
                 value_col = [col for col in df.columns if col != "node_id"][0]
                 if node_count is not None:
                     # Create array with zeros
-                    data = np.zeros(node_count, dtype=np.float64)
+                    data: np.ndarray = np.zeros(node_count, dtype=np.float64)
                     # Fill in specified nodes (convert from 1-based to 0-based)
                     for _, row in df.iterrows():
                         node_idx = int(row["node_id"]) - 1
