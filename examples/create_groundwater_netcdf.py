@@ -340,8 +340,8 @@ def create_dummy_grid() -> Path:
     nx, ny = 25, 28  # 25x28 = 700 nodes
 
     # Create node coordinates
-    x = np.repeat(np.arange(nx) * 1000.0, ny)
-    y = np.tile(np.arange(ny) * 1000.0, nx)
+    x: np.ndarray = np.repeat(np.arange(nx) * 1000.0, ny)
+    y: np.ndarray = np.tile(np.arange(ny) * 1000.0, nx)
 
     # Simple triangulation
     elements = []
