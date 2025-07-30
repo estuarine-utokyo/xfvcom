@@ -111,13 +111,13 @@ class TestGroundwaterNetCDFGenerator:
 
         # Verify output (decode_times=False to avoid issues with FVCOM's time format)
         with xr.open_dataset(output_file, decode_times=False) as ds:
-            # Check flux varies by node
+            # Check flux varies by node (dimensions are time, node)
             for i in range(4):
-                assert np.allclose(ds["groundwater_flux"][i, :].values, flux_by_node[i])
+                assert np.allclose(ds["groundwater_flux"][:, i].values, flux_by_node[i])
 
-            # Check temperature varies by node
+            # Check temperature varies by node (dimensions are time, node)
             for i in range(4):
-                assert np.allclose(ds["groundwater_temp"][i, :].values, temp_by_node[i])
+                assert np.allclose(ds["groundwater_temp"][:, i].values, temp_by_node[i])
 
             # Check salinity is constant
             assert np.allclose(ds["groundwater_salt"].values, 0.0)
@@ -126,10 +126,10 @@ class TestGroundwaterNetCDFGenerator:
         """Test generation with time-varying values."""
         output_file = tmp_path / "groundwater_time.nc"
 
-        # Create time-varying data (node x time)
+        # Create time-varying data (time x node)
         nt = 5  # 5 time steps
         node = 4
-        flux_data = np.random.rand(node, nt) * 0.01
+        flux_data = np.random.rand(nt, node) * 0.01
 
         gen = GroundwaterNetCDFGenerator(
             grid_nc=sample_grid_file,
