@@ -25,6 +25,14 @@ if _core_all:  # truthy & already a list[str]
 
 from .groundwater_nc_generator import GroundwaterNetCDFGenerator  # noqa: F401
 from .input_loader import FvcomInputLoader  # noqa: F401
+from .netcdf_utils import (  # noqa: F401
+    decode_fvcom_time,
+    encode_fvcom_time,
+    extend_river_nc_file,
+    read_fvcom_river_nc,
+    to_mjd,
+    write_fvcom_river_nc,
+)
 
 # ---------------------------------------------------------------------
 # New helper(s)

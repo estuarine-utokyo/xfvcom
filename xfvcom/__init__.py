@@ -7,7 +7,17 @@
 from .analysis import FvcomAnalyzer
 from .decorators import precedence
 from .grid import FvcomGrid, get_grid, read_grid
-from .io import FvcomDataLoader, FvcomInputLoader, parse_river_namelist  # noqa: F401
+from .io import (  # noqa: F401
+    FvcomDataLoader,
+    FvcomInputLoader,
+    decode_fvcom_time,
+    encode_fvcom_time,
+    extend_river_nc_file,
+    parse_river_namelist,
+    read_fvcom_river_nc,
+    to_mjd,
+    write_fvcom_river_nc,
+)
 
 # ------------------------------------------------------------------
 # 2) plotting sub-package (ordered: config → core → utils)
@@ -28,6 +38,13 @@ from .utils.helpers_utils import (
     evaluate_model_scores,
     generate_test_data,
 )
+from .utils.timeseries_utils import (
+    extend_timeseries_ffill,
+    extend_timeseries_linear,
+    extend_timeseries_seasonal,
+    interpolate_missing_values,
+    resample_timeseries,
+)
 
 # ------------------------------------------------------------------
 # 3) public symbol table
@@ -44,6 +61,13 @@ __all__: list[str] = [
     "FvcomInputLoader",
     "FvcomAnalyzer",
     "parse_river_namelist",
+    # NetCDF utilities
+    "decode_fvcom_time",
+    "encode_fvcom_time",
+    "extend_river_nc_file",
+    "read_fvcom_river_nc",
+    "to_mjd",
+    "write_fvcom_river_nc",
     # helpers
     "FrameGenerator",
     "PlotHelperMixin",
@@ -52,6 +76,12 @@ __all__: list[str] = [
     "apply_xlim_ylim",
     "evaluate_model_scores",
     "generate_test_data",
+    # timeseries utilities
+    "extend_timeseries_ffill",
+    "extend_timeseries_linear",
+    "extend_timeseries_seasonal",
+    "interpolate_missing_values",
+    "resample_timeseries",
     # misc
     "precedence",
     # grid
