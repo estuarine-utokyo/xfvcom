@@ -223,7 +223,7 @@ def extend_timeseries_seasonal(
         pattern_data = df.copy()
     else:
         # Extract the pattern from the last complete period
-        pattern_data = df.loc[last_period_start : df.index[-1]].copy()
+        pattern_data = df.loc[last_period_start:df.index[-1]].copy()  # fmt: skip
 
     # Create result DataFrame
     result = df.reindex(extended_index)
