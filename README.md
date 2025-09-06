@@ -1,255 +1,392 @@
 # xfvcom
 
-**xfvcom** is a Python package designed to streamline preprocessing and postprocessing for the Finite Volume Community Ocean Model ([FVCOM](https://github.com/FVCOM-GitHub/FVCOM)). Built on top of [xarray](https://docs.xarray.dev/en/stable/), this package simplifies large-scale ocean model data analysis and visualization. This package is under active development.
+[![Python Version](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
+**A comprehensive Python toolkit for FVCOM ocean model data analysis and visualization**
+
+xfvcom streamlines preprocessing and postprocessing workflows for the Finite Volume Community Ocean Model ([FVCOM](https://github.com/FVCOM-GitHub/FVCOM)). Built on [xarray](https://docs.xarray.dev/en/stable/), it provides powerful tools for ocean model data analysis, forcing file generation, and publication-quality visualizations.
+
+## 🚀 Key Features
+
+### 📊 Data I/O & Processing
+- **FVCOM NetCDF Support**: Load and process model output files with automatic mesh completion
+- **Multi-format Grid Support**: Handle both ASCII (.dat) and NetCDF grid formats
+- **Coordinate Systems**: Seamless conversion between UTM and geographic (lat/lon) coordinates
+- **Depth Calculations**: Automatic depth variable computation from sigma layers and bathymetry
+- **Time Zone Handling**: Intelligent timezone conversion with configurable defaults
+
+### 🔬 Analysis Tools
+- **Spatial Analysis**: KDTree-based nearest neighbor search for efficient spatial queries
+- **Physics Calculations**: Layer averages, tidal decomposition, variable filtering by dimensions
+- **Time Series Processing**: Advanced extension methods (seasonal, linear, forward-fill)
+- **Grid Utilities**: Mesh connectivity analysis and validation tools
+
+### 🎨 Visualization
+- **Static Plots**: Time series, 2D contours, vector fields, vertical sections
+- **Animations**: Generate GIF and MP4 animations for temporal data
+- **Interactive Plots**: Plotly integration for web-based interactive visualizations
+- **Map Projections**: Full Cartopy support for geographic visualizations
+- **Triangular Mesh**: Native support for FVCOM's unstructured grid visualization
+
+### ⚡ Forcing File Generation
+- **River Forcing**: Generate river discharge and temperature/salinity inputs
+- **Meteorological Forcing**: Create atmospheric forcing files with comprehensive variables
+- **Groundwater Forcing**: Support for groundwater flux with optional dye tracers
+- **Flexible Input**: Mix constants with CSV time series, multiple data formats
 
 ---
 
-## Features
+## 📚 Documentation
 
-* **Load FVCOM data**
-  * Load NetCDF-format FVCOM output files
-  * Load FVCOM input files (grid, OBC, forcing) with `FvcomInputLoader`
-  * Support for both geographic and Cartesian coordinate systems
-* **Coordinate transformation**
-  Convert between UTM coordinates and geographic coordinates (longitude/latitude).
-* **Depth calculation**
-  Add depth variables based on water levels, sigma layers, and bathymetry.
-* **Analysis tools**
-  * Find nearest nodes
-  * Filter variables based on specific dimensions
-  * Calculate layer averages and perform tidal decomposition
-* **Visualization**
-  * Create time-series plots
-  * Generate 2D contour and vector plots
-  * Plot triangular meshes for both input and output data
-  * Support for both geographic (with map projections) and Cartesian coordinates
-  * Produce animated GIFs and MP4s for 2D spatial data
+### Core Documentation
+- [2-D Horizontal Plotting](docs/plot_2d.md) - Spatial visualization techniques
+- [Time-series & Depth-profiles](docs/plot_ts.md) - Temporal data analysis
+- [Vertical Sections](docs/plot_section.md) - Cross-sectional views
+- [Forcing File Generator](docs/forcing_generator.md) - Input file creation
 
----
+### Quick Links
+- [API Reference](#api-reference)
+- [Examples](#examples)
+- [CLI Commands](#command-line-tools)
+- [Contributing Guidelines](docs/CONTRIBUTING.md)
 
-## Documentation
-
-* [2-D Horizontal Plotting](docs/plot_2d.md)
-* [Time-series & Depth-profiles](docs/plot_ts.md)
-* [Vertical Sections](docs/plot_section.md)
-* [Forcing File Generator](docs/forcing_generator.md)
-
-## Installation
-
-This package is currently intended for **local development only** and is **not** published on PyPI.
+## 🔧 Installation
 
 ### Prerequisites
+- Python 3.10, 3.11, or 3.12
+- Conda (Miniforge/Mambaforge recommended)
+- Git
 
-* Miniforge (or compatible conda distribution)
-* Python ≥ 3.10
+### Quick Install
 
-### Create and activate conda environment
-
+#### Option 1: Automated Setup (Recommended)
 ```bash
-conda create -n xfvcom python=3.12 -c conda-forge \
-    numpy xarray pandas matplotlib cartopy pyproj \
-    scipy scikit-learn imageio moviepy tqdm \
-    pytest mypy black isort jinja2 pyyaml types-pyyaml
+# Clone the repository
+git clone https://github.com/yourusername/xfvcom.git
+cd xfvcom
+
+# Run the setup script
+./setup.sh
+```
+
+#### Option 2: Using Conda Environment File
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/xfvcom.git
+cd xfvcom
+
+# Create environment from file
+conda env create -f environment.yml
 conda activate xfvcom
 ```
 
-### Install xfvcom in editable mode
-
+#### Option 3: Manual Installation
 ```bash
+# Create conda environment
+conda create -n xfvcom python=3.11 -c conda-forge \
+    numpy xarray pandas matplotlib cartopy pyproj \
+    scipy scikit-learn imageio moviepy tqdm netcdf4 \
+    pytest mypy black isort jinja2 pyyaml
+
+# Activate environment
+conda activate xfvcom
+
+# Install xfvcom in editable mode
 pip install -e .
 ```
 
----
+### Verify Installation
+```bash
+python -c "import xfvcom; print(f'xfvcom {xfvcom.__version__} installed successfully')"
+```
 
-## Usage
+## 💻 Quick Start
 
-### Load Data
+### Basic Usage
 
 ```python
-from xfvcom import FvcomDataLoader
+import xfvcom
 
-fvcom = FvcomDataLoader(base_path="/path/to/data", ncfile="sample.nc")
+# Load FVCOM data
+fvcom = xfvcom.FvcomDataLoader("path/to/data", ncfile="output.nc")
 ds = fvcom.ds
+
+# Analyze data
+analyzer = xfvcom.FvcomAnalyzer(ds)
+node_idx = analyzer.nearest_neighbor(lon=140.0, lat=35.0)
+
+# Create visualizations
+cfg = xfvcom.FvcomPlotConfig(figsize=(10, 6), dpi=150)
+plotter = xfvcom.FvcomPlotter(ds, cfg)
+
+# Time series plot
+fig = plotter.plot_timeseries("temperature", index=node_idx)
+
+# 2D spatial plot
+fig = plotter.plot_2d("salinity", time="2020-07-01", siglay=0)
 ```
 
-### Analyze Data
+### Creating Animations
 
 ```python
-from xfvcom import FvcomAnalyzer
+from xfvcom.plot.utils import create_anim_2d_plot
 
-analyzer = FvcomAnalyzer(ds)
-idx = analyzer.nearest_neighbor(lon=140.0, lat=35.0)
-print(f"Nearest node index: {idx}")
-```
-
-### Time-Series Plot
-
-```python
-from xfvcom import FvcomPlotConfig, FvcomPlotter
-
-cfg = FvcomPlotConfig(figsize=(8, 2), dpi=300)
-plotter = FvcomPlotter(ds, cfg)
-fig = plotter.ts_contourf("zeta", index=idx, start="2020-01-01", end="2020-12-31")
-```
-
-### 2D GIF/MP4 Animation
-
-```python
-from xfvcom.plot_utils import create_anim_2d_plot
-
+# Generate animated GIF
 create_anim_2d_plot(
     plotter=plotter,
-    var_name="salinity",
-    siglay=0,
+    var_name="temperature",
+    siglay=0,  # Surface layer
     fps=10,
-    post_process_func=None,
-    plot_kwargs={"vmin": 28, "vmax": 34, "cmap": "jet"}
+    output_format="gif",
+    plot_kwargs={"vmin": 10, "vmax": 30, "cmap": "RdYlBu_r"}
 )
 ```
 
-### Extended forcing inputs
-
-#### Groundwater forcing
-
-Basic usage with constant values:
-```bash
-xfvcom-make-groundwater-nc grid.nc \
-  --start 2025-01-01T00:00Z --end 2025-01-07T00:00Z \
-  --flux 0.001 --temperature 15.0 --salinity 0.0
-```
-
-Using CSV files for spatio-temporal data:
-```bash
-# Wide format CSV (columns: datetime, node_100, node_200, ...)
-xfvcom-make-groundwater-nc grid.nc \
-  --start 2025-01-01T00:00Z --end 2025-12-31T23:00Z \
-  --flux flux_timeseries.csv:datetime \
-  --temperature temp_timeseries.csv:datetime \
-  --salinity 0.0
-
-# Long format CSV (columns: datetime, node_id, value)
-xfvcom-make-groundwater-nc grid.nc \
-  --start 2025-01-01T00:00Z --end 2025-12-31T23:00Z \
-  --flux groundwater.csv:datetime,node_id,flux \
-  --temperature groundwater.csv:datetime,node_id,temperature \
-  --salinity 0.0
-```
-
-#### River forcing
-
-```bash
-make_river_nc.py rivers_minimal.nml \
-  --start 2025-01-01T00:00Z \
-  --end   2025-01-02T00:00Z \
-  --dt    3600 \
-```
-
-```bash
-make_met_nc.py grid.dat --utm-zone 54 \
-  --start 2025-01-01T00:00Z --end 2025-01-02T00:00Z \
-  --ts met.csv:uwind,vwind --data-tz Asia/Tokyo
-```
-
-```bash
-make_met_nc.py grid.dat --utm-zone 54 \
-  --start 2025-01-01T00:00Z --end 2025-01-01T06:00Z \
-  --ts swrad.csv:swrad \
-  --uwind 2 --vwind -1
-```
-
-```bash
-make_met_nc.py grid.dat --utm-zone 54 \
-  --start 2025-01-01T09:00 --end 2025-01-01T12:00 \
-  --start-tz Asia/Tokyo \
-  --uwind 2 --vwind -1
-```
-
-The NML file given above must exist on disk; otherwise
-``RiverNetCDFGenerator`` will raise ``FileNotFoundError``.
-
-MetNetCDFGenerator can mix constant parameters with CSV/TSV time-series via
-``--ts``.
-
-Input CSV/TSV values are assumed to be in ``Asia/Tokyo`` by default and
-converted to UTC.  Use ``--data-tz`` to override this.  The ``--start-tz``
-option sets the timezone for naive ``--start``/``--end`` values.  For example a
-timestamp ``2025-01-01T00:00`` with ``--data-tz Asia/Tokyo`` becomes
-``2024-12-31T15:00Z`` in the output NetCDF file.
-
-#### Programmatic example
+### Interactive Visualizations
 
 ```python
-from pathlib import Path
-from xfvcom.io.met_nc_generator import MetNetCDFGenerator
+from xfvcom.plot.plotly_utils import plot_timeseries_comparison
 
-gen = MetNetCDFGenerator(
-    grid_nc="grid.dat",
-    start="2025-01-01T00:00Z",
-    end="2025-01-02T00:00Z",
-    dt_seconds=3600,
-    ts_specs=["met.csv:uwind,vwind"],
-    data_tz="Asia/Tokyo",
-    uwind=2.0,
-    vwind=-1.0,
+# Compare multiple variables interactively
+fig = plot_timeseries_comparison(
+    ds,
+    variables=["temperature", "salinity"],
+    node_idx=node_idx,
+    start_time="2020-01-01",
+    end_time="2020-12-31"
 )
-gen.write(Path("met.nc"))
+fig.show()
 ```
 
-## Dependencies
+## 🔨 Command-Line Tools
 
-All runtime dependencies are listed in **pyproject.toml** under `[project.dependencies]`. To add new packages, use:
+### River Forcing Generation
 
 ```bash
-conda install -c conda-forge <package>
+# Generate river namelist from CSV
+xfvcom-make-river-nml river_data.csv --output rivers.nml
+
+# Create river forcing NetCDF
+xfvcom-make-river-nc rivers.nml \
+  --start 2025-01-01T00:00Z \
+  --end 2025-12-31T23:00Z \
+  --dt 3600
 ```
 
----
+### Meteorological Forcing
 
-## Developer Information
+```bash
+# Basic usage with time series
+xfvcom-make-met-nc grid.nc \
+  --start 2025-01-01T00:00Z \
+  --end 2025-01-02T00:00Z \
+  --ts weather.csv:uwind,vwind,air_temperature,humidity
 
-### Contributing
+# Mix constants with CSV data
+xfvcom-make-met-nc grid.nc \
+  --start 2025-01-01T00:00Z \
+  --end 2025-01-07T00:00Z \
+  --ts wind.csv:uwind,vwind \
+  --air-temperature 20.0 \
+  --humidity 0.7
+```
 
-Contributions are welcome! Please fork the repo, create a feature branch, and submit a pull request.
-For development workflow and test-suite details, please see
-[CONTRIBUTING.md](docs/CONTRIBUTING.md).
+### Groundwater Forcing
 
----
+```bash
+# Constant values
+xfvcom-make-groundwater-nc grid.nc \
+  --start 2025-01-01T00:00Z \
+  --end 2025-12-31T23:00Z \
+  --flux 0.001 \
+  --temperature 15.0 \
+  --salinity 0.0
 
-## License
+# Time-varying with dye tracer
+xfvcom-make-groundwater-nc grid.nc \
+  --start 2025-01-01T00:00Z \
+  --end 2025-12-31T23:00Z \
+  --flux groundwater.csv:datetime,node_id,flux \
+  --temperature groundwater.csv:datetime,node_id,temperature \
+  --salinity 0.0 \
+  --dye-concentration 1.0
+```
 
-This project is licensed under the [MIT License](LICENSE).
+## 🔍 Examples
 
----
+### Advanced Time Series Processing
 
-## File Relationships
+```python
+from xfvcom.utils.timeseries_utils import (
+    extend_timeseries_seasonal,
+    interpolate_missing_values
+)
 
-* **helpers.py**  
-  High-level API for GIF/MP4 creation, frame generation, and batch plotting
-  (e.g., `FrameGenerator`).
+# Extend river data using seasonal patterns
+extended_ds = extend_timeseries_seasonal(
+    ds,
+    target_end="2025-12-31",
+    variables=["river_flux", "river_temp"]
+)
 
-* **helpers_utils.py**  
-  Utility helpers for cleaning and merging option dictionaries used across
-  the code base.
+# Fill gaps in observational data
+filled_ds = interpolate_missing_values(
+    ds,
+    method="linear",
+    max_gap="7D"
+)
+```
 
-* **utils.py**  
-  Wrapper functions that combine `helpers.py` and `core.py` to create
-  sequences of 2-D plots and export them as animations (GIF/MP4).
+### Programmatic Forcing Generation
 
-* **plot_options.py**  
-  `FvcomPlotOptions` dataclass holding all styling and plotting options.
+```python
+from xfvcom.io import MetNetCDFGenerator, GroundwaterNetCDFGenerator
 
-* **core.py**  
-  Main drawing routines implemented in `FvcomPlotter` (scalar contours,
-  vector fields, vertical sections, etc.).
+# Meteorological forcing
+met_gen = MetNetCDFGenerator(
+    grid_nc="grid.nc",
+    start="2025-01-01T00:00Z",
+    end="2025-12-31T23:00Z",
+    dt_seconds=3600,
+    ts_specs=["weather.csv:all"],  # Read all columns
+    data_tz="UTC"
+)
+met_gen.write("met_forcing.nc")
 
-* **io.py**  
-  `FvcomDataLoader` for reading FVCOM NetCDF files, completing the mesh, and
-  performing light preprocessing.
+# Groundwater with spatial variation
+gw_gen = GroundwaterNetCDFGenerator(
+    grid_nc="grid.nc",
+    start="2025-01-01T00:00Z",
+    end="2025-12-31T23:00Z",
+    groundwater_flux="flux_map.csv:node_id,flux",
+    groundwater_temp=15.0,
+    groundwater_salt=0.0
+)
+gw_gen.write("groundwater_forcing.nc")
+```
 
-* **config.py**  
-  `FvcomPlotConfig` with default fonts, projections, and other constants that
-  `core.py` refers to.
+## 📦 API Reference
 
-* **analysis.py**  
-  `FvcomAnalyzer` providing physics-oriented calculations and reductions
-  (layer averages, tidal decomposition, etc.).
+### Core Classes
+
+| Class | Module | Description |
+|-------|--------|-------------|
+| `FvcomDataLoader` | `xfvcom.io` | Load and preprocess FVCOM NetCDF files |
+| `FvcomAnalyzer` | `xfvcom.analysis` | Physics calculations and spatial analysis |
+| `FvcomPlotter` | `xfvcom.plot` | Main visualization engine |
+| `FvcomPlotConfig` | `xfvcom.plot` | Configuration for plot styling |
+| `FvcomGrid` | `xfvcom.grid` | Grid manipulation utilities |
+
+### Generator Classes
+
+| Class | Module | Description |
+|-------|--------|-------------|
+| `RiverNetCDFGenerator` | `xfvcom.io` | Generate river forcing files |
+| `MetNetCDFGenerator` | `xfvcom.io` | Generate meteorological forcing |
+| `GroundwaterNetCDFGenerator` | `xfvcom.io` | Generate groundwater forcing |
+| `RiverNamelistGenerator` | `xfvcom.io` | Create FVCOM river namelists |
+
+### Utility Functions
+
+| Function | Module | Description |
+|----------|--------|-------------|
+| `create_anim_2d_plot()` | `xfvcom.plot.utils` | Create animations from 2D data |
+| `extend_timeseries_*()` | `xfvcom.utils.timeseries_utils` | Time series extension methods |
+| `plot_timeseries_comparison()` | `xfvcom.plot.plotly_utils` | Interactive comparison plots |
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test module
+pytest tests/test_plot_2d.py
+
+# Skip PNG regression tests
+pytest -m "not png"
+
+# Regenerate plot baselines
+pytest --regenerate-baseline
+```
+
+## 🛠️ Development
+
+### Code Quality Tools
+
+```bash
+# Format code
+black xfvcom/
+
+# Sort imports
+isort xfvcom/
+
+# Type checking
+mypy .
+
+# Run all checks
+pre-commit run --all-files
+```
+
+### Building Documentation
+
+```bash
+cd docs
+make html
+open _build/html/index.html
+```
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guidelines](docs/CONTRIBUTING.md) for details on:
+
+- Development setup
+- Code style guidelines
+- Testing requirements
+- Pull request process
+
+### Quick Contribution Guide
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Run tests (`pytest`)
+5. Commit with descriptive message
+6. Push to your fork
+7. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 👥 Authors
+
+- **Jun Sasaki** - *Initial work* - [jsasaki.ece@gmail.com](mailto:jsasaki.ece@gmail.com)
+
+## 🙏 Acknowledgments
+
+- FVCOM development team for the ocean model
+- xarray developers for the excellent data structure
+- All contributors who have helped improve this package
+
+## 📚 Citation
+
+If you use xfvcom in your research, please cite:
+
+```bibtex
+@software{xfvcom,
+  author = {Sasaki, Jun},
+  title = {xfvcom: A Python toolkit for FVCOM data analysis},
+  year = {2024},
+  url = {https://github.com/yourusername/xfvcom}
+}
+```
+
+## 🔗 Links
+
+- [FVCOM Official Site](http://fvcom.smast.umassd.edu/fvcom/)
+- [xarray Documentation](https://docs.xarray.dev/)
+- [Cartopy Documentation](https://scitools.org.uk/cartopy/)
+- [Issue Tracker](https://github.com/yourusername/xfvcom/issues)
