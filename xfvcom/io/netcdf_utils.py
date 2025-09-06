@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
 import netCDF4 as nc
 import numpy as np
@@ -75,9 +75,9 @@ def encode_fvcom_time(
     """
     mjd_epoch = pd.Timestamp("1858-11-17")
 
-    itime = np.zeros(len(datetimes), dtype=np.int32)
-    itime2 = np.zeros(len(datetimes), dtype=np.int32)
-    times_str = []
+    itime: np.ndarray = np.zeros(len(datetimes), dtype=np.int32)
+    itime2: np.ndarray = np.zeros(len(datetimes), dtype=np.int32)
+    times_str: List[str] = []
 
     for i, dt in enumerate(datetimes):
         # Calculate days since MJD epoch
@@ -115,7 +115,7 @@ def to_mjd(times: pd.DatetimeIndex) -> np.ndarray:
     return ((times - mjd_epoch) / pd.Timedelta("1D")).to_numpy("f8")
 
 
-def read_fvcom_river_nc(filepath: Union[Path, str]) -> Dict:
+def read_fvcom_river_nc(filepath: Union[Path, str]) -> Dict[str, Any]:
     """
     Read FVCOM river NetCDF file with proper decoding.
 
@@ -136,7 +136,7 @@ def read_fvcom_river_nc(filepath: Union[Path, str]) -> Dict:
         - '*_attrs': Dictionaries of variable attributes
     """
     filepath = Path(filepath)
-    data = {}
+    data: Dict[str, Any] = {}
 
     with nc.Dataset(filepath, "r") as ds:
         # Store metadata
@@ -145,22 +145,24 @@ def read_fvcom_river_nc(filepath: Union[Path, str]) -> Dict:
 
         # Decode time
         if "Itime" in ds.variables and "Itime2" in ds.variables:
-            data["datetime"] = decode_fvcom_time(
+            datetime_index = decode_fvcom_time(
                 ds.variables["Itime"][:], ds.variables["Itime2"][:]
             )
+            data["datetime"] = datetime_index
         elif "time" in ds.variables:
             # Try to decode from time variable if Itime/Itime2 not available
             time_var = ds.variables["time"]
             if "units" in time_var.ncattrs():
                 # Use pandas to parse time units
-                data["datetime"] = pd.to_datetime(
+                datetime_index = pd.to_datetime(
                     time_var[:], unit="D", origin="1858-11-17"
                 )
+                data["datetime"] = datetime_index
             else:
                 raise ValueError("Cannot decode time from NetCDF file")
 
         # Determine river dimension name
-        river_dim = "river" if "river" in ds.dimensions else "rivers"
+        river_dim: str = "river" if "river" in ds.dimensions else "rivers"
         data["river_dim"] = river_dim
         n_rivers = data["dimensions"][river_dim]
 
@@ -191,7 +193,7 @@ def read_fvcom_river_nc(filepath: Union[Path, str]) -> Dict:
         # Decode river names
         if "river_names" in ds.variables:
             names_raw = ds.variables["river_names"][:]
-            data["river_names"] = []
+            river_names_list: List[str] = []
 
             for i in range(n_rivers):
                 if names_raw.ndim == 1:
@@ -216,7 +218,9 @@ def read_fvcom_river_nc(filepath: Union[Path, str]) -> Dict:
                         .strip()
                     )
 
-                data["river_names"].append(name_str)
+                river_names_list.append(name_str)
+
+            data["river_names"] = river_names_list
 
             # Update DataFrame column names with river names
             for var_name in ["river_flux", "river_temp", "river_salt"]:
@@ -227,7 +231,15 @@ def read_fvcom_river_nc(filepath: Union[Path, str]) -> Dict:
 
 
 def write_fvcom_river_nc(
-    filepath: Union[Path, str], data: Dict, format: str = "NETCDF4_CLASSIC"
+    filepath: Union[Path, str],
+    data: Dict[str, Any],
+    format: Literal[
+        "NETCDF4",
+        "NETCDF4_CLASSIC",
+        "NETCDF3_CLASSIC",
+        "NETCDF3_64BIT_OFFSET",
+        "NETCDF3_64BIT_DATA",
+    ] = "NETCDF4_CLASSIC",
 ) -> None:
     """
     Write FVCOM-compatible river NetCDF file.
@@ -289,7 +301,7 @@ def write_fvcom_river_nc(
         times_var = ds.createVariable("Times", "c", ("time", "DateStrLen"))
         times_var.time_zone = "UTC"
         for i, ts in enumerate(times_str):
-            ts_array = np.zeros(30, dtype="S1")
+            ts_array: np.ndarray = np.zeros(30, dtype="S1")
             ts_bytes = ts.encode("utf-8")
             ts_array[: len(ts_bytes)] = list(ts_bytes)
             times_var[i, :] = ts_array
@@ -298,7 +310,7 @@ def write_fvcom_river_nc(
         if "river_names" in data:
             names_var = ds.createVariable("river_names", "c", (river_dim, "namelen"))
             for i, name in enumerate(data["river_names"]):
-                name_array = np.zeros(max_name_len, dtype="S1")
+                name_array: np.ndarray = np.zeros(max_name_len, dtype="S1")
                 name_bytes = name.encode("utf-8")
                 name_array[: len(name_bytes)] = list(name_bytes)
                 names_var[i, :] = name_array
@@ -376,7 +388,9 @@ def extend_river_nc_file(
     data = read_fvcom_river_nc(input_path)
 
     # Choose extension function
-    extension_funcs = {
+    extension_funcs: Dict[
+        str, Callable[[pd.DataFrame, Union[str, pd.Timestamp]], pd.DataFrame]
+    ] = {
         "ffill": extend_timeseries_ffill,
         "linear": extend_timeseries_linear,
         "seasonal": extend_timeseries_seasonal,

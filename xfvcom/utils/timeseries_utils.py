@@ -49,7 +49,10 @@ def extend_timeseries_ffill(
 
     # Infer frequency if not provided
     if freq is None:
-        freq = pd.infer_freq(df.index)
+        if isinstance(df.index, pd.DatetimeIndex):
+            freq = pd.infer_freq(df.index)
+        else:
+            freq = None
         if freq is None and len(df.index) > 1:
             # Calculate from first two timestamps
             delta = df.index[1] - df.index[0]
@@ -100,7 +103,10 @@ def extend_timeseries_linear(
 
     # Infer frequency if not provided
     if freq is None:
-        freq = pd.infer_freq(df.index)
+        if isinstance(df.index, pd.DatetimeIndex):
+            freq = pd.infer_freq(df.index)
+        else:
+            freq = None
         if freq is None and len(df.index) > 1:
             delta = df.index[1] - df.index[0]
             hours = delta.total_seconds() / 3600
@@ -176,7 +182,10 @@ def extend_timeseries_seasonal(
 
     # Infer frequency if not provided
     if freq is None:
-        freq = pd.infer_freq(df.index)
+        if isinstance(df.index, pd.DatetimeIndex):
+            freq = pd.infer_freq(df.index)
+        else:
+            freq = None
         if freq is None and len(df.index) > 1:
             delta = df.index[1] - df.index[0]
             hours = delta.total_seconds() / 3600
@@ -296,7 +305,9 @@ def resample_timeseries(
         Resampled DataFrame
     """
     # Determine if upsampling or downsampling
-    current_freq = pd.infer_freq(df.index)
+    current_freq = (
+        pd.infer_freq(df.index) if isinstance(df.index, pd.DatetimeIndex) else None
+    )
 
     # Resample
     resampler = df.resample(target_freq)
