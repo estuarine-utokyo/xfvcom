@@ -25,36 +25,40 @@ classifiers = [
 ]
 
 dependencies = [
-  "numpy>=1.24",
-  "xarray>=2023.11",
-  "pandas>=2.1",
-  "matplotlib>=3.8",
-  "cartopy>=0.22",
-  "pyproj>=3.6",
-  "scipy>=1.11",
-  "scikit-learn>=1.4",
-  "imageio>=2.34",
+  "numpy>=2.0.0",
+  "xarray>=2024.12.0",
+  "pandas>=2.2.2",
+  "matplotlib>=3.9.1",
+  "cartopy>=0.24.0",
+  "pyproj>=3.6.1",
+  "scipy>=1.14.0",
+  "scikit-learn>=1.5.1",
+  "imageio>=2.36.1",
   "moviepy>=1.0.3", 
-  "imageio-ffmpeg>=0.4",
-  "tqdm>=4.66",
-  "jinja2>=3.1",
-  "PyYAML>=6.0",
-  "netCDF4 >=1.6",
-  "chardet>=5.0", 
+  "imageio-ffmpeg>=0.6.0",
+  "tqdm>=4.66.8",
+  "jinja2>=3.1.4",
+  "PyYAML>=6.0.1",
+  "netCDF4>=1.7.1",
+  "h5netcdf>=1.3.0",
+  "cftime>=1.6.4",
+  "chardet>=5.2.0", 
 ]
 
 [project.optional-dependencies]
-video = ["moviepy>=1.0.3", "imageio-ffmpeg>=0.4"]
+video = ["moviepy>=1.0.3", "imageio-ffmpeg>=0.6.0"]
 dev = [
-  "pytest>=8.1",
-  "mypy>=1.7",
-  "black>=24.2",
-  "isort>=5.13",
-  "types-tqdm>=4.66",
-  "pandas-stubs",
-  "matplotlib>=3.8",
+  "pytest>=8.3.2",
+  "mypy>=1.17.1",
+  "black>=25.1.0",
+  "isort>=6.0.1",
+  "types-tqdm>=4.66.8",
+  "pandas-stubs>=2.2.2",
+  "matplotlib>=3.9.1",
   "ruff>=0.3",
   "types-PyYAML>=6.0.12",
+  "ipykernel>=6.29.5",
+  "jupyterlab>=4.2.3",
 ]
 
 [tool.setuptools.packages.find]

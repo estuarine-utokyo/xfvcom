@@ -1,12 +1,52 @@
-# environment.yml  (root of repository)
-name: xfvcom-docs
+name: xfvcom
 channels:
   - conda-forge
+  - defaults
 dependencies:
-  # --- core -----------------------------------------------------------
-  - python=3.12
-  # --- documentation --------------------------------------------------
-  - sphinx
-  - furo                     # HTML theme
-  - sphinx-autodoc-typehints # type-hint support
+  # Python version
+  - python=3.11
+  
+  # Core scientific packages
+  - numpy=2.0.0
+  - pandas=2.2.2
+  - xarray=2024.12.0
+  - scipy=1.14.0
+  - scikit-learn=1.5.1
+  
+  # Visualization packages
+  - matplotlib=3.9.1
+  - cartopy=0.24.0
+  - pyproj=3.6.1
+  - imageio=2.36.1
+  - imageio-ffmpeg=0.6.0
+  - moviepy=1.0.3
+  
+  # NetCDF support
+  - netcdf4=1.7.1
+  - h5netcdf=1.3.0
+  - cftime=1.6.4
+  
+  # Additional required packages
+  - tqdm=4.66.8
+  - jinja2=3.1.4
+  - pyyaml=6.0.1
+  - chardet=5.2.0
+  
+  # Development tools
+  - pytest=8.3.2
+  - mypy=1.17.1
+  - black=25.1.0
+  - isort=6.0.1
+  - ipykernel=6.29.5
+  - jupyterlab=4.2.3
+  
+  # Type stubs for mypy
+  - types-pyyaml
+  - pandas-stubs
+  
+  # Pip dependencies (install after conda)
+  - pip
+  - pip:
+    # Install xfvcom package in editable mode
+    - -e .
 
