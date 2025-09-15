@@ -16,7 +16,7 @@ from typing import Any, Literal, Optional, Sequence
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
-from cartopy.io.img_tiles import GoogleTiles, OSM
+from cartopy.io.img_tiles import OSM, GoogleTiles
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
