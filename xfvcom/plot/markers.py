@@ -166,7 +166,7 @@ def make_node_marker_post(
                 lon_min, lon_max = opts.xlim
             else:
                 lon_min, lon_max = float(lon_arr.min()), float(lon_arr.max())
-            
+
             if opts.ylim:
                 lat_min, lat_max = opts.ylim
             else:
@@ -179,7 +179,9 @@ def make_node_marker_post(
         if mode == "coord_lonlat":  # DataFrame with lon/lat
             for x, y, lbl in zip(lon_direct, lat_direct, labels, strict=False):
                 # Check bounds if enabled
-                if stored_respect_bounds and not (lon_min <= x <= lon_max and lat_min <= y <= lat_max):
+                if stored_respect_bounds and not (
+                    lon_min <= x <= lon_max and lat_min <= y <= lat_max
+                ):
                     continue
                 ax.plot(x, y, **_inject_transform(ax, mkw, use_latlon))
                 if text_kwargs is not None:
@@ -198,7 +200,9 @@ def make_node_marker_post(
             for i in idx:
                 # Always check bounds against lat/lon coordinates
                 lon, lat = lon_arr[i], lat_arr[i]
-                if stored_respect_bounds and not (lon_min <= lon <= lon_max and lat_min <= lat <= lat_max):
+                if stored_respect_bounds and not (
+                    lon_min <= lon <= lon_max and lat_min <= lat <= lat_max
+                ):
                     continue
                 x, y = coord_x[i], coord_y[i]
                 lbl = str(i + index_base)

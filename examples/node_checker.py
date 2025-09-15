@@ -133,7 +133,9 @@ def plot_node_checker(
     specific_marker_size = max(all_marker_size * 1.5, 5)  # Specific nodes larger
 
     # Determine font size for labels
-    font_size = _auto_font_size(n_nodes, xlim, ylim, grid_ds) if show_node_numbers else 8
+    font_size = (
+        _auto_font_size(n_nodes, xlim, ylim, grid_ds) if show_node_numbers else 8
+    )
 
     # Build post-processing functions
     post_process_funcs = []
@@ -264,8 +266,12 @@ def plot_node_checker(
     info_text = _generate_info_text(n_nodes, show_all_nodes, specific_nodes)
     if info_text:
         fig.text(
-            0.02, 0.02, info_text,
-            fontsize=9, ha="left", va="bottom",
+            0.02,
+            0.02,
+            info_text,
+            fontsize=9,
+            ha="left",
+            va="bottom",
             bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
         )
 
@@ -279,9 +285,7 @@ def plot_node_checker(
     return fig, ax
 
 
-def _auto_marker_size(
-    n_nodes: int, show_all: bool, show_numbers: bool
-) -> float:
+def _auto_marker_size(n_nodes: int, show_all: bool, show_numbers: bool) -> float:
     """Calculate appropriate marker size based on node count."""
     if not show_all:
         return 5  # Default for specific nodes only
@@ -330,10 +334,7 @@ def _auto_font_size(
         view_y_range = ylim[1] - ylim[0]
 
         # Calculate zoom factor (>1 means zoomed in)
-        zoom_factor = min(
-            full_x_range / view_x_range,
-            full_y_range / view_y_range
-        )
+        zoom_factor = min(full_x_range / view_x_range, full_y_range / view_y_range)
 
         # Scale font size with zoom
         base_font *= min(2.0, max(0.5, zoom_factor))
