@@ -80,6 +80,10 @@ explicit_package_bases = true
 ignore_missing_imports = true
 no_implicit_optional = true
 
+[[tool.mypy.overrides]]
+module = "yaml"
+ignore_missing_imports = true
+
 [project.scripts]
 xfvcom-make-river-nml = "xfvcom.cli.make_river_nml:main"
 xfvcom-make-river-nc = "xfvcom.cli.make_river_nc:main"

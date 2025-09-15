@@ -9,7 +9,7 @@ import csv
 import json
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 from jinja2 import BaseLoader, Environment, select_autoescape
 
 from .base_generator import BaseGenerator

@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Mapping, Sequence, cast
 import netCDF4 as nc
 import numpy as np
 import pandas as pd
-import yaml
+import yaml  # type: ignore[import-untyped]
 from numpy.typing import NDArray
 
 from xfvcom.io.sources.base import BaseForcingSource

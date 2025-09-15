@@ -11,7 +11,7 @@ Created: 2025-01-14
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal, Optional, Sequence
+from typing import Any, Dict, Literal, Optional, Sequence
 
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
@@ -304,7 +304,7 @@ def _auto_marker_size(n_nodes: int, show_all: bool, show_numbers: bool) -> float
 
     # Reduce size if showing numbers to avoid overlap
     if show_numbers:
-        base_size *= 0.7
+        base_size = int(base_size * 0.7)
 
     return base_size
 
@@ -337,7 +337,7 @@ def _auto_font_size(
         zoom_factor = min(full_x_range / view_x_range, full_y_range / view_y_range)
 
         # Scale font size with zoom
-        base_font *= min(2.0, max(0.5, zoom_factor))
+        base_font = int(base_font * min(2.0, max(0.5, zoom_factor)))
 
     return base_font
 
@@ -395,7 +395,7 @@ def check_nodes_in_bounds(
     grid_ds = loader.ds
     n_nodes = len(grid_ds.lon)
 
-    results = {
+    results: dict[str, Any] = {
         "total_nodes": n_nodes,
         "valid_nodes": [],
         "invalid_nodes": [],
@@ -409,8 +409,8 @@ def check_nodes_in_bounds(
             results["node_info"][node_id] = {
                 "lon": float(grid_ds.lon.values[idx]),
                 "lat": float(grid_ds.lat.values[idx]),
-                "x": float(grid_ds.x.values[idx]) if "x" in grid_ds else None,
-                "y": float(grid_ds.y.values[idx]) if "y" in grid_ds else None,
+                "x": float(grid_ds.x.values[idx]) if "x" in grid_ds.data_vars else None,
+                "y": float(grid_ds.y.values[idx]) if "y" in grid_ds.data_vars else None,
             }
         else:
             results["invalid_nodes"].append(node_id)
