@@ -29,6 +29,7 @@ xfvcom streamlines preprocessing and postprocessing workflows for the Finite Vol
 - **Interactive Plots**: Plotly integration for web-based interactive visualizations
 - **Map Projections**: Full Cartopy support for geographic visualizations
 - **Triangular Mesh**: Native support for FVCOM's unstructured grid visualization
+- **Enhanced Node/Marker Display**: Advanced clipping control for geographic coordinates with Cartopy
 
 ### ⚡ Forcing File Generation
 - **River Forcing**: Generate river discharge and temperature/salinity inputs
@@ -47,9 +48,9 @@ xfvcom streamlines preprocessing and postprocessing workflows for the Finite Vol
 - [Forcing File Generator](docs/forcing_generator.md) - Input file creation
 
 ### Quick Links
-- [API Reference](#api-reference)
-- [Examples](#examples)
-- [CLI Commands](#command-line-tools)
+- [API Reference](#-api-reference)
+- [Examples](#-examples)
+- [CLI Commands](#-command-line-tools)
 - [Contributing Guidelines](docs/CONTRIBUTING.md)
 
 ## 🔧 Installation
@@ -239,6 +240,49 @@ filled_ds = interpolate_missing_values(
 )
 ```
 
+### Enhanced Node Visualization with Cartopy
+
+xfvcom provides advanced control for displaying node markers and text labels on geographic maps, addressing known Cartopy limitations with text clipping:
+
+```python
+from xfvcom import make_node_marker_post
+
+# Independent buffer control for markers and text
+pp = make_node_marker_post(
+    nodes=[1, 100, 500, 1000],  # Node indices to display
+    plotter=plotter,
+    marker_kwargs={"color": "red", "markersize": 4},
+    text_kwargs={"color": "yellow", "fontsize": 8, "clip_on": True},
+    index_base=1,  # FVCOM uses 1-based indexing
+    respect_bounds=True,
+    marker_clip_buffer=0.002,  # Include markers slightly outside bounds
+    text_clip_buffer=-0.001,   # Hide text near edges to prevent overflow
+)
+
+# Apply to a map with specific extent
+opts = FvcomPlotOptions(
+    xlim=(139.85, 139.95),
+    ylim=(35.36, 35.45),
+    add_tiles=True
+)
+ax = plotter.plot_2d(post_process_func=pp, opts=opts)
+```
+
+**Key Features:**
+- **`marker_clip_buffer`**: Controls marker visibility at map boundaries
+  - Positive values: Include markers outside the specified extent
+  - Negative values: Exclude markers near boundaries
+- **`text_clip_buffer`**: Controls text label visibility (fixes Cartopy `clip_on` issues)
+  - Positive values: Show text labels beyond map extent
+  - Negative values: Hide text near edges to prevent overflow
+- **Performance optimized**: Uses vectorized operations for large node sets
+- **Cartopy workaround**: Automatically handles geographic coordinate text clipping
+
+This feature is particularly useful for:
+- Dense grids where text labels may overlap at boundaries
+- Analyzing nodes at domain edges
+- Creating clean visualizations with precise boundary control
+
 ### Programmatic Forcing Generation
 
 ```python
@@ -295,6 +339,7 @@ gw_gen.write("groundwater_forcing.nc")
 | `create_anim_2d_plot()` | `xfvcom.plot.utils` | Create animations from 2D data |
 | `extend_timeseries_*()` | `xfvcom.utils.timeseries_utils` | Time series extension methods |
 | `plot_timeseries_comparison()` | `xfvcom.plot.plotly_utils` | Interactive comparison plots |
+| `make_node_marker_post()` | `xfvcom.plot.markers` | Enhanced node/text display with clipping control |
 
 ## 🧪 Testing
 

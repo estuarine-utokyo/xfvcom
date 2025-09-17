@@ -52,6 +52,8 @@ def make_node_marker_post(
     index_base: int = 0,
     use_latlon: bool | None = None,
     respect_bounds: bool = True,
+    marker_clip_buffer: float = 0.0,
+    text_clip_buffer: float = 0.0,
 ) -> Callable[[Axes], None]:
     """Return a post_process_func that plots node markers / labels.
 
@@ -77,6 +79,23 @@ def make_node_marker_post(
     respect_bounds : bool, default True
         Whether to filter markers to only show those within xlim/ylim bounds.
         When True, markers outside the specified bounds will not be displayed.
+    marker_clip_buffer : float, default 0.0
+        Buffer zone (in degrees) for marker clipping.
+        Positive values include markers slightly outside bounds (show edge markers),
+        negative values exclude markers near boundaries.
+    text_clip_buffer : float, default 0.0
+        Buffer zone (in degrees) for text clipping when using Cartopy.
+        Positive values make the clipping area larger (show more text),
+        negative values make it smaller (hide text near edges).
+
+    Notes
+    -----
+    When using Cartopy with geographic coordinates and clip_on=True in text_kwargs,
+    this function implements manual text clipping as a workaround for Cartopy's
+    known issue with text clipping in geographic projections.
+
+    The marker_clip_buffer and text_clip_buffer allow independent control over
+    marker and text visibility near boundaries, useful for dense node displays.
     """
 
     mkw: dict[str, Any] = {  # marker defaults
@@ -149,6 +168,8 @@ def make_node_marker_post(
     # Store the use_latlon preference
     stored_use_latlon = use_latlon
     stored_respect_bounds = respect_bounds
+    stored_marker_clip_buffer = marker_clip_buffer
+    stored_text_clip_buffer = text_clip_buffer
 
     # -- post-processor -------------------------------------------------
     def _post(ax: Axes, *, opts: FvcomPlotOptions | None = None, **__) -> None:
@@ -163,29 +184,69 @@ def make_node_marker_post(
         if stored_respect_bounds and opts and (opts.xlim or opts.ylim):
             # Use the bounds from opts (these are always in lat/lon for geographic plots)
             if opts.xlim:
-                lon_min, lon_max = opts.xlim
+                base_lon_min, base_lon_max = opts.xlim
             else:
-                lon_min, lon_max = float(lon_arr.min()), float(lon_arr.max())
+                base_lon_min, base_lon_max = float(lon_arr.min()), float(lon_arr.max())
 
             if opts.ylim:
-                lat_min, lat_max = opts.ylim
+                base_lat_min, base_lat_max = opts.ylim
             else:
-                lat_min, lat_max = float(lat_arr.min()), float(lat_arr.max())
+                base_lat_min, base_lat_max = float(lat_arr.min()), float(lat_arr.max())
+
+            # Apply marker buffer for marker bounds
+            marker_lon_min = base_lon_min - stored_marker_clip_buffer
+            marker_lon_max = base_lon_max + stored_marker_clip_buffer
+            marker_lat_min = base_lat_min - stored_marker_clip_buffer
+            marker_lat_max = base_lat_max + stored_marker_clip_buffer
         else:
             # No bounds checking
-            lon_min, lon_max = -np.inf, np.inf
-            lat_min, lat_max = -np.inf, np.inf
+            marker_lon_min, marker_lon_max = -np.inf, np.inf
+            marker_lat_min, marker_lat_max = -np.inf, np.inf
+
+        # Check if we need enhanced text clipping for Cartopy
+        # This is triggered when:
+        # 1. We have text to plot (text_kwargs is not None)
+        # 2. clip_on=True is set in text_kwargs
+        # 3. We're using geographic coordinates (use_latlon=True)
+        # 4. The axes is a Cartopy GeoAxes
+        enhanced_text_clip = False
+        text_lon_min, text_lon_max = marker_lon_min, marker_lon_max
+        text_lat_min, text_lat_max = marker_lat_min, marker_lat_max
+
+        if text_kwargs is not None and tkw.get("clip_on", True) and use_latlon:
+            try:
+                proj = ax.projection  # Cartopy's GeoAxes has this attr
+                if isinstance(proj, ccrs.Projection):
+                    enhanced_text_clip = True
+                    # Apply buffer for text clipping (independent of marker buffer)
+                    if stored_respect_bounds and opts and opts.xlim:
+                        text_lon_min = base_lon_min - stored_text_clip_buffer
+                        text_lon_max = base_lon_max + stored_text_clip_buffer
+                    if stored_respect_bounds and opts and opts.ylim:
+                        text_lat_min = base_lat_min - stored_text_clip_buffer
+                        text_lat_max = base_lat_max + stored_text_clip_buffer
+            except AttributeError:
+                pass  # Normal Matplotlib Axes
 
         if mode == "coord_lonlat":  # DataFrame with lon/lat
             for x, y, lbl in zip(lon_direct, lat_direct, labels, strict=False):
-                # Check bounds if enabled
+                # Check marker bounds if enabled
                 if stored_respect_bounds and not (
-                    lon_min <= x <= lon_max and lat_min <= y <= lat_max
+                    marker_lon_min <= x <= marker_lon_max
+                    and marker_lat_min <= y <= marker_lat_max
                 ):
                     continue
                 ax.plot(x, y, **_inject_transform(ax, mkw, use_latlon))
                 if text_kwargs is not None:
-                    ax.text(x, y, lbl, **_inject_transform(ax, tkw, use_latlon))
+                    # Apply enhanced text clipping if needed
+                    if enhanced_text_clip:
+                        if (
+                            text_lon_min <= x <= text_lon_max
+                            and text_lat_min <= y <= text_lat_max
+                        ):
+                            ax.text(x, y, lbl, **_inject_transform(ax, tkw, use_latlon))
+                    else:
+                        ax.text(x, y, lbl, **_inject_transform(ax, tkw, use_latlon))
         elif mode == "coord_xy":  # DataFrame with x/y
             for x, y, lbl in zip(x_direct, y_direct, labels, strict=False):
                 # For x/y coordinates, we need to check against the corresponding lat/lon
@@ -195,20 +256,54 @@ def make_node_marker_post(
                 if text_kwargs is not None:
                     ax.text(x, y, lbl, **_inject_transform(ax, tkw, use_latlon))
         else:  # indices → lookup coords based on use_latlon
+            # Pre-compute coordinates for performance
             coord_x = lon_arr if use_latlon else x_arr
             coord_y = lat_arr if use_latlon else y_arr
-            for i in idx:
-                # Always check bounds against lat/lon coordinates
-                lon, lat = lon_arr[i], lat_arr[i]
-                if stored_respect_bounds and not (
-                    lon_min <= lon <= lon_max and lat_min <= lat <= lat_max
-                ):
+
+            # Vectorized bounds checking for performance
+            lon_vals = lon_arr[idx]
+            lat_vals = lat_arr[idx]
+
+            # Pre-compute marker visibility mask
+            if stored_respect_bounds:
+                marker_mask = (
+                    (lon_vals >= marker_lon_min)
+                    & (lon_vals <= marker_lon_max)
+                    & (lat_vals >= marker_lat_min)
+                    & (lat_vals <= marker_lat_max)
+                )
+            else:
+                marker_mask = np.ones(len(idx), dtype=bool)
+
+            # Pre-compute text visibility mask for enhanced clipping
+            if enhanced_text_clip and text_kwargs is not None:
+                text_mask = (
+                    (lon_vals >= text_lon_min)
+                    & (lon_vals <= text_lon_max)
+                    & (lat_vals >= text_lat_min)
+                    & (lat_vals <= text_lat_max)
+                )
+            else:
+                text_mask = (
+                    marker_mask  # Use same as marker mask if no enhanced clipping
+                )
+
+            for j, i in enumerate(idx):
+                # Check marker visibility using pre-computed mask
+                if not marker_mask[j]:
                     continue
+
                 x, y = coord_x[i], coord_y[i]
                 lbl = str(i + index_base)
                 ax.plot(x, y, **_inject_transform(ax, mkw, use_latlon))
+
                 if text_kwargs is not None:
-                    ax.text(x, y, lbl, **_inject_transform(ax, tkw, use_latlon))
+                    # Apply text clipping based on the appropriate mask
+                    if enhanced_text_clip:
+                        if text_mask[j]:  # Use enhanced text clipping mask
+                            ax.text(x, y, lbl, **_inject_transform(ax, tkw, use_latlon))
+                    elif marker_mask[j]:  # Text follows marker visibility
+                        ax.text(x, y, lbl, **_inject_transform(ax, tkw, use_latlon))
 
     return _post
 
