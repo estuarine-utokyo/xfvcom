@@ -36,6 +36,9 @@ def plot_node_checker(
     specific_nodes: Sequence[int] | None = None,
     specific_node_color: str = "red",
     all_node_color: str = "blue",
+    all_node_marker_size: float | None = None,
+    node_number_color: str = "black",
+    node_number_size: float | None = None,
     mesh_color: str = "#808080",
     mesh_linewidth: float = 0.3,
     xlim: tuple[float, float] | None = None,
@@ -70,6 +73,12 @@ def plot_node_checker(
         Color for specific node markers
     all_node_color : str, default "blue"
         Color for all node markers
+    all_node_marker_size : float, optional
+        Size for all node markers. If None, auto-calculated based on node count.
+    node_number_color : str, default "black"
+        Color for node number text labels
+    node_number_size : float, optional
+        Font size for node number text labels. If None, auto-calculated based on node count.
     mesh_color : str, default "#808080"
         Color for mesh lines
     mesh_linewidth : float, default 0.3
@@ -129,13 +138,19 @@ def plot_node_checker(
     plotter = FvcomPlotter(grid_ds, cfg)
 
     # Determine marker sizes based on node count and display options
-    all_marker_size = _auto_marker_size(n_nodes, show_all_nodes, show_node_numbers)
+    if all_node_marker_size is not None:
+        all_marker_size = all_node_marker_size
+    else:
+        all_marker_size = _auto_marker_size(n_nodes, show_all_nodes, show_node_numbers)
     specific_marker_size = max(all_marker_size * 1.5, 5)  # Specific nodes larger
 
     # Determine font size for labels
-    font_size = (
-        _auto_font_size(n_nodes, xlim, ylim, grid_ds) if show_node_numbers else 8
-    )
+    if node_number_size is not None:
+        font_size = node_number_size
+    else:
+        font_size = (
+            _auto_font_size(n_nodes, xlim, ylim, grid_ds) if show_node_numbers else 8
+        )
 
     # Build post-processing functions
     post_process_funcs = []
@@ -157,7 +172,7 @@ def plot_node_checker(
         if show_node_numbers:  # Remove limit - user can zoom in for overlapping text
             tkw_all = {
                 "fontsize": font_size,
-                "color": "black",  # Simple black text
+                "color": node_number_color,  # Use custom text color
                 "ha": "center",
                 "va": "bottom",  # Position text above the node marker
                 "zorder": 4,
