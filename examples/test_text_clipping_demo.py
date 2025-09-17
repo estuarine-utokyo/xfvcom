@@ -38,7 +38,7 @@ def main():
         grid_path=grid_file,
         utm_zone=utm_zone,
         add_dummy_time=False,
-        add_dummy_siglay=False
+        add_dummy_siglay=False,
     )
 
     grid_ds = loader.ds
@@ -60,17 +60,24 @@ def main():
     print(f"Displaying {len(display_nodes)} nodes with markers and labels")
 
     # Create two plots for comparison
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10),
-                                    subplot_kw={'projection': ccrs.PlateCarree()})
+    fig, (ax1, ax2) = plt.subplots(
+        1, 2, figsize=(20, 10), subplot_kw={"projection": ccrs.PlateCarree()}
+    )
 
     # Plot 1: Without respect_bounds (all text shown regardless of extent)
     print("\nCreating Plot 1: Without text clipping (respect_bounds=False)...")
     pp_no_clip = make_node_marker_post(
         display_nodes,
         plotter,
-        marker_kwargs={'marker': 'o', 'color': 'red', 'markersize': 4, 'zorder': 4},
-        text_kwargs={'fontsize': 8, 'color': 'yellow', 'ha': 'center',
-                     'va': 'bottom', 'zorder': 5, 'clip_on': False},
+        marker_kwargs={"marker": "o", "color": "red", "markersize": 4, "zorder": 4},
+        text_kwargs={
+            "fontsize": 8,
+            "color": "yellow",
+            "ha": "center",
+            "va": "bottom",
+            "zorder": 5,
+            "clip_on": False,
+        },
         index_base=1,
         respect_bounds=False,  # Show all markers and text
     )
@@ -79,16 +86,24 @@ def main():
     ax1.add_image(GoogleTiles(style="satellite"), 10)
     ax1.gridlines(draw_labels=True, alpha=0.5)
     pp_no_clip(ax1, opts=FvcomPlotOptions(xlim=xlim, ylim=ylim, use_latlon=True))
-    ax1.set_title("WITHOUT Enhanced Clipping\n(Text appears outside map extent)", fontsize=14)
+    ax1.set_title(
+        "WITHOUT Enhanced Clipping\n(Text appears outside map extent)", fontsize=14
+    )
 
     # Plot 2: With enhanced text clipping (only text within extent shown)
     print("Creating Plot 2: With enhanced text clipping (clip_on=True)...")
     pp_with_clip = make_node_marker_post(
         display_nodes,
         plotter,
-        marker_kwargs={'marker': 'o', 'color': 'red', 'markersize': 4, 'zorder': 4},
-        text_kwargs={'fontsize': 8, 'color': 'yellow', 'ha': 'center',
-                     'va': 'bottom', 'zorder': 5, 'clip_on': True},  # Enable clipping
+        marker_kwargs={"marker": "o", "color": "red", "markersize": 4, "zorder": 4},
+        text_kwargs={
+            "fontsize": 8,
+            "color": "yellow",
+            "ha": "center",
+            "va": "bottom",
+            "zorder": 5,
+            "clip_on": True,
+        },  # Enable clipping
         index_base=1,
         respect_bounds=False,  # Show all markers (but text will be clipped)
     )
@@ -97,24 +112,29 @@ def main():
     ax2.add_image(GoogleTiles(style="satellite"), 10)
     ax2.gridlines(draw_labels=True, alpha=0.5)
     pp_with_clip(ax2, opts=FvcomPlotOptions(xlim=xlim, ylim=ylim, use_latlon=True))
-    ax2.set_title("WITH Enhanced Clipping\n(Text properly clipped to map extent)", fontsize=14)
+    ax2.set_title(
+        "WITH Enhanced Clipping\n(Text properly clipped to map extent)", fontsize=14
+    )
 
-    plt.suptitle("Enhanced Text Clipping for Cartopy Geographic Coordinates",
-                 fontsize=16, fontweight='bold')
+    plt.suptitle(
+        "Enhanced Text Clipping for Cartopy Geographic Coordinates",
+        fontsize=16,
+        fontweight="bold",
+    )
     plt.tight_layout()
 
     # Save the comparison
     output_dir = Path("PNG")
     output_dir.mkdir(exist_ok=True)
     output_file = output_dir / "text_clipping_comparison.png"
-    plt.savefig(output_file, dpi=150, bbox_inches='tight')
+    plt.savefig(output_file, dpi=150, bbox_inches="tight")
     print(f"\nComparison plot saved to: {output_file}")
 
     plt.show()
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("DEMONSTRATION COMPLETE")
-    print("="*60)
+    print("=" * 60)
     print("\nKey improvements:")
     print("1. Text labels now respect map extent when clip_on=True")
     print("2. Works around known Cartopy issue with text clipping")

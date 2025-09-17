@@ -35,7 +35,7 @@ def main():
         grid_path=grid_file,
         utm_zone=utm_zone,
         add_dummy_time=False,
-        add_dummy_siglay=False
+        add_dummy_siglay=False,
     )
 
     grid_ds = loader.ds
@@ -73,12 +73,12 @@ def main():
     pp1 = make_node_marker_post(
         all_nodes,
         plotter,
-        marker_kwargs={'marker': 'o', 'color': 'red', 'markersize': 2},
-        text_kwargs={'fontsize': 6, 'color': 'blue', 'clip_on': True},
+        marker_kwargs={"marker": "o", "color": "red", "markersize": 2},
+        text_kwargs={"fontsize": 6, "color": "blue", "clip_on": True},
         index_base=1,
         respect_bounds=True,
         marker_clip_buffer=0.0,  # No buffer
-        text_clip_buffer=0.0,     # No buffer
+        text_clip_buffer=0.0,  # No buffer
     )
     ax1.set_extent([xlim[0], xlim[1], ylim[0], ylim[1]], crs=ccrs.PlateCarree())
     ax1.add_image(GoogleTiles(style="satellite"), 10)
@@ -91,12 +91,12 @@ def main():
     pp2 = make_node_marker_post(
         all_nodes,
         plotter,
-        marker_kwargs={'marker': 'o', 'color': 'red', 'markersize': 2},
-        text_kwargs={'fontsize': 6, 'color': 'blue', 'clip_on': True},
+        marker_kwargs={"marker": "o", "color": "red", "markersize": 2},
+        text_kwargs={"fontsize": 6, "color": "blue", "clip_on": True},
         index_base=1,
         respect_bounds=True,
         marker_clip_buffer=0.002,  # Include markers slightly outside
-        text_clip_buffer=0.0,      # No text buffer
+        text_clip_buffer=0.0,  # No text buffer
     )
     ax2.set_extent([xlim[0], xlim[1], ylim[0], ylim[1]], crs=ccrs.PlateCarree())
     ax2.add_image(GoogleTiles(style="satellite"), 10)
@@ -109,12 +109,12 @@ def main():
     pp3 = make_node_marker_post(
         all_nodes,
         plotter,
-        marker_kwargs={'marker': 'o', 'color': 'red', 'markersize': 2},
-        text_kwargs={'fontsize': 6, 'color': 'blue', 'clip_on': True},
+        marker_kwargs={"marker": "o", "color": "red", "markersize": 2},
+        text_kwargs={"fontsize": 6, "color": "blue", "clip_on": True},
         index_base=1,
         respect_bounds=True,
-        marker_clip_buffer=0.0,     # No marker buffer
-        text_clip_buffer=-0.002,    # Exclude text near edges
+        marker_clip_buffer=0.0,  # No marker buffer
+        text_clip_buffer=-0.002,  # Exclude text near edges
     )
     ax3.set_extent([xlim[0], xlim[1], ylim[0], ylim[1]], crs=ccrs.PlateCarree())
     ax3.add_image(GoogleTiles(style="satellite"), 10)
@@ -127,12 +127,12 @@ def main():
     pp4 = make_node_marker_post(
         all_nodes,
         plotter,
-        marker_kwargs={'marker': 'o', 'color': 'red', 'markersize': 2},
-        text_kwargs={'fontsize': 6, 'color': 'blue', 'clip_on': True},
+        marker_kwargs={"marker": "o", "color": "red", "markersize": 2},
+        text_kwargs={"fontsize": 6, "color": "blue", "clip_on": True},
         index_base=1,
         respect_bounds=True,
-        marker_clip_buffer=0.001,   # Small positive buffer for markers
-        text_clip_buffer=-0.001,    # Small negative buffer for text
+        marker_clip_buffer=0.001,  # Small positive buffer for markers
+        text_clip_buffer=-0.001,  # Small negative buffer for text
     )
     ax4.set_extent([xlim[0], xlim[1], ylim[0], ylim[1]], crs=ccrs.PlateCarree())
     ax4.add_image(GoogleTiles(style="satellite"), 10)
@@ -140,21 +140,23 @@ def main():
     pp4(ax4, opts=base_opts)
     ax4.set_title("Combined Buffers\n(Marker +0.001°, Text -0.001°)", fontsize=14)
 
-    plt.suptitle("Independent Marker and Text Buffer Control", fontsize=18, fontweight='bold')
+    plt.suptitle(
+        "Independent Marker and Text Buffer Control", fontsize=18, fontweight="bold"
+    )
     plt.tight_layout()
 
     # Save the comparison
     output_dir = Path("PNG")
     output_dir.mkdir(exist_ok=True)
     output_file = output_dir / "marker_buffer_comparison.png"
-    plt.savefig(output_file, dpi=150, bbox_inches='tight')
+    plt.savefig(output_file, dpi=150, bbox_inches="tight")
     print(f"\nComparison plot saved to: {output_file}")
 
     plt.show()
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("MARKER BUFFER DEMONSTRATION COMPLETE")
-    print("="*60)
+    print("=" * 60)
     print("\nKey features:")
     print("1. marker_clip_buffer: Controls marker visibility at boundaries")
     print("   - Positive: Include markers outside bounds")
