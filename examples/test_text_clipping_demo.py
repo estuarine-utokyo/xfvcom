@@ -10,16 +10,17 @@ After the fix: Text labels are properly clipped to the map extent when using Car
 """
 
 from pathlib import Path
-import numpy as np
-import matplotlib.pyplot as plt
+
 import cartopy.crs as ccrs
+import matplotlib.pyplot as plt
+import numpy as np
 from cartopy.io.img_tiles import GoogleTiles
 
 from xfvcom import (
     FvcomInputLoader,
-    FvcomPlotter,
     FvcomPlotConfig,
     FvcomPlotOptions,
+    FvcomPlotter,
     make_node_marker_post,
 )
 
