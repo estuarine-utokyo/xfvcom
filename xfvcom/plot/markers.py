@@ -184,12 +184,12 @@ def make_node_marker_post(
         if stored_respect_bounds and opts and (opts.xlim or opts.ylim):
             # Use the bounds from opts (these are always in lat/lon for geographic plots)
             if opts.xlim:
-                base_lon_min, base_lon_max = opts.xlim
+                base_lon_min, base_lon_max = float(opts.xlim[0]), float(opts.xlim[1])
             else:
                 base_lon_min, base_lon_max = float(lon_arr.min()), float(lon_arr.max())
 
             if opts.ylim:
-                base_lat_min, base_lat_max = opts.ylim
+                base_lat_min, base_lat_max = float(opts.ylim[0]), float(opts.ylim[1])
             else:
                 base_lat_min, base_lat_max = float(lat_arr.min()), float(lat_arr.max())
 
