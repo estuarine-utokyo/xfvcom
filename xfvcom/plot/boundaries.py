@@ -20,6 +20,7 @@ def make_element_boundary_post(
     index_base: int = 1,
     respect_bounds: bool = True,
     clip_buffer: float = 0.0,
+    grid_obj: Any = None,  # Optional FvcomGrid or FvcomInputLoader
 ) -> Callable[[Axes], None]:
     """Create post-processing function to draw element boundaries for selected nodes.
 
@@ -37,6 +38,8 @@ def make_element_boundary_post(
         If True, only show boundaries within current xlim/ylim
     clip_buffer : float
         Buffer in degrees for clipping. Positive values extend beyond bounds.
+    grid_obj : FvcomGrid | FvcomInputLoader | None
+        Optional grid object or loader with get_node_element_boundaries method
 
     Returns
     -------
@@ -48,7 +51,8 @@ def make_element_boundary_post(
     >>> pp_boundaries = make_element_boundary_post(
     ...     [100, 200, 300],
     ...     plotter,
-    ...     line_kwargs={"color": "red", "linewidth": 2, "linestyle": "-"}
+    ...     line_kwargs={"color": "red", "linewidth": 2, "linestyle": "-"},
+    ...     grid_obj=loader  # Pass the loader or grid
     ... )
     >>> ax = plotter.plot_2d(da=None, post_process_func=pp_boundaries, opts=opts)
     """
@@ -57,7 +61,12 @@ def make_element_boundary_post(
         line_kwargs = {"color": "red", "linewidth": 2, "linestyle": "-"}
 
     # Get boundaries from the grid
-    if hasattr(plotter, "grid") and plotter.grid is not None:
+    if grid_obj is not None and hasattr(grid_obj, "get_node_element_boundaries"):
+        # Use provided grid object or loader
+        boundaries = grid_obj.get_node_element_boundaries(
+            node_indices, index_base=index_base, return_as="lines"
+        )
+    elif hasattr(plotter, "grid") and plotter.grid is not None:
         # If plotter has direct grid access
         boundaries = plotter.grid.get_node_element_boundaries(
             node_indices, index_base=index_base, return_as="lines"
