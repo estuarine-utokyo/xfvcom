@@ -14,6 +14,7 @@
 - `ruff check .`: Static analysis aligned with the repo lint rules.
 - `black . && isort .`: Auto-format code with an 88-character line length and Black-compatible import ordering.
 - `mypy --config-file mypy.ini xfvcom`: Type-check new code paths using the shared configuration (Python 3.12 target, relaxed import checks).
+- `pytest && black --check . && isort --check-only . && mypy xfvcom`: Mirror the GitHub CI gate locally before committing.
 
 ## Coding Style & Naming Conventions
 - Follow Python 3.10+ idioms; prefer type annotations and dataclasses where appropriate.
