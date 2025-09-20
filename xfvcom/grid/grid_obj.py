@@ -412,6 +412,331 @@ class FvcomGrid:
 
         return boundaries
 
+    def get_node_control_volume(
+        self, node_idx: int, index_base: int = 1
+    ) -> list[tuple[float, float]]:
+        """Get FVCOM median-dual control volume polygon for a node.
+
+        Parameters
+        ----------
+        node_idx : int
+            Node index
+        index_base : int
+            0 for zero-based indexing, 1 for one-based indexing (FVCOM default)
+
+        Returns
+        -------
+        list[tuple[float, float]]
+            List of (x, y) coordinates forming the control volume polygon
+        """
+        import numpy as np
+
+        # Convert to zero-based
+        if index_base == 1:
+            node_idx = node_idx - 1
+
+        # Validate index
+        if node_idx < 0 or node_idx >= self.node:
+            raise ValueError(f"Invalid node index: {node_idx}")
+
+        # Find all triangles containing this node
+        incident_triangles = self._get_incident_triangles(node_idx)
+
+        if len(incident_triangles) == 0:
+            return []
+
+        # Special case: single triangle
+        if len(incident_triangles) == 1:
+            tri_idx = incident_triangles[0]
+            tri_nodes = self.nv[:, tri_idx]
+
+            # Find the other two nodes
+            other_nodes = [n for n in tri_nodes if n != node_idx]
+
+            # Calculate triangle centroid
+            cx = np.mean(self.x[tri_nodes])
+            cy = np.mean(self.y[tri_nodes])
+
+            # Get edge midpoints
+            mx1 = (self.x[node_idx] + self.x[other_nodes[0]]) / 2
+            my1 = (self.y[node_idx] + self.y[other_nodes[0]]) / 2
+            mx2 = (self.x[node_idx] + self.x[other_nodes[1]]) / 2
+            my2 = (self.y[node_idx] + self.y[other_nodes[1]]) / 2
+
+            # Create control volume: node -> midpoint1 -> centroid -> midpoint2 -> node
+            polygon = [
+                (float(self.x[node_idx]), float(self.y[node_idx])),
+                (float(mx1), float(my1)),
+                (float(cx), float(cy)),
+                (float(mx2), float(my2)),
+                (float(self.x[node_idx]), float(self.y[node_idx]))
+            ]
+            return polygon
+
+        # Order triangles counterclockwise around the node
+        ordered_triangles = self._order_triangles_ccw(node_idx, incident_triangles)
+
+        # Build control volume polygon
+        polygon = []
+        prev_midpoint: tuple[float, float] | None = None
+
+        for i, tri_idx in enumerate(ordered_triangles):  # type: ignore[assignment]
+            # Get triangle vertices (0-based)
+            tri_nodes = self.nv[:, tri_idx]
+
+            # Find the other two nodes in this triangle
+            other_nodes = [n for n in tri_nodes if n != node_idx]
+
+            # Calculate triangle centroid
+            cx = np.mean(self.x[tri_nodes])
+            cy = np.mean(self.y[tri_nodes])
+
+            # Get edge midpoints for edges connected to node_idx
+            mx1 = (self.x[node_idx] + self.x[other_nodes[0]]) / 2
+            my1 = (self.y[node_idx] + self.y[other_nodes[0]]) / 2
+            mx2 = (self.x[node_idx] + self.x[other_nodes[1]]) / 2
+            my2 = (self.y[node_idx] + self.y[other_nodes[1]]) / 2
+
+            # Determine which midpoint connects to the previous triangle
+            if i == 0:
+                # First triangle - start with one midpoint
+                polygon.append((float(mx1), float(my1)))
+                polygon.append((float(cx), float(cy)))
+                prev_midpoint = (mx2, my2)
+            else:
+                # Find which midpoint is shared with previous triangle
+                # (should be close to prev_midpoint)
+                assert prev_midpoint is not None  # Type guard for mypy
+                dist1 = np.sqrt((mx1 - prev_midpoint[0])**2 + (my1 - prev_midpoint[1])**2)
+                dist2 = np.sqrt((mx2 - prev_midpoint[0])**2 + (my2 - prev_midpoint[1])**2)
+
+                if dist1 < dist2:
+                    # mx1/my1 is the shared edge
+                    polygon.append((float(cx), float(cy)))
+                    prev_midpoint = (mx2, my2)
+                else:
+                    # mx2/my2 is the shared edge
+                    polygon.append((float(cx), float(cy)))
+                    prev_midpoint = (mx1, my1)
+
+        # Add the last midpoint
+        if prev_midpoint is not None:
+            polygon.append((float(prev_midpoint[0]), float(prev_midpoint[1])))
+
+        # Check if this is a boundary node
+        if self._is_boundary_node(node_idx, incident_triangles):
+            # For boundary nodes, we need to close along the boundary
+            # Add the node itself for proper closure
+            if len(polygon) > 2:
+                # Add lines from last midpoint to node and from node to first midpoint
+                polygon.append((float(self.x[node_idx]), float(self.y[node_idx])))
+
+        # Close the polygon
+        if len(polygon) > 0 and polygon[0] != polygon[-1]:
+            polygon.append(polygon[0])
+
+        return polygon
+
+    def _get_incident_triangles(self, node_idx: int) -> np.ndarray:
+        """Get indices of all triangles containing the specified node (0-based)."""
+        import numpy as np
+
+        # Find triangles where node appears in any vertex
+        mask = (self.nv[0, :] == node_idx) | (self.nv[1, :] == node_idx) | (self.nv[2, :] == node_idx)
+        return np.where(mask)[0]
+
+    def _order_triangles_ccw(self, node_idx: int, triangle_indices: np.ndarray) -> list[int]:
+        """Order triangles counterclockwise around a node."""
+        import numpy as np
+
+        if len(triangle_indices) == 0:
+            return []
+
+        # Calculate centroid of each triangle and its angle relative to the node
+        angles = []
+        for tri_idx in triangle_indices:
+            tri_nodes = self.nv[:, tri_idx]
+            cx = np.mean(self.x[tri_nodes])
+            cy = np.mean(self.y[tri_nodes])
+
+            # Calculate angle from node to centroid
+            angle = np.arctan2(cy - self.y[node_idx], cx - self.x[node_idx])
+            angles.append(angle)
+
+        # Sort triangles by angle
+        sorted_indices = np.argsort(angles)
+        return [triangle_indices[i] for i in sorted_indices]
+
+    def _is_boundary_node(self, node_idx: int, incident_triangles: np.ndarray) -> bool:
+        """Check if a node is on the boundary (coastal node)."""
+        import numpy as np
+
+        if len(incident_triangles) < 3:
+            # Nodes with less than 3 triangles are likely boundary nodes
+            return True
+
+        # Check if triangles form a complete circle around the node
+        # Calculate the total angle span of triangles
+        angles = []
+        for tri_idx in incident_triangles:
+            tri_nodes = self.nv[:, tri_idx]
+
+            # Get the other two nodes
+            other_nodes = [n for n in tri_nodes if n != node_idx]
+
+            for other_node in other_nodes:
+                angle = np.arctan2(
+                    self.y[other_node] - self.y[node_idx],
+                    self.x[other_node] - self.x[node_idx]
+                )
+                angles.append(angle)
+
+        # Sort angles and check for gaps
+        angles = np.sort(angles)
+        max_gap = 0
+        for i in range(len(angles)):
+            gap = angles[(i + 1) % len(angles)] - angles[i]
+            if gap < 0:
+                gap += 2 * np.pi
+            max_gap = max(max_gap, gap)
+
+        # If there's a large gap (> 120 degrees), it's likely a boundary node
+        return max_gap > (2 * np.pi / 3)
+
+    def calculate_node_area_median_dual(
+        self,
+        node_indices: list[int] | NDArray[np.int_] | None = None,
+        index_base: int = 1,
+    ) -> float:
+        """Calculate total area of median-dual control volumes for specified nodes.
+
+        This uses the FVCOM median-dual method where each node's control volume
+        is formed by connecting triangle centroids and edge midpoints.
+
+        Parameters
+        ----------
+        node_indices : list[int] | NDArray[np.int_] | None
+            List of node indices. If None, calculates area for all nodes.
+        index_base : int
+            0 for zero-based indexing, 1 for one-based indexing (FVCOM default)
+
+        Returns
+        -------
+        float
+            Total area in square meters (assuming x, y are in meters/UTM)
+        """
+        import numpy as np
+
+        # Handle None case - all nodes
+        if node_indices is None:
+            node_indices = np.arange(
+                1 if index_base == 1 else 0, self.node + (1 if index_base == 1 else 0)
+            )
+
+        # Convert to numpy array
+        node_indices_arr: NDArray[np.int_] = np.asarray(node_indices, dtype=int)
+
+        # Convert to zero-based if needed
+        if index_base == 1:
+            node_indices_0 = node_indices_arr - 1
+        else:
+            node_indices_0 = node_indices_arr
+
+        # Validate indices
+        if np.any(node_indices_0 < 0) or np.any(node_indices_0 >= self.node):
+            invalid = node_indices_arr[
+                (node_indices_0 < 0) | (node_indices_0 >= self.node)
+            ]
+            raise ValueError(
+                f"Invalid node indices (base-{index_base}): {invalid.tolist()}. "
+                f"Valid range: {1 if index_base == 1 else 0} to "
+                f"{self.node if index_base == 1 else self.node - 1}"
+            )
+
+        total_area = 0.0
+
+        # Calculate area for each node's control volume
+        for node_idx in node_indices_0:
+            # Get control volume polygon
+            polygon = self.get_node_control_volume(node_idx, index_base=0)
+
+            if len(polygon) < 3:
+                continue
+
+            # Calculate area using shoelace formula
+            area = 0.0
+            n = len(polygon)
+            for i in range(n):
+                j = (i + 1) % n
+                area += polygon[i][0] * polygon[j][1]
+                area -= polygon[j][0] * polygon[i][1]
+
+            area = abs(area) / 2.0
+            total_area += area
+
+        return total_area
+
+    def get_node_control_volumes(
+        self,
+        node_indices: list[int] | NDArray[np.int_] | None = None,
+        index_base: int = 1,
+    ) -> list[list[tuple[float, float]]]:
+        """Get median-dual control volume polygons for specified nodes.
+
+        Parameters
+        ----------
+        node_indices : list[int] | NDArray[np.int_] | None
+            List of node indices. If None, gets volumes for all nodes.
+        index_base : int
+            0 for zero-based indexing, 1 for one-based indexing (FVCOM default)
+
+        Returns
+        -------
+        list[list[tuple[float, float]]]
+            List of control volume polygons, each as a list of (lon, lat) coordinates
+        """
+        import numpy as np
+
+        # Handle None case - all nodes
+        if node_indices is None:
+            node_indices = np.arange(
+                1 if index_base == 1 else 0, self.node + (1 if index_base == 1 else 0)
+            )
+
+        # Convert to numpy array
+        node_indices_arr: NDArray[np.int_] = np.asarray(node_indices, dtype=int)
+
+        volumes = []
+        for node_idx in node_indices_arr:
+            polygon = self.get_node_control_volume(node_idx, index_base)
+
+            # Convert to geographic coordinates if available
+            if self.lon is not None and self.lat is not None and len(polygon) > 0:
+                # Need to interpolate since polygon points are at centroids/midpoints
+                geo_polygon = []
+                for x, y in polygon:
+                    # Find nearest node for approximate lon/lat
+                    # This is simplified - better would be proper interpolation
+                    distances = np.sqrt((self.x - x)**2 + (self.y - y)**2)
+                    nearest = np.argmin(distances)
+
+                    # Use offset from nearest node to estimate lon/lat
+                    dx = x - self.x[nearest]
+                    dy = y - self.y[nearest]
+
+                    # Rough approximation (assuming small distances)
+                    # Better would use proper UTM to geographic conversion
+                    lon_approx = self.lon[nearest] + dx * 1e-5  # Rough scale
+                    lat_approx = self.lat[nearest] + dy * 1e-5
+
+                    geo_polygon.append((lon_approx, lat_approx))
+
+                volumes.append(geo_polygon)
+            else:
+                volumes.append(polygon)
+
+        return volumes
+
     # ------------------------------------------------------------------
     # Representation
     # ------------------------------------------------------------------

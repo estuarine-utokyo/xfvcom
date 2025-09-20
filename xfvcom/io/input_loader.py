@@ -485,3 +485,95 @@ class FvcomInputLoader:
         return self.grid.get_node_element_boundaries(
             node_indices, index_base, return_as
         )
+
+    def calculate_node_area_median_dual(
+        self,
+        node_indices: list[int] | np.ndarray | None = None,
+        index_base: int = 1,
+    ) -> float:
+        """Calculate total area of median-dual control volumes for specified nodes.
+
+        This is the FVCOM-standard control volume calculation method.
+
+        Parameters
+        ----------
+        node_indices : list[int] | np.ndarray | None
+            List of node indices. If None, calculates area for all nodes.
+        index_base : int
+            0 for zero-based indexing, 1 for one-based indexing (FVCOM default)
+
+        Returns
+        -------
+        float
+            Total area in square meters (assuming x, y are in meters/UTM)
+
+        Examples
+        --------
+        >>> loader = FvcomInputLoader("grid.dat", utm_zone=54)
+        >>> area = loader.calculate_node_area_median_dual([100, 200, 300])
+        >>> print(f"Total control volume area: {area:.0f} m²")
+        """
+        if self.grid is None:
+            raise ValueError("Grid not loaded. Initialize with a valid grid file.")
+
+        return self.grid.calculate_node_area_median_dual(node_indices, index_base)
+
+    def get_node_control_volume(
+        self,
+        node_idx: int,
+        index_base: int = 1,
+    ) -> list[tuple[float, float]]:
+        """Get the median-dual control volume polygon for a single node.
+
+        Parameters
+        ----------
+        node_idx : int
+            Node index
+        index_base : int
+            0 for zero-based indexing, 1 for one-based indexing (FVCOM default)
+
+        Returns
+        -------
+        list[tuple[float, float]]
+            Closed polygon as list of (x, y) or (lon, lat) coordinates
+
+        Examples
+        --------
+        >>> loader = FvcomInputLoader("grid.dat", utm_zone=54)
+        >>> polygon = loader.get_node_control_volume(100)
+        >>> print(f"Control volume has {len(polygon)-1} vertices")
+        """
+        if self.grid is None:
+            raise ValueError("Grid not loaded. Initialize with a valid grid file.")
+
+        return self.grid.get_node_control_volume(node_idx, index_base)
+
+    def get_node_control_volumes(
+        self,
+        node_indices: list[int] | np.ndarray | None = None,
+        index_base: int = 1,
+    ) -> list[list[tuple[float, float]]]:
+        """Get median-dual control volume polygons for multiple nodes.
+
+        Parameters
+        ----------
+        node_indices : list[int] | np.ndarray | None
+            List of node indices. If None, gets volumes for all nodes.
+        index_base : int
+            0 for zero-based indexing, 1 for one-based indexing (FVCOM default)
+
+        Returns
+        -------
+        list[list[tuple[float, float]]]
+            List of closed polygons as coordinate pairs
+
+        Examples
+        --------
+        >>> loader = FvcomInputLoader("grid.dat", utm_zone=54)
+        >>> volumes = loader.get_node_control_volumes([100, 200, 300])
+        >>> print(f"Got {len(volumes)} control volumes")
+        """
+        if self.grid is None:
+            raise ValueError("Grid not loaded. Initialize with a valid grid file.")
+
+        return self.grid.get_node_control_volumes(node_indices, index_base)
