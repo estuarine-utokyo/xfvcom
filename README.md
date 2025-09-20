@@ -22,6 +22,7 @@ xfvcom streamlines preprocessing and postprocessing workflows for the Finite Vol
 - **Physics Calculations**: Layer averages, tidal decomposition, variable filtering by dimensions
 - **Time Series Processing**: Advanced extension methods (seasonal, linear, forward-fill)
 - **Grid Utilities**: Mesh connectivity analysis and validation tools
+- **Area Calculations**: Compute total area of triangular elements containing specified nodes
 
 ### 🎨 Visualization
 - **Static Plots**: Time series, 2D contours, vector fields, vertical sections
@@ -117,6 +118,11 @@ ds = fvcom.ds
 # Analyze data
 analyzer = xfvcom.FvcomAnalyzer(ds)
 node_idx = analyzer.nearest_neighbor(lon=140.0, lat=35.0)
+
+# Calculate area for selected nodes (requires grid file)
+from xfvcom import calculate_node_area
+area = calculate_node_area("path/to/grid.dat", [100, 200, 300], utm_zone=54)
+print(f"Area: {area/1e6:.2f} km²")
 
 # Create visualizations
 cfg = xfvcom.FvcomPlotConfig(figsize=(10, 6), dpi=150)
@@ -240,6 +246,38 @@ filled_ds = interpolate_missing_values(
 )
 ```
 
+### Node Area Calculations
+
+Calculate the total area of triangular elements containing specified nodes, useful for spatial analysis and domain decomposition:
+
+```python
+from xfvcom import FvcomInputLoader, calculate_node_area
+
+# Method 1: Using existing loader
+loader = FvcomInputLoader("grid.dat", utm_zone=54)
+nodes = [100, 200, 300, 500, 1000]  # 1-based node indices (FVCOM convention)
+area = loader.calculate_node_area(nodes, index_base=1)
+print(f"Total area: {area:,.0f} m² ({area/1e6:.2f} km²)")
+
+# Method 2: Direct calculation from grid file
+area = calculate_node_area(
+    grid_file="grid.dat",
+    node_indices=[100, 200, 300],
+    utm_zone=54,
+    index_base=1  # Use 0 for zero-based indexing
+)
+
+# Calculate area for all nodes
+total_area = calculate_node_area("grid.dat", None, utm_zone=54)
+print(f"Total mesh area: {total_area/1e6:.2f} km²")
+```
+
+**Features:**
+- Support for both 0-based and 1-based node indexing
+- Efficient calculation using shoelace formula
+- Returns area in square meters (assuming UTM coordinates)
+- Handles overlapping triangular elements automatically
+
 ### Enhanced Node Visualization with Cartopy
 
 xfvcom provides advanced control for displaying node markers and text labels on geographic maps, addressing known Cartopy limitations with text clipping:
@@ -321,7 +359,7 @@ gw_gen.write("groundwater_forcing.nc")
 | `FvcomAnalyzer` | `xfvcom.analysis` | Physics calculations and spatial analysis |
 | `FvcomPlotter` | `xfvcom.plot` | Main visualization engine |
 | `FvcomPlotConfig` | `xfvcom.plot` | Configuration for plot styling |
-| `FvcomGrid` | `xfvcom.grid` | Grid manipulation utilities |
+| `FvcomGrid` | `xfvcom.grid` | Grid manipulation utilities with area calculations |
 
 ### Generator Classes
 
@@ -340,6 +378,7 @@ gw_gen.write("groundwater_forcing.nc")
 | `extend_timeseries_*()` | `xfvcom.utils.timeseries_utils` | Time series extension methods |
 | `plot_timeseries_comparison()` | `xfvcom.plot.plotly_utils` | Interactive comparison plots |
 | `make_node_marker_post()` | `xfvcom.plot.markers` | Enhanced node/text display with clipping control |
+| `calculate_node_area()` | `xfvcom.grid` | Calculate total area for specified nodes |
 
 ## 🧪 Testing
 
