@@ -261,7 +261,7 @@ class FvcomGrid:
         # Find all elements containing any of the selected nodes
         # nv is already 0-based internally
         node_set = set(node_indices_0.tolist())  # Convert to list for set creation
-        element_mask = np.zeros(self.nele, dtype=bool)
+        element_mask: NDArray[np.bool_] = np.zeros(self.nele, dtype=bool)
 
         for i in range(3):  # Check each vertex of triangles
             element_mask |= np.isin(self.nv[i, :], list(node_set))
