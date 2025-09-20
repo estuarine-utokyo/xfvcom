@@ -515,8 +515,8 @@ class FvcomGrid:
             other_nodes = [n for n in tri_nodes if n != node_idx]
 
             # Calculate triangle centroid
-            cx = np.mean(self.x[tri_nodes])
-            cy = np.mean(self.y[tri_nodes])
+            cx = float(np.mean(self.x[tri_nodes]))
+            cy = float(np.mean(self.y[tri_nodes]))
 
             # Get edge midpoints
             mx1 = (self.x[node_idx] + self.x[other_nodes[0]]) / 2
@@ -525,14 +525,14 @@ class FvcomGrid:
             my2 = (self.y[node_idx] + self.y[other_nodes[1]]) / 2
 
             # Create control volume: node -> midpoint1 -> centroid -> midpoint2 -> node
-            polygon = [
+            simple_polygon = [
                 (float(self.x[node_idx]), float(self.y[node_idx])),
                 (float(mx1), float(my1)),
                 (float(cx), float(cy)),
                 (float(mx2), float(my2)),
                 (float(self.x[node_idx]), float(self.y[node_idx])),
             ]
-            return polygon
+            return simple_polygon
 
         # Order triangles counterclockwise around the node
         ordered_triangles = self._order_triangles_ccw(node_idx, incident_triangles)
