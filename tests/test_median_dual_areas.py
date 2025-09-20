@@ -29,7 +29,9 @@ def test_simple_triangle_control_volumes():
     # Due to boundary effects in single triangle, areas won't be exactly equal
     # but total should equal triangle area
     total_area = area1 + area2 + area3
-    assert abs(total_area - triangle_area) < 1e-10, "Total area should equal triangle area"
+    assert (
+        abs(total_area - triangle_area) < 1e-10
+    ), "Total area should equal triangle area"
 
 
 def test_regular_hexagon_control_volume():
@@ -96,7 +98,9 @@ def test_boundary_node_control_volume():
     total_mesh_area = 2 * 0.5  # Two triangles, each with area 0.5
     total_cv_area = boundary_area1 + boundary_area2 + interior_area1 + interior_area2
 
-    assert abs(total_cv_area - total_mesh_area) < 1e-10, "Total CV area should equal mesh area"
+    assert (
+        abs(total_cv_area - total_mesh_area) < 1e-10
+    ), "Total CV area should equal mesh area"
 
 
 def test_control_volume_polygon_structure():

@@ -47,7 +47,9 @@ def read_fvcom_grd(path: str | Path) -> Tuple[int, int, List[Element], NodeMap]:
             try:
                 n1, n2, n3 = map(int, parts[1:4])
             except ValueError as exc:
-                raise ValueError(f"Invalid element indices in line: '{line.strip()}'") from exc
+                raise ValueError(
+                    f"Invalid element indices in line: '{line.strip()}'"
+                ) from exc
             elements.append((n1, n2, n3))
 
         # Read node coordinates
@@ -66,7 +68,9 @@ def read_fvcom_grd(path: str | Path) -> Tuple[int, int, List[Element], NodeMap]:
                 x = float(parts[1])
                 y = float(parts[2])
             except ValueError as exc:
-                raise ValueError(f"Invalid node entry in line: '{line.strip()}'") from exc
+                raise ValueError(
+                    f"Invalid node entry in line: '{line.strip()}'"
+                ) from exc
             nodes[node_id] = (x, y)
 
     if len(elements) != nelem or len(nodes) != nnode:
@@ -158,11 +162,10 @@ def write_boundary_nodes(nodes: Sequence[int], output_path: Path) -> None:
             fh.write(f"{node_id}\n")
 
 
-def write_polylines(polylines: Sequence[Tuple[List[int], bool]], output_path: Path) -> None:
-    payload = [
-        {"nodes": polyline, "closed": closed}
-        for polyline, closed in polylines
-    ]
+def write_polylines(
+    polylines: Sequence[Tuple[List[int], bool]], output_path: Path
+) -> None:
+    payload = [{"nodes": polyline, "closed": closed} for polyline, closed in polylines]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2)

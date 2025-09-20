@@ -530,7 +530,7 @@ class FvcomGrid:
                 (float(mx1), float(my1)),
                 (float(cx), float(cy)),
                 (float(mx2), float(my2)),
-                (float(self.x[node_idx]), float(self.y[node_idx]))
+                (float(self.x[node_idx]), float(self.y[node_idx])),
             ]
             return polygon
 
@@ -627,14 +627,16 @@ class FvcomGrid:
                 last_point = polygon[-2]
                 outgoing_edge = min(
                     edges_current,
-                    key=lambda edge: ( _edge_midpoint(edge)[0] - last_point[0]) ** 2
-                    + ( _edge_midpoint(edge)[1] - last_point[1]) ** 2,
+                    key=lambda edge: (_edge_midpoint(edge)[0] - last_point[0]) ** 2
+                    + (_edge_midpoint(edge)[1] - last_point[1]) ** 2,
                 )
 
             polygon.append(_edge_midpoint(outgoing_edge))
 
             neighbors = [
-                tri for tri in edge_to_triangles.get(outgoing_edge, []) if tri != current_triangle
+                tri
+                for tri in edge_to_triangles.get(outgoing_edge, [])
+                if tri != current_triangle
             ]
 
             if not neighbors:
@@ -672,10 +674,16 @@ class FvcomGrid:
         import numpy as np
 
         # Find triangles where node appears in any vertex
-        mask = (self.nv[0, :] == node_idx) | (self.nv[1, :] == node_idx) | (self.nv[2, :] == node_idx)
+        mask = (
+            (self.nv[0, :] == node_idx)
+            | (self.nv[1, :] == node_idx)
+            | (self.nv[2, :] == node_idx)
+        )
         return np.where(mask)[0]
 
-    def _order_triangles_ccw(self, node_idx: int, triangle_indices: np.ndarray) -> list[int]:
+    def _order_triangles_ccw(
+        self, node_idx: int, triangle_indices: np.ndarray
+    ) -> list[int]:
         """Order triangles counterclockwise around a node."""
         import numpy as np
 
@@ -850,7 +858,7 @@ class FvcomGrid:
                 for x, y in polygon:
                     # Find nearest node for approximate lon/lat
                     # This is simplified - better would be proper interpolation
-                    distances = np.sqrt((self.x - x)**2 + (self.y - y)**2)
+                    distances = np.sqrt((self.x - x) ** 2 + (self.y - y) ** 2)
                     nearest = np.argmin(distances)
 
                     # Use offset from nearest node to estimate lon/lat
