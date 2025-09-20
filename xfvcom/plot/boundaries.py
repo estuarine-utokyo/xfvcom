@@ -122,39 +122,32 @@ def make_element_boundary_post(
         if not filtered_boundaries:
             return
 
-        # Create LineCollection for efficient rendering
-        # Transform boundaries if using cartopy
+        # Transform and draw lines based on projection
         if hasattr(ax, "projection"):
-            # Transform coordinates for cartopy
+            # Using Cartopy - draw lines one by one using plot
             import cartopy.crs as ccrs
 
-            transformed_boundaries = []
+            # Set transform and draw each line
             for boundary in filtered_boundaries:
-                try:
-                    # Transform from PlateCarree to the axis projection
-                    transformed = ax.projection.transform_points(
-                        ccrs.PlateCarree(),
-                        np.array([p[0] for p in boundary]),
-                        np.array([p[1] for p in boundary]),
-                    )
-                    transformed_boundaries.append(
-                        transformed[:, :2]
-                    )  # Drop z coordinate
-                except Exception:
-                    # If transformation fails, skip this boundary
-                    continue
+                x_coords = [boundary[0][0], boundary[1][0]]
+                y_coords = [boundary[0][1], boundary[1][1]]
 
-            if transformed_boundaries:
-                lc = LineCollection(transformed_boundaries, **line_kwargs)
+                # Plot the line with PlateCarree transform
+                ax.plot(
+                    x_coords,
+                    y_coords,
+                    transform=ccrs.PlateCarree(),
+                    color=line_kwargs.get("color", "red"),
+                    linewidth=line_kwargs.get("linewidth", 2),
+                    linestyle=line_kwargs.get("linestyle", "-"),
+                    alpha=line_kwargs.get("alpha", 1.0),
+                    zorder=line_kwargs.get("zorder", 10),
+                )
         else:
-            # No projection, use coordinates directly
+            # No projection - use LineCollection for efficiency
             lc = LineCollection(filtered_boundaries, **line_kwargs)
-
-        # Add to axes
-        ax.add_collection(lc)
-
-        # Update plot limits if needed
-        ax.autoscale_view()
+            ax.add_collection(lc)
+            ax.autoscale_view()
 
     return post_process
 
