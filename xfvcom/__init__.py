@@ -6,7 +6,13 @@
 # ------------------------------------------------------------------
 from .analysis import FvcomAnalyzer
 from .decorators import precedence
-from .grid import FvcomGrid, calculate_node_area, get_grid, read_grid
+from .grid import (
+    FvcomGrid,
+    calculate_element_area,
+    calculate_node_area,
+    get_grid,
+    read_grid,
+)
 from .io import (  # noqa: F401
     FvcomDataLoader,
     FvcomInputLoader,
@@ -91,6 +97,7 @@ __all__: list[str] = [
     "get_grid",
     "read_grid",
     "calculate_node_area",
+    "calculate_element_area",
 ]
 
 __version__ = "0.2.0"

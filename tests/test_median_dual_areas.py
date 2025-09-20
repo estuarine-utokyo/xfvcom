@@ -49,7 +49,7 @@ def test_regular_hexagon_control_volume():
     # Triangle i connects center, node i, node (i+1)%6
     triangles = []
     for i in range(6):
-        triangles.append([0, i + 1, (i % 6) + 1])  # 0-based
+        triangles.append([0, i + 1, ((i + 1) % 6) + 1])  # 0-based
 
     nv = np.array(triangles).T
 
@@ -63,9 +63,10 @@ def test_regular_hexagon_control_volume():
     # the area of the 6 triangles
     six_triangle_area = 6 * 0.5 * radius * radius * np.sin(np.pi / 3)
 
-    # The median-dual control volume is approximately 0.5 of the triangles
-    assert center_area < six_triangle_area
-    assert center_area > 0.4 * six_triangle_area  # Reasonable bounds
+    # The median-dual control volume should correspond to 1/3 of the surrounding
+    # triangle area for a perfectly regular configuration
+    expected_area = six_triangle_area / 3.0
+    assert center_area == pytest.approx(expected_area, rel=1e-6)
 
 
 def test_boundary_node_control_volume():

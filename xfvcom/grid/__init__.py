@@ -12,6 +12,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 
 # ---------------------------------------------------------------
 # Lazy loader: the first attribute access triggers real import
@@ -84,8 +86,37 @@ else:
         grid = mod.FvcomGrid.from_dat(grid_path, utm_zone=utm_zone)
         return grid.calculate_node_area(node_indices, index_base)
 
+    def calculate_element_area(
+        grid_file: str | Path,
+        element_indices: list[int] | None = None,
+        utm_zone: int = 54,
+        index_base: int = 1,
+    ) -> np.ndarray:
+        """Calculate areas of triangular elements from a grid file."""
+        grid_path = Path(grid_file)
+        if not grid_path.exists():
+            raise FileNotFoundError(f"Grid file not found: {grid_file}")
+
+        mod = _load()
+        grid = mod.FvcomGrid.from_dat(grid_path, utm_zone=utm_zone)
+        return grid.calculate_element_area(element_indices, index_base)
+
     def __dir__():
-        return sorted({"FvcomGrid", "get_grid", "read_grid", "calculate_node_area"})
+        return sorted(
+            {
+                "FvcomGrid",
+                "get_grid",
+                "read_grid",
+                "calculate_node_area",
+                "calculate_element_area",
+            }
+        )
 
 
-__all__ = ["FvcomGrid", "get_grid", "read_grid", "calculate_node_area"]
+__all__ = [
+    "FvcomGrid",
+    "get_grid",
+    "read_grid",
+    "calculate_node_area",
+    "calculate_element_area",
+]

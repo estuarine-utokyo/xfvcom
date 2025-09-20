@@ -10,7 +10,7 @@ from matplotlib.collections import LineCollection
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
 
-    from xfvcom.plot.core import FvcomPlotter
+    from .core import FvcomPlotter
 
 
 def make_element_boundary_post(

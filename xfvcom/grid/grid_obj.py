@@ -67,6 +67,12 @@ class FvcomGrid:
     xc: NDArray[np.float64] | None = field(default=None, repr=False)
     yc: NDArray[np.float64] | None = field(default=None, repr=False)
 
+    # cached topology helpers -----------------------------------------
+    _boundary_edge_cache: set[tuple[int, int]] | None = field(
+        default=None, init=False, repr=False
+    )
+    _boundary_node_cache: set[int] | None = field(default=None, init=False, repr=False)
+
     # ------------------------------------------------------------------
     # Constructors
     # ------------------------------------------------------------------
@@ -290,6 +296,61 @@ class FvcomGrid:
 
         return total_area
 
+    def calculate_element_area(
+        self,
+        element_indices: list[int] | NDArray[np.int_] | None = None,
+        index_base: int = 1,
+    ) -> NDArray[np.float64]:
+        """Calculate areas of triangular elements for selected indices.
+
+        Parameters
+        ----------
+        element_indices : list[int] | NDArray[np.int_] | None
+            Element numbers to evaluate. ``None`` returns areas for every element.
+        index_base : int
+            0 for zero-based indexing, 1 for one-based indexing (FVCOM default).
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of areas in square metres, in the same order as ``element_indices``
+            (or element order if ``element_indices`` is ``None``).
+        """
+        import numpy as np
+
+        if element_indices is None:
+            element_indices = np.arange(
+                1 if index_base == 1 else 0, self.nele + (1 if index_base == 1 else 0)
+            )
+
+        elem_arr: NDArray[np.int_] = np.asarray(element_indices, dtype=int)
+
+        if index_base == 1:
+            elem_idx0 = elem_arr - 1
+        else:
+            elem_idx0 = elem_arr
+
+        if np.any(elem_idx0 < 0) or np.any(elem_idx0 >= self.nele):
+            invalid = elem_arr[(elem_idx0 < 0) | (elem_idx0 >= self.nele)]
+            raise ValueError(
+                f"Invalid element indices (base-{index_base}): {invalid.tolist()}. "
+                f"Valid range: {1 if index_base == 1 else 0} to "
+                f"{self.nele if index_base == 1 else self.nele - 1}"
+            )
+
+        tri_nodes = self.nv[:, elem_idx0]
+        x_coords = self.x[tri_nodes]
+        y_coords = self.y[tri_nodes]
+
+        v1x = x_coords[1] - x_coords[0]
+        v1y = y_coords[1] - y_coords[0]
+        v2x = x_coords[2] - x_coords[0]
+        v2y = y_coords[2] - y_coords[0]
+
+        cross = v1x * v2y - v1y * v2x
+        areas = 0.5 * np.abs(cross)
+        return np.asarray(areas, dtype=float)
+
     def get_node_element_boundaries(
         self,
         node_indices: list[int] | NDArray[np.int_] | None = None,
@@ -477,62 +538,131 @@ class FvcomGrid:
         ordered_triangles = self._order_triangles_ccw(node_idx, incident_triangles)
 
         # Build control volume polygon
-        polygon = []
-        prev_midpoint: tuple[float, float] | None = None
+        ordered_triangles = [int(idx) for idx in ordered_triangles]
 
-        for i, tri_idx in enumerate(ordered_triangles):  # type: ignore[assignment]
-            # Get triangle vertices (0-based)
-            tri_nodes = self.nv[:, tri_idx]
+        def _norm_edge(u: int, v: int) -> tuple[int, int]:
+            return (u, v) if u < v else (v, u)
 
-            # Find the other two nodes in this triangle
-            other_nodes = [n for n in tri_nodes if n != node_idx]
+        def _edge_midpoint(edge: tuple[int, int]) -> tuple[float, float]:
+            u, v = edge
+            return (
+                float((self.x[u] + self.x[v]) / 2.0),
+                float((self.y[u] + self.y[v]) / 2.0),
+            )
 
-            # Calculate triangle centroid
-            cx = np.mean(self.x[tri_nodes])
-            cy = np.mean(self.y[tri_nodes])
+        def _edge_angle(edge: tuple[int, int]) -> float:
+            u, v = edge
+            other = v if u == node_idx else u
+            mx, my = _edge_midpoint(edge)
+            return float(np.arctan2(my - self.y[node_idx], mx - self.x[node_idx]))
 
-            # Get edge midpoints for edges connected to node_idx
-            mx1 = (self.x[node_idx] + self.x[other_nodes[0]]) / 2
-            my1 = (self.y[node_idx] + self.y[other_nodes[0]]) / 2
-            mx2 = (self.x[node_idx] + self.x[other_nodes[1]]) / 2
-            my2 = (self.y[node_idx] + self.y[other_nodes[1]]) / 2
+        boundary_edges = self._get_boundary_edges()
+        node_boundary_edges = [edge for edge in boundary_edges if node_idx in edge]
 
-            # Determine which midpoint connects to the previous triangle
-            if i == 0:
-                # First triangle - start with one midpoint
-                polygon.append((float(mx1), float(my1)))
-                polygon.append((float(cx), float(cy)))
-                prev_midpoint = (mx2, my2)
+        # Build edge → triangles map for adjacency walking
+        edge_to_triangles: dict[tuple[int, int], list[int]] = {}
+        for tri_idx in incident_triangles:
+            tri_idx_int = int(tri_idx)
+            tri_nodes = self.nv[:, tri_idx_int]
+            for raw_node in tri_nodes:
+                other_node = int(raw_node)
+                if other_node == node_idx:
+                    continue
+                edge = _norm_edge(node_idx, other_node)
+                edge_to_triangles.setdefault(edge, []).append(tri_idx_int)
+
+        # Select starting edge: prefer boundary edge so the polygon opens along coastline
+        if node_boundary_edges:
+            node_boundary_edges.sort(key=_edge_angle)
+            start_edge = node_boundary_edges[0]
+        else:
+            first_tri = ordered_triangles[0]
+            tri_nodes = self.nv[:, first_tri]
+            candidate_edges = [
+                _norm_edge(node_idx, int(n)) for n in tri_nodes if int(n) != node_idx
+            ]
+            start_edge = min(candidate_edges, key=_edge_angle)
+
+        # Identify starting triangle that contains the starting edge
+        candidate_tris = edge_to_triangles.get(start_edge, [])
+        if not candidate_tris:
+            return []
+
+        def _triangle_order_key(tri_idx: int) -> int:
+            try:
+                return ordered_triangles.index(tri_idx)
+            except ValueError:
+                return 0
+
+        start_triangle = min(candidate_tris, key=_triangle_order_key)
+
+        polygon: list[tuple[float, float]] = []
+        polygon.append(_edge_midpoint(start_edge))
+
+        visited_triangles: set[int] = set()
+        current_triangle = start_triangle
+        current_edge = start_edge
+
+        while True:
+            visited_triangles.add(current_triangle)
+            tri_nodes = self.nv[:, current_triangle]
+            cx = float(np.mean(self.x[tri_nodes]))
+            cy = float(np.mean(self.y[tri_nodes]))
+            polygon.append((cx, cy))
+
+            edges_current = [
+                _norm_edge(node_idx, int(n)) for n in tri_nodes if int(n) != node_idx
+            ]
+            if not edges_current:
+                break
+
+            if len(edges_current) == 1:
+                outgoing_edge = edges_current[0]
+            elif edges_current[0] == current_edge:
+                outgoing_edge = edges_current[1]
+            elif edges_current[1] == current_edge:
+                outgoing_edge = edges_current[0]
             else:
-                # Find which midpoint is shared with previous triangle
-                # (should be close to prev_midpoint)
-                assert prev_midpoint is not None  # Type guard for mypy
-                dist1 = np.sqrt((mx1 - prev_midpoint[0])**2 + (my1 - prev_midpoint[1])**2)
-                dist2 = np.sqrt((mx2 - prev_midpoint[0])**2 + (my2 - prev_midpoint[1])**2)
+                # Choose the edge whose midpoint is closest to the last polygon vertex
+                last_point = polygon[-2]
+                outgoing_edge = min(
+                    edges_current,
+                    key=lambda edge: ( _edge_midpoint(edge)[0] - last_point[0]) ** 2
+                    + ( _edge_midpoint(edge)[1] - last_point[1]) ** 2,
+                )
 
-                if dist1 < dist2:
-                    # mx1/my1 is the shared edge
-                    polygon.append((float(cx), float(cy)))
-                    prev_midpoint = (mx2, my2)
-                else:
-                    # mx2/my2 is the shared edge
-                    polygon.append((float(cx), float(cy)))
-                    prev_midpoint = (mx1, my1)
+            polygon.append(_edge_midpoint(outgoing_edge))
 
-        # Add the last midpoint
-        if prev_midpoint is not None:
-            polygon.append((float(prev_midpoint[0]), float(prev_midpoint[1])))
+            neighbors = [
+                tri for tri in edge_to_triangles.get(outgoing_edge, []) if tri != current_triangle
+            ]
 
-        # Check if this is a boundary node
-        if self._is_boundary_node(node_idx, incident_triangles):
-            # For boundary nodes, we need to close along the boundary
-            # Add the node itself for proper closure
-            if len(polygon) > 2:
-                # Add lines from last midpoint to node and from node to first midpoint
-                polygon.append((float(self.x[node_idx]), float(self.y[node_idx])))
+            if not neighbors:
+                current_edge = outgoing_edge
+                break
 
-        # Close the polygon
-        if len(polygon) > 0 and polygon[0] != polygon[-1]:
+            next_triangle = None
+            for candidate in neighbors:
+                if candidate not in visited_triangles:
+                    next_triangle = candidate
+                    break
+
+            if next_triangle is None:
+                current_edge = outgoing_edge
+                break
+
+            current_edge = outgoing_edge
+            current_triangle = next_triangle
+
+        # Remove duplicated final midpoint for interior nodes
+        if polygon and np.allclose(polygon[0], polygon[-1]):
+            polygon.pop()
+
+        # Boundary nodes include the node itself to trace along the coastline/open boundary
+        if node_boundary_edges:
+            polygon.append((float(self.x[node_idx]), float(self.y[node_idx])))
+
+        if polygon and polygon[0] != polygon[-1]:
             polygon.append(polygon[0])
 
         return polygon
@@ -567,41 +697,44 @@ class FvcomGrid:
         sorted_indices = np.argsort(angles)
         return [triangle_indices[i] for i in sorted_indices]
 
+    def _get_boundary_edges(self) -> set[tuple[int, int]]:
+        """Compute (or return cached) set of boundary edges as node index pairs."""
+        if self._boundary_edge_cache is not None:
+            return self._boundary_edge_cache
+
+        edge_counts: dict[tuple[int, int], int] = {}
+        for tri_nodes in self.nv.T:
+            n1, n2, n3 = int(tri_nodes[0]), int(tri_nodes[1]), int(tri_nodes[2])
+            edges = (
+                (n1, n2),
+                (n2, n3),
+                (n3, n1),
+            )
+            for u, v in edges:
+                key = (u, v) if u < v else (v, u)
+                edge_counts[key] = edge_counts.get(key, 0) + 1
+
+        boundary_edges = {edge for edge, count in edge_counts.items() if count == 1}
+        self._boundary_edge_cache = boundary_edges
+        return boundary_edges
+
+    def _get_boundary_nodes(self) -> set[int]:
+        """Return set of node indices that lie on any boundary edge."""
+        if self._boundary_node_cache is not None:
+            return self._boundary_node_cache
+
+        boundary_edges = self._get_boundary_edges()
+        boundary_nodes: set[int] = set()
+        for u, v in boundary_edges:
+            boundary_nodes.add(u)
+            boundary_nodes.add(v)
+
+        self._boundary_node_cache = boundary_nodes
+        return boundary_nodes
+
     def _is_boundary_node(self, node_idx: int, incident_triangles: np.ndarray) -> bool:
         """Check if a node is on the boundary (coastal node)."""
-        import numpy as np
-
-        if len(incident_triangles) < 3:
-            # Nodes with less than 3 triangles are likely boundary nodes
-            return True
-
-        # Check if triangles form a complete circle around the node
-        # Calculate the total angle span of triangles
-        angles = []
-        for tri_idx in incident_triangles:
-            tri_nodes = self.nv[:, tri_idx]
-
-            # Get the other two nodes
-            other_nodes = [n for n in tri_nodes if n != node_idx]
-
-            for other_node in other_nodes:
-                angle = np.arctan2(
-                    self.y[other_node] - self.y[node_idx],
-                    self.x[other_node] - self.x[node_idx]
-                )
-                angles.append(angle)
-
-        # Sort angles and check for gaps
-        angles = np.sort(angles)
-        max_gap = 0
-        for i in range(len(angles)):
-            gap = angles[(i + 1) % len(angles)] - angles[i]
-            if gap < 0:
-                gap += 2 * np.pi
-            max_gap = max(max_gap, gap)
-
-        # If there's a large gap (> 120 degrees), it's likely a boundary node
-        return max_gap > (2 * np.pi / 3)
+        return node_idx in self._get_boundary_nodes()
 
     def calculate_node_area_median_dual(
         self,

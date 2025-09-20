@@ -518,6 +518,18 @@ class FvcomInputLoader:
 
         return self.grid.calculate_node_area_median_dual(node_indices, index_base)
 
+    def calculate_element_area(
+        self,
+        element_indices: list[int] | np.ndarray | None = None,
+        index_base: int = 1,
+    ) -> np.ndarray:
+        """Calculate areas of triangular elements for selected element numbers."""
+
+        if self.grid is None:
+            raise ValueError("Grid not loaded. Initialize with a valid grid file.")
+
+        return self.grid.calculate_element_area(element_indices, index_base)
+
     def get_node_control_volume(
         self,
         node_idx: int,

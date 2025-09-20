@@ -22,7 +22,8 @@ xfvcom streamlines preprocessing and postprocessing workflows for the Finite Vol
 - **Physics Calculations**: Layer averages, tidal decomposition, variable filtering by dimensions
 - **Time Series Processing**: Advanced extension methods (seasonal, linear, forward-fill)
 - **Grid Utilities**: Mesh connectivity analysis and validation tools
-- **Area Calculations**: Compute total area of triangular elements containing specified nodes
+- **Node Area Calculations**: FVCOM median-dual control volumes with shoreline-aware boundary closure plus legacy triangle sums
+- **Element Areas**: Retrieve per-cell triangle areas with zero/one-based index handling for targeted diagnostics
 
 ### 🎨 Visualization
 - **Static Plots**: Time series, 2D contours, vector fields, vertical sections
@@ -119,10 +120,18 @@ ds = fvcom.ds
 analyzer = xfvcom.FvcomAnalyzer(ds)
 node_idx = analyzer.nearest_neighbor(lon=140.0, lat=35.0)
 
-# Calculate area for selected nodes (requires grid file)
-from xfvcom import calculate_node_area
-area = calculate_node_area("path/to/grid.dat", [100, 200, 300], utm_zone=54)
-print(f"Area: {area/1e6:.2f} km²")
+# Calculate areas for selected nodes and elements (requires grid file)
+from xfvcom import FvcomInputLoader, calculate_node_area
+
+triangle_area = calculate_node_area("path/to/grid.dat", [100, 200, 300], utm_zone=54)
+
+loader = FvcomInputLoader(grid_file="path/to/grid.dat", utm_zone=54)
+cv_area = loader.calculate_node_area_median_dual([100, 200, 300], index_base=1)
+element_areas = loader.calculate_element_area([10, 11, 12], index_base=1)
+
+print(f"Triangle area sum: {triangle_area/1e6:.2f} km²")
+print(f"Median-dual area sum: {cv_area/1e6:.2f} km²")
+print(f"Element areas: {[round(float(a), 1) for a in element_areas]}")
 
 # Create visualizations
 cfg = xfvcom.FvcomPlotConfig(figsize=(10, 6), dpi=150)
