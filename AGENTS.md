@@ -5,6 +5,7 @@
 - `tests/`: Pytest suite with regression helpers, fixture data under `tests/data`, and image baselines in `tests/baseline`—mirror new features with matching test modules.
 - `docs/`: Task-focused guides (e.g., plotting, forcing generators) that should be updated when workflows change.
 - `examples/`: Ready-to-run notebooks and scripts that demonstrate common processing patterns; keep them lightweight and reproducible.
+- `tools/`: Standalone maintenance scripts (e.g., `extract_fvcom_boundary.py`) for mesh housekeeping tasks.
 - `environment.yml`, `setup.sh`: Provision reproducible development environments; refresh versions here when dependencies shift.
 
 ## Build, Test & Development Commands
