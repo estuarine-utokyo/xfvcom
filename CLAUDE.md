@@ -52,6 +52,17 @@ pytest --regenerate-baseline -q
 pytest tests/test_grid.py
 ```
 
+#### CI-equivalent checks
+
+Run the same suite GitHub executes before pushing:
+
+```bash
+pytest
+black --check .
+isort --check-only .
+mypy xfvcom
+```
+
 ### Code Quality
 ```bash
 # Format code
