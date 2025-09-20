@@ -290,6 +290,128 @@ class FvcomGrid:
 
         return total_area
 
+    def get_node_element_boundaries(
+        self,
+        node_indices: list[int] | NDArray[np.int_] | None = None,
+        index_base: int = 1,
+        return_as: str = "lines",  # "lines" or "polygons"
+    ) -> list[list[tuple[float, float]]]:
+        """Get boundaries of triangular elements containing specified nodes.
+
+        Parameters
+        ----------
+        node_indices : list[int] | NDArray[np.int_] | None
+            List of node indices. If None, gets boundaries for all elements.
+        index_base : int
+            0 for zero-based indexing, 1 for one-based indexing (FVCOM default)
+        return_as : str
+            "lines" returns list of line segments (edges)
+            "polygons" returns list of closed triangles
+
+        Returns
+        -------
+        list[list[tuple[float, float]]]
+            List of polylines/polygons as coordinate pairs (lon, lat)
+            For "lines": each item is a line segment with 2 points
+            For "polygons": each item is a closed triangle with 4 points (first=last)
+        """
+        import numpy as np
+
+        # Handle None case - all nodes
+        if node_indices is None:
+            node_indices = np.arange(
+                1 if index_base == 1 else 0, self.node + (1 if index_base == 1 else 0)
+            )
+
+        # Convert to numpy array
+        node_indices_arr: NDArray[np.int_] = np.asarray(node_indices, dtype=int)
+
+        # Convert to zero-based if needed
+        if index_base == 1:
+            node_indices_0 = node_indices_arr - 1
+        else:
+            node_indices_0 = node_indices_arr
+
+        # Validate indices
+        if np.any(node_indices_0 < 0) or np.any(node_indices_0 >= self.node):
+            invalid = node_indices_arr[
+                (node_indices_0 < 0) | (node_indices_0 >= self.node)
+            ]
+            raise ValueError(
+                f"Invalid node indices (base-{index_base}): {invalid.tolist()}. "
+                f"Valid range: {1 if index_base == 1 else 0} to "
+                f"{self.node if index_base == 1 else self.node - 1}"
+            )
+
+        # Find all elements containing any of the selected nodes
+        node_set = set(node_indices_0.tolist())
+        element_mask: NDArray[np.bool_] = np.zeros(self.nele, dtype=bool)
+
+        for i in range(3):  # Check each vertex of triangles
+            element_mask |= np.isin(self.nv[i, :], list(node_set))
+
+        # Get unique elements containing selected nodes
+        selected_elements = np.where(element_mask)[0]
+
+        if len(selected_elements) == 0:
+            return []
+
+        # Use geographic coordinates if available, otherwise use UTM
+        if self.lon is not None and self.lat is not None:
+            x_coords = self.lon
+            y_coords = self.lat
+        else:
+            x_coords = self.x
+            y_coords = self.y
+
+        boundaries = []
+
+        if return_as == "polygons":
+            # Return closed triangles
+            for elem_idx in selected_elements:
+                # Get the three nodes of this triangle (0-based)
+                n1, n2, n3 = self.nv[:, elem_idx]
+
+                # Create closed polygon (first point repeated at end)
+                polygon = [
+                    (float(x_coords[n1]), float(y_coords[n1])),
+                    (float(x_coords[n2]), float(y_coords[n2])),
+                    (float(x_coords[n3]), float(y_coords[n3])),
+                    (float(x_coords[n1]), float(y_coords[n1])),  # Close the polygon
+                ]
+                boundaries.append(polygon)
+
+        elif return_as == "lines":
+            # Return unique edges as line segments
+            edges_set = set()
+
+            for elem_idx in selected_elements:
+                # Get the three nodes of this triangle (0-based)
+                n1, n2, n3 = self.nv[:, elem_idx]
+
+                # Add three edges (sorted to ensure uniqueness)
+                edges = [
+                    tuple(sorted([n1, n2])),
+                    tuple(sorted([n2, n3])),
+                    tuple(sorted([n3, n1])),
+                ]
+                edges_set.update(edges)
+
+            # Convert edges to line segments
+            for edge in edges_set:
+                n1, n2 = edge
+                line = [
+                    (float(x_coords[n1]), float(y_coords[n1])),
+                    (float(x_coords[n2]), float(y_coords[n2])),
+                ]
+                boundaries.append(line)
+        else:
+            raise ValueError(
+                f"return_as must be 'lines' or 'polygons', got '{return_as}'"
+            )
+
+        return boundaries
+
     # ------------------------------------------------------------------
     # Representation
     # ------------------------------------------------------------------

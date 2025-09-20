@@ -449,3 +449,39 @@ class FvcomInputLoader:
             raise ValueError("Grid not loaded. Initialize with a valid grid file.")
 
         return self.grid.calculate_node_area(node_indices, index_base)
+
+    def get_node_element_boundaries(
+        self,
+        node_indices: list[int] | np.ndarray | None = None,
+        index_base: int = 1,
+        return_as: str = "lines",
+    ) -> list[list[tuple[float, float]]]:
+        """Get boundaries of triangular elements containing specified nodes.
+
+        Parameters
+        ----------
+        node_indices : list[int] | np.ndarray | None
+            List of node indices. If None, gets boundaries for all elements.
+        index_base : int
+            0 for zero-based indexing, 1 for one-based indexing (FVCOM default)
+        return_as : str
+            "lines" returns list of line segments (edges)
+            "polygons" returns list of closed triangles
+
+        Returns
+        -------
+        list[list[tuple[float, float]]]
+            List of polylines/polygons as coordinate pairs (lon, lat)
+
+        Examples
+        --------
+        >>> loader = FvcomInputLoader("grid.dat", utm_zone=54)
+        >>> boundaries = loader.get_node_element_boundaries([100, 200, 300])
+        >>> print(f"Found {len(boundaries)} boundary segments")
+        """
+        if self.grid is None:
+            raise ValueError("Grid not loaded. Initialize with a valid grid file.")
+
+        return self.grid.get_node_element_boundaries(
+            node_indices, index_base, return_as
+        )

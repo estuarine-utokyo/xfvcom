@@ -24,6 +24,7 @@ from .io import (  # noqa: F401
 # ------------------------------------------------------------------
 from .plot.config import FvcomPlotConfig
 from .plot.core import FvcomPlotter
+from .plot.boundaries import make_element_boundary_post
 from .plot.markers import make_node_marker_post  # ← 直接 import
 from .plot.utils import create_anim_2d_plot
 from .plot_options import FvcomPlotOptions
@@ -56,6 +57,7 @@ __all__: list[str] = [
     "FvcomPlotOptions",
     "create_anim_2d_plot",
     "make_node_marker_post",
+    "make_element_boundary_post",
     # analysis / I/O
     "FvcomDataLoader",
     "FvcomInputLoader",
