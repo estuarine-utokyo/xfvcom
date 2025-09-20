@@ -419,3 +419,33 @@ class FvcomInputLoader:
                     }
 
         return results
+
+    def calculate_node_area(
+        self,
+        node_indices: list[int] | np.ndarray | None = None,
+        index_base: int = 1,
+    ) -> float:
+        """Calculate total area of triangular elements containing specified nodes.
+
+        Parameters
+        ----------
+        node_indices : list[int] | np.ndarray | None
+            List of node indices. If None, calculates area for all nodes.
+        index_base : int
+            0 for zero-based indexing, 1 for one-based indexing (FVCOM default)
+
+        Returns
+        -------
+        float
+            Total area in square meters (assuming x, y are in meters/UTM)
+
+        Examples
+        --------
+        >>> loader = FvcomInputLoader("grid.dat", utm_zone=54)
+        >>> area = loader.calculate_node_area([100, 200, 300])
+        >>> print(f"Total area: {area:.0f} m²")
+        """
+        if self.grid is None:
+            raise ValueError("Grid not loaded. Initialize with a valid grid file.")
+
+        return self.grid.calculate_node_area(node_indices, index_base)

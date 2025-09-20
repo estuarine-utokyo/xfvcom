@@ -209,6 +209,88 @@ class FvcomGrid:
         return ds
 
     # ------------------------------------------------------------------
+    # Area calculation methods
+    # ------------------------------------------------------------------
+    def calculate_node_area(
+        self,
+        node_indices: list[int] | NDArray[np.int_] | None = None,
+        index_base: int = 1,
+    ) -> float:
+        """Calculate total area of triangular elements containing specified nodes.
+
+        Parameters
+        ----------
+        node_indices : list[int] | NDArray[np.int_] | None
+            List of node indices. If None, calculates area for all nodes.
+        index_base : int
+            0 for zero-based indexing, 1 for one-based indexing (FVCOM default)
+
+        Returns
+        -------
+        float
+            Total area in square meters (assuming x, y are in meters/UTM)
+        """
+        import numpy as np
+
+        # Handle None case - all nodes
+        if node_indices is None:
+            node_indices = np.arange(
+                1 if index_base == 1 else 0, self.node + (1 if index_base == 1 else 0)
+            )
+
+        # Convert to numpy array
+        node_indices_arr: NDArray[np.int_] = np.asarray(node_indices, dtype=int)
+
+        # Convert to zero-based if needed
+        if index_base == 1:
+            node_indices_0 = node_indices_arr - 1
+        else:
+            node_indices_0 = node_indices_arr
+
+        # Validate indices
+        if np.any(node_indices_0 < 0) or np.any(node_indices_0 >= self.node):
+            invalid = node_indices_arr[
+                (node_indices_0 < 0) | (node_indices_0 >= self.node)
+            ]
+            raise ValueError(
+                f"Invalid node indices (base-{index_base}): {invalid.tolist()}. "
+                f"Valid range: {1 if index_base == 1 else 0} to "
+                f"{self.node if index_base == 1 else self.node - 1}"
+            )
+
+        # Find all elements containing any of the selected nodes
+        # nv is already 0-based internally
+        node_set = set(node_indices_0.tolist())  # Convert to list for set creation
+        element_mask = np.zeros(self.nele, dtype=bool)
+
+        for i in range(3):  # Check each vertex of triangles
+            element_mask |= np.isin(self.nv[i, :], list(node_set))
+
+        # Get unique elements containing selected nodes
+        selected_elements = np.where(element_mask)[0]
+
+        if len(selected_elements) == 0:
+            return 0.0
+
+        # Calculate area of each selected triangle using shoelace formula
+        total_area = 0.0
+
+        for elem_idx in selected_elements:
+            # Get the three nodes of this triangle (0-based)
+            n1, n2, n3 = self.nv[:, elem_idx]
+
+            # Get coordinates
+            x1, y1 = self.x[n1], self.y[n1]
+            x2, y2 = self.x[n2], self.y[n2]
+            x3, y3 = self.x[n3], self.y[n3]
+
+            # Shoelace formula for triangle area
+            area = 0.5 * abs((x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1))
+            total_area += area
+
+        return total_area
+
+    # ------------------------------------------------------------------
     # Representation
     # ------------------------------------------------------------------
     def __repr__(self) -> str:
