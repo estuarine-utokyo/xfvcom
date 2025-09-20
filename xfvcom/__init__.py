@@ -24,13 +24,13 @@ from .io import (  # noqa: F401
     to_mjd,
     write_fvcom_river_nc,
 )
+from .plot.boundaries import make_element_boundary_post
 
 # ------------------------------------------------------------------
 # 2) plotting sub-package (ordered: config → core → utils)
 # ------------------------------------------------------------------
 from .plot.config import FvcomPlotConfig
 from .plot.core import FvcomPlotter
-from .plot.boundaries import make_element_boundary_post
 from .plot.markers import make_node_marker_post  # ← 直接 import
 from .plot.utils import create_anim_2d_plot
 from .plot_options import FvcomPlotOptions
