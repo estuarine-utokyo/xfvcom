@@ -2603,10 +2603,25 @@ class FvcomPlotter(PlotHelperMixin):
         """
         extra = opts.extra
         cmap_obj = extra.get("cmap", opts.cmap)
+
+        levels = extra.get("levels", opts.levels)
+        vmin = extra.get("vmin", opts.vmin)
+        vmax = extra.get("vmax", opts.vmax)
+
+        if isinstance(levels, int):
+            # Convert integer shorthand to explicit boundaries so explicit
+            # vmin/vmax remain in effect across frames.
+            data = da.values
+            lower = vmin if vmin is not None else float(np.nanmin(data))
+            upper = vmax if vmax is not None else float(np.nanmax(data))
+            levels = np.linspace(lower, upper, levels + 1)
+            vmin = lower if vmin is None else vmin
+            vmax = upper if vmax is None else vmax
+
         tc_kwargs = {
-            "levels": extra.get("levels", opts.levels),
-            "vmin": extra.get("vmin", opts.vmin),
-            "vmax": extra.get("vmax", opts.vmax),
+            "levels": levels,
+            "vmin": vmin,
+            "vmax": vmax,
         }
         extend_flag = extra.get("extend", opts.extend)
 
