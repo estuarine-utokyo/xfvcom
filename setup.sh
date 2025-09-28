@@ -22,15 +22,12 @@ print_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
-# Check if conda/mamba is installed
-if command -v mamba &> /dev/null; then
-    CONDA_CMD="mamba"
-    print_status "Found mamba installation"
-elif command -v conda &> /dev/null; then
+# Check if conda is installed
+if command -v conda &> /dev/null; then
     CONDA_CMD="conda"
     print_status "Found conda installation"
 else
-    print_error "Neither conda nor mamba is installed. Please install Miniforge or Anaconda first."
+    print_error "Conda is not installed. Please install Miniforge or Anaconda first."
     echo "Visit: https://github.com/conda-forge/miniforge for installation instructions"
     exit 1
 fi
@@ -92,7 +89,7 @@ if [ "$INSTALL_DEV" = true ]; then
 else
     # Create a temporary environment file without dev dependencies
     print_status "Creating environment without development dependencies..."
-    grep -v -E "(pytest|mypy|black|isort|ipykernel|jupyterlab|types-|pandas-stubs)" environment.yml > /tmp/environment_no_dev.yml
+    grep -v -E "(pytest|mypy|black|isort|ruff|ipykernel|jupyterlab|types-|pandas-stubs)" environment.yml > /tmp/environment_no_dev.yml
     $CONDA_CMD env create -f /tmp/environment_no_dev.yml -n $ENV_NAME
     rm /tmp/environment_no_dev.yml
 fi
@@ -107,6 +104,13 @@ conda activate $ENV_NAME
 # Verify Python version
 PYTHON_VERSION=$(python --version 2>&1 | awk '{print $2}')
 print_status "Python version: $PYTHON_VERSION"
+
+# Ensure the environment resolved to Python 3.12
+if [[ $PYTHON_VERSION != 3.12.* ]]; then
+    print_error "Expected Python 3.12.x but found $PYTHON_VERSION."
+    print_error "Ensure environment.yml pins python=3.12.* and recreate the environment."
+    exit 1
+fi
 
 # Install xfvcom package in editable mode if not already installed via pip section
 if ! pip show xfvcom &> /dev/null; then
