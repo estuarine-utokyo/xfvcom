@@ -112,7 +112,9 @@ def to_mjd(times: pd.DatetimeIndex) -> np.ndarray:
         Modified Julian Day values as float64
     """
     mjd_epoch = pd.Timestamp("1858-11-17")
-    return ((times - mjd_epoch) / pd.Timedelta("1D")).to_numpy("f8")
+    delta = times - mjd_epoch
+    delta_seconds = np.asarray(delta.total_seconds(), dtype=np.float64)
+    return delta_seconds / 86400.0
 
 
 def read_fvcom_river_nc(filepath: Union[Path, str]) -> Dict[str, Any]:

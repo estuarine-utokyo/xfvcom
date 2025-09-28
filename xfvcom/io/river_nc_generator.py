@@ -256,7 +256,9 @@ class RiverNetCDFGenerator(BaseGenerator):
     def _to_mjd(times: pd.DatetimeIndex) -> NDArray[np.float64]:
         """Return Modified Julian Day as a NumPy array (float64)."""
         mjd0 = pd.Timestamp("1858-11-17T00:00:00Z")
-        return ((times - mjd0) / pd.Timedelta("1D")).to_numpy("f8")
+        delta = times - mjd0
+        seconds = np.asarray(delta.total_seconds(), dtype=np.float64)
+        return seconds / 86400.0
 
     @staticmethod
     def _times_char(times: pd.DatetimeIndex) -> np.ndarray:

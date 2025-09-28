@@ -117,7 +117,9 @@ class GroundwaterNetCDFGenerator(BaseGenerator):
     def _to_mjd(t: pd.DatetimeIndex) -> NDArray[np.float32]:
         """Convert to Modified Julian Day."""
         origin = pd.Timestamp("1858-11-17T00:00:00Z")
-        return ((t - origin) / pd.Timedelta("1D")).to_numpy("f4")
+        delta = t - origin
+        seconds = np.asarray(delta.total_seconds(), dtype=np.float64)
+        return (seconds / 86400.0).astype("f4")
 
     @staticmethod
     def _to_ideal_days(t: pd.DatetimeIndex) -> NDArray[np.float32]:
