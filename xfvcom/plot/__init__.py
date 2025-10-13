@@ -10,6 +10,11 @@ from __future__ import annotations
 from .config import FvcomPlotConfig
 from .core import FvcomPlotter  # ← 追加すると便利
 from .markers import make_node_marker_post
+from .timeseries import (
+    apply_smart_time_ticks,
+    plot_ensemble_statistics,
+    plot_ensemble_timeseries,
+)
 
 # Plotly utilities (optional, only if plotly is installed)
 try:
@@ -31,6 +36,9 @@ __all__: list[str] = [
     "FvcomPlotConfig",
     "FvcomPlotter",
     "make_node_marker_post",
+    "apply_smart_time_ticks",
+    "plot_ensemble_timeseries",
+    "plot_ensemble_statistics",
 ]
 
 # Add plotly functions to __all__ if available

@@ -6,6 +6,17 @@
 # ------------------------------------------------------------------
 from .analysis import FvcomAnalyzer
 from .decorators import precedence
+from .dye_timeseries import (
+    AlignPolicy,
+    DyeCase,
+    NegPolicy,
+    Paths,
+    Selection,
+    aggregate,
+    collect_member_files,
+    negative_stats,
+    verify_linearity,
+)
 from .grid import (
     FvcomGrid,
     calculate_element_area,
@@ -69,6 +80,16 @@ __all__: list[str] = [
     "FvcomInputLoader",
     "FvcomAnalyzer",
     "parse_river_namelist",
+    # dye timeseries
+    "DyeCase",
+    "Selection",
+    "Paths",
+    "NegPolicy",
+    "AlignPolicy",
+    "collect_member_files",
+    "aggregate",
+    "negative_stats",
+    "verify_linearity",
     # NetCDF utilities
     "decode_fvcom_time",
     "encode_fvcom_time",
