@@ -74,7 +74,7 @@ def plot_ensemble_timeseries(
     var_name: str = "dye",
     ax: Axes | None = None,
     cfg: FvcomPlotConfig | None = None,
-    max_lines: int = 10,
+    max_lines: int | None = None,
     alpha: float = 0.7,
     legend_outside: bool = True,
     title: str | None = None,
@@ -99,8 +99,8 @@ def plot_ensemble_timeseries(
         Matplotlib axes to plot on. If None, creates new figure
     cfg : FvcomPlotConfig, optional
         Plot configuration. If None, uses default with increased font sizes
-    max_lines : int
-        Maximum number of ensemble members to plot (default: 10)
+    max_lines : int, optional
+        Maximum number of ensemble members to plot. If None, plots all members (default: None)
     alpha : float
         Line transparency (default: 0.7)
     legend_outside : bool
@@ -153,7 +153,8 @@ def plot_ensemble_timeseries(
     # Check if ensemble dimension exists
     if "ensemble" in data.dims:
         n_ensemble = len(data.ensemble)
-        n_plot = min(n_ensemble, max_lines)
+        # If max_lines is None, plot all ensemble members
+        n_plot = n_ensemble if max_lines is None else min(n_ensemble, max_lines)
 
         for i in range(n_plot):
             series = data.isel(ensemble=i)
@@ -185,7 +186,8 @@ def plot_ensemble_timeseries(
                 **kwargs
             )
 
-        if n_ensemble > max_lines:
+        # Show annotation only if we're limiting the number of lines
+        if max_lines is not None and n_ensemble > max_lines:
             ax.text(
                 0.98, 0.02, f"(Showing {n_plot} of {n_ensemble} ensemble members)",
                 transform=ax.transAxes,
