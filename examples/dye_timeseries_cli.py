@@ -238,8 +238,16 @@ def main() -> None:
         sys.exit(1)
 
     # Parse node and sigma lists
-    nodes = parse_int_list(args.nodes) if "," in args.nodes else [int(x) for x in args.nodes.split()]
-    sigmas = parse_int_list(args.sigmas) if "," in args.sigmas else [int(x) for x in args.sigmas.split()]
+    nodes = (
+        parse_int_list(args.nodes)
+        if "," in args.nodes
+        else [int(x) for x in args.nodes.split()]
+    )
+    sigmas = (
+        parse_int_list(args.sigmas)
+        if "," in args.sigmas
+        else [int(x) for x in args.sigmas.split()]
+    )
 
     # Build configuration objects
     paths = Paths(tb_fvcom_dir=tb_fvcom_dir)
@@ -312,23 +320,37 @@ def main() -> None:
         logger.info(f"Saving to {save_path}...")
 
         # NetCDF doesn't support MultiIndex - convert to regular coordinates
-        ds_to_save = ds.reset_index("ensemble") if "ensemble" in ds.indexes and isinstance(ds.indexes["ensemble"], pd.MultiIndex) else ds
+        ds_to_save = (
+            ds.reset_index("ensemble")
+            if "ensemble" in ds.indexes
+            and isinstance(ds.indexes["ensemble"], pd.MultiIndex)
+            else ds
+        )
 
         if save_path.suffix == ".nc":
             ds_to_save.to_netcdf(save_path)
             logger.info(f"Saved NetCDF: {save_path}")
             if ds_to_save is not ds:
-                logger.info("Note: MultiIndex 'ensemble' was converted to separate 'year' and 'member' coordinates")
+                logger.info(
+                    "Note: MultiIndex 'ensemble' was converted to separate 'year' and 'member' coordinates"
+                )
         elif save_path.suffix == ".zarr":
             # Prepare dataset with proper encoding for Zarr compatibility
-            ds_to_save_chunked, encoding = prepare_for_zarr(ds_to_save, time_chunk_size=100)
+            ds_to_save_chunked, encoding = prepare_for_zarr(
+                ds_to_save, time_chunk_size=100
+            )
             ds_to_save_chunked.to_zarr(
-                save_path, mode="w", encoding=encoding,
-                zarr_version=2, consolidated=False
+                save_path,
+                mode="w",
+                encoding=encoding,
+                zarr_version=2,
+                consolidated=False,
             )
             logger.info(f"Saved Zarr: {save_path}")
             if ds_to_save is not ds:
-                logger.info("Note: MultiIndex 'ensemble' was converted to separate 'year' and 'member' coordinates")
+                logger.info(
+                    "Note: MultiIndex 'ensemble' was converted to separate 'year' and 'member' coordinates"
+                )
         else:
             logger.warning(f"Unknown format: {save_path.suffix}. Saving as NetCDF...")
             ds_to_save.to_netcdf(save_path.with_suffix(".nc"))

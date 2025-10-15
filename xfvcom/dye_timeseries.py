@@ -47,39 +47,53 @@ def decode_fvcom_time(ds: xr.Dataset, time_key: str = "time") -> xr.Dataset:
 
     # Get time attributes to determine the reference date
     time_attrs = ds[time_key].attrs
-    units = time_attrs.get('units', '')
+    units = time_attrs.get("units", "")
 
-    if 'since' in units:
+    if "since" in units:
         # Parse units string: "days since 1858-11-17 00:00:00"
         try:
             # Extract reference date from units
-            parts = units.split('since')
+            parts = units.split("since")
             if len(parts) == 2:
                 ref_date_str = parts[1].strip()
                 ref_date = pd.Timestamp(ref_date_str)
 
                 # Convert to datetime
-                if 'days' in parts[0]:
-                    time_decoded = pd.to_datetime(time_values, unit='D', origin=ref_date)
-                elif 'hours' in parts[0]:
-                    time_decoded = pd.to_datetime(time_values, unit='h', origin=ref_date)
-                elif 'seconds' in parts[0]:
-                    time_decoded = pd.to_datetime(time_values, unit='s', origin=ref_date)
-                elif 'milliseconds' in parts[0] or 'msec' in parts[0]:
-                    time_decoded = pd.to_datetime(time_values, unit='ms', origin=ref_date)
+                if "days" in parts[0]:
+                    time_decoded = pd.to_datetime(
+                        time_values, unit="D", origin=ref_date
+                    )
+                elif "hours" in parts[0]:
+                    time_decoded = pd.to_datetime(
+                        time_values, unit="h", origin=ref_date
+                    )
+                elif "seconds" in parts[0]:
+                    time_decoded = pd.to_datetime(
+                        time_values, unit="s", origin=ref_date
+                    )
+                elif "milliseconds" in parts[0] or "msec" in parts[0]:
+                    time_decoded = pd.to_datetime(
+                        time_values, unit="ms", origin=ref_date
+                    )
                 else:
-                    logger.warning(f"Unknown time unit in '{units}', keeping original values")
+                    logger.warning(
+                        f"Unknown time unit in '{units}', keeping original values"
+                    )
                     return ds
 
                 # Update dataset with decoded time
                 ds = ds.assign_coords({time_key: time_decoded})
                 logger.debug(f"Decoded time from {time_values[0]} to {time_decoded[0]}")
             else:
-                logger.warning(f"Could not parse units '{units}', keeping original values")
+                logger.warning(
+                    f"Could not parse units '{units}', keeping original values"
+                )
         except Exception as e:
             logger.warning(f"Failed to decode time: {e}, keeping original values")
     else:
-        logger.warning(f"Time units '{units}' don't contain 'since', keeping original values")
+        logger.warning(
+            f"Time units '{units}' don't contain 'since', keeping original values"
+        )
 
     return ds
 
@@ -120,9 +134,9 @@ class Selection:
     def __post_init__(self) -> None:
         """Normalize inputs to lists."""
         if isinstance(self.nodes, int):
-            self.nodes = [self.nodes]
+            self.nodes = [self.nodes]  # type: ignore[assignment]
         if isinstance(self.sigmas, int):
-            self.sigmas = [self.sigmas]
+            self.sigmas = [self.sigmas]  # type: ignore[assignment]
 
 
 @dataclass
@@ -165,12 +179,13 @@ class AlignPolicy:
             - "climatology": Average over years by (month, day, hour)
     """
 
-    mode: Literal["native_intersection", "same_calendar", "climatology"] = "native_intersection"
+    mode: Literal["native_intersection", "same_calendar", "climatology"] = (
+        "native_intersection"
+    )
 
 
 def collect_member_files(
-    paths: Paths,
-    case: DyeCase
+    paths: Paths, case: DyeCase
 ) -> dict[tuple[int, int], list[Path]]:
     """Collect NetCDF files for all requested (year, member) combinations.
 
@@ -190,13 +205,14 @@ def collect_member_files(
     for year in case.years:
         for member in case.members:
             # Construct expected directory and glob pattern
-            member_dir = paths.tb_fvcom_dir / paths.output_root_rel / str(year) / str(member)
+            member_dir = (
+                paths.tb_fvcom_dir / paths.output_root_rel / str(year) / str(member)
+            )
             pattern = f"{case.basename}_{year}_{member}_*.nc"
 
             # Exclude restart files
             files = [
-                f for f in sorted(member_dir.glob(pattern))
-                if "restart" not in f.name
+                f for f in sorted(member_dir.glob(pattern)) if "restart" not in f.name
             ]
 
             if not files:
@@ -309,6 +325,9 @@ def load_member_series(
             time_val = dye_sel[case.time_key].isel({case.time_key: int(t_idx)}).values
             time_str = pd.Timestamp(time_val).isoformat()
 
+            # After __post_init__, nodes and sigmas are guaranteed to be lists
+            assert isinstance(sel.nodes, list)
+            assert isinstance(sel.sigmas, list)
             node_actual = sel.nodes[int(n_idx)]
             sigma_actual = sel.sigmas[int(s_idx)]
 
@@ -334,21 +353,25 @@ def load_member_series(
     if neg.mode == "clip_zero":
         # Clip BEFORE averaging
         dye_sel = dye_sel.clip(min=0.0)
-        logger.debug(f"Clipped negative values to zero for (year={year}, member={member})")
+        logger.debug(
+            f"Clipped negative values to zero for (year={year}, member={member})"
+        )
 
     # Average over nodes and sigma layers
     dye_mean = dye_sel.mean(dim=["node", case.sigma_key], skipna=False)
 
     # Attach metadata
-    dye_mean.attrs.update({
-        "units": dye_full.attrs.get("units", "dimensionless"),
-        "long_name": f"Spatially averaged {case.var_name}",
-        "year": year,
-        "member": member,
-        "nodes_selected": sel.nodes,
-        "sigmas_selected": sel.sigmas,
-        "negative_policy": neg.mode,
-    })
+    dye_mean.attrs.update(
+        {
+            "units": dye_full.attrs.get("units", "dimensionless"),
+            "long_name": f"Spatially averaged {case.var_name}",
+            "year": year,
+            "member": member,
+            "nodes_selected": sel.nodes,
+            "sigmas_selected": sel.sigmas,
+            "negative_policy": neg.mode,
+        }
+    )
 
     ds.close()
 
@@ -451,17 +474,19 @@ def _aggregate_native_intersection(
     combined = combined.assign_coords(mindex_coords)
 
     # Add metadata
-    combined.attrs.update({
-        "basename": case.basename,
-        "nodes_selected": sel.nodes,
-        "sigmas_selected": sel.sigmas,
-        "negative_policy": neg.mode,
-        "alignment_mode": align.mode,
-        "n_years": len(case.years),
-        "n_members": len(case.members),
-        "tool": "xfvcom.dye_timeseries",
-        "time_steps": len(combined[case.time_key]),
-    })
+    combined.attrs.update(
+        {
+            "basename": case.basename,
+            "nodes_selected": sel.nodes,
+            "sigmas_selected": sel.sigmas,
+            "negative_policy": neg.mode,
+            "alignment_mode": align.mode,
+            "n_years": len(case.years),
+            "n_members": len(case.members),
+            "tool": "xfvcom.dye_timeseries",
+            "time_steps": len(combined[case.time_key]),
+        }
+    )
 
     logger.info(
         f"Native intersection complete: {len(combined[case.time_key])} time steps, "
@@ -500,7 +525,9 @@ def _aggregate_same_calendar(
     combined_df = pd.concat(grouped_data, ignore_index=True)
 
     # Group by calendar position and ensemble
-    grouped = combined_df.groupby(["month", "day", "hour", "year", "member"])["dye"].mean()
+    grouped = combined_df.groupby(["month", "day", "hour", "year", "member"])[
+        "dye"
+    ].mean()
 
     # Convert back to xarray
     result_ds = grouped.to_xarray()
@@ -512,19 +539,23 @@ def _aggregate_same_calendar(
         result_ds = result_ds.stack(ensemble=("year", "member"))
 
     # Add metadata
-    result_ds.attrs.update({
-        "basename": case.basename,
-        "nodes_selected": sel.nodes,
-        "sigmas_selected": sel.sigmas,
-        "negative_policy": neg.mode,
-        "alignment_mode": align.mode,
-        "n_years": len(case.years),
-        "n_members": len(case.members),
-        "tool": "xfvcom.dye_timeseries",
-        "calendar_coords": ["month", "day", "hour"],
-    })
+    result_ds.attrs.update(
+        {
+            "basename": case.basename,
+            "nodes_selected": sel.nodes,
+            "sigmas_selected": sel.sigmas,
+            "negative_policy": neg.mode,
+            "alignment_mode": align.mode,
+            "n_years": len(case.years),
+            "n_members": len(case.members),
+            "tool": "xfvcom.dye_timeseries",
+            "calendar_coords": ["month", "day", "hour"],
+        }
+    )
 
-    logger.info(f"Same calendar aggregation complete: {len(result_ds.ensemble)} ensemble members")
+    logger.info(
+        f"Same calendar aggregation complete: {len(result_ds.ensemble)} ensemble members"
+    )
 
     return result_ds
 
@@ -566,25 +597,29 @@ def _aggregate_climatology(
     result_ds["clim_mean"] = clim_mean.to_xarray()
 
     # Add metadata
-    result_ds.attrs.update({
-        "basename": case.basename,
-        "nodes_selected": sel.nodes,
-        "sigmas_selected": sel.sigmas,
-        "negative_policy": neg.mode,
-        "alignment_mode": align.mode,
-        "n_years": len(case.years),
-        "n_members": len(case.members),
-        "tool": "xfvcom.dye_timeseries",
-        "calendar_coords": ["month", "day", "hour"],
-        "note": "Averaged over years; clim_mean is average over both years and members",
-    })
+    result_ds.attrs.update(
+        {
+            "basename": case.basename,
+            "nodes_selected": sel.nodes,
+            "sigmas_selected": sel.sigmas,
+            "negative_policy": neg.mode,
+            "alignment_mode": align.mode,
+            "n_years": len(case.years),
+            "n_members": len(case.members),
+            "tool": "xfvcom.dye_timeseries",
+            "calendar_coords": ["month", "day", "hour"],
+            "note": "Averaged over years; clim_mean is average over both years and members",
+        }
+    )
 
     logger.info("Climatology aggregation complete")
 
     return result_ds
 
 
-def negative_stats(ds: xr.Dataset, series_dict: dict[tuple[int, int], xr.DataArray] | None = None) -> dict:
+def negative_stats(
+    ds: xr.Dataset, series_dict: dict[tuple[int, int], xr.DataArray] | None = None
+) -> dict:
     """Compute statistics on negative values BEFORE clipping.
 
     Args:
@@ -632,7 +667,9 @@ def negative_stats(ds: xr.Dataset, series_dict: dict[tuple[int, int], xr.DataArr
         }
     else:
         # Fallback: analyze from dataset (may be post-clipping)
-        logger.warning("No raw series provided; computing stats from aggregated dataset")
+        logger.warning(
+            "No raw series provided; computing stats from aggregated dataset"
+        )
 
         if "dye" in ds:
             dye_values = ds["dye"].values
@@ -679,7 +716,11 @@ def verify_linearity(
 
     # Determine parts if not specified
     if parts is None:
-        ensemble_idx = ds.ensemble.to_index() if hasattr(ds.ensemble, 'to_index') else ds.ensemble.values
+        ensemble_idx = (
+            ds.ensemble.to_index()
+            if hasattr(ds.ensemble, "to_index")
+            else ds.ensemble.values
+        )
         if isinstance(ensemble_idx, pd.MultiIndex):
             all_members = ensemble_idx.get_level_values("member").unique().tolist()
         else:
@@ -689,7 +730,11 @@ def verify_linearity(
 
     # Extract reference and parts
     # Handle both MultiIndex and flat ensemble
-    ensemble_idx = ds.ensemble.to_index() if hasattr(ds.ensemble, 'to_index') else ds.ensemble.values
+    ensemble_idx = (
+        ds.ensemble.to_index()
+        if hasattr(ds.ensemble, "to_index")
+        else ds.ensemble.values
+    )
 
     if isinstance(ensemble_idx, pd.MultiIndex):
         # MultiIndex case
@@ -702,17 +747,25 @@ def verify_linearity(
 
         # Sum over parts
         parts_sum = parts_data.sum(dim="ensemble")
-        ref_series = ref_data.isel(ensemble=0) if ref_data.sizes.get("ensemble", 0) > 0 else ref_data
+        ref_series = (
+            ref_data.isel(ensemble=0)
+            if ref_data.sizes.get("ensemble", 0) > 0
+            else ref_data
+        )
     else:
         # Flat ensemble case - assume ensemble index corresponds to member
-        logger.warning("Ensemble is not MultiIndex; assuming ensemble index = member index")
+        logger.warning(
+            "Ensemble is not MultiIndex; assuming ensemble index = member index"
+        )
 
         # Find indices for ref and parts
         ref_idx = ref_member if ref_member < ds.sizes["ensemble"] else None
         parts_idx = [p for p in parts if p < ds.sizes["ensemble"]]
 
         if ref_idx is None:
-            raise ValueError(f"ref_member {ref_member} not found in ensemble (size={ds.sizes['ensemble']})")
+            raise ValueError(
+                f"ref_member {ref_member} not found in ensemble (size={ds.sizes['ensemble']})"
+            )
 
         ref_series = ds["dye"].isel(ensemble=ref_idx)
         parts_data = ds["dye"].isel(ensemble=parts_idx)
@@ -729,7 +782,7 @@ def verify_linearity(
 
     # Nash-Sutcliffe Efficiency
     mean_ref = float(ref_series.mean().item())
-    nse = 1.0 - float(((diff**2).sum() / ((ref_series - mean_ref)**2).sum()).item())
+    nse = 1.0 - float(((diff**2).sum() / ((ref_series - mean_ref) ** 2).sum()).item())
 
     # Count of compared samples
     n_samples = int(ref_series.size)

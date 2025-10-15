@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.dates import DateFormatter, AutoDateLocator, ConciseDateFormatter
+from matplotlib.dates import AutoDateLocator, ConciseDateFormatter, DateFormatter
 from matplotlib.ticker import MaxNLocator
 
 if TYPE_CHECKING:
@@ -64,7 +64,7 @@ def apply_smart_time_ticks(ax, fig=None, minticks=3, maxticks=7, rotation=30):
     if rotation != 0:
         for label in ax.get_xticklabels():
             label.set_rotation(rotation)
-            label.set_ha('right')
+            label.set_ha("right")
 
     return ax
 
@@ -82,7 +82,7 @@ def plot_ensemble_timeseries(
     minticks: int = 3,
     maxticks: int = 7,
     rotation: int = 30,
-    **kwargs
+    **kwargs,
 ) -> tuple[Figure, Axes]:
     """Plot time series for ensemble data with automatic datetime formatting.
 
@@ -183,18 +183,20 @@ def plot_ensemble_timeseries(
                 alpha=alpha,
                 color=color,
                 linewidth=cfg.linewidth_plot,
-                **kwargs
+                **kwargs,
             )
 
         # Show annotation only if we're limiting the number of lines
         if max_lines is not None and n_ensemble > max_lines:
             ax.text(
-                0.98, 0.02, f"(Showing {n_plot} of {n_ensemble} ensemble members)",
+                0.98,
+                0.02,
+                f"(Showing {n_plot} of {n_ensemble} ensemble members)",
                 transform=ax.transAxes,
                 ha="right",
                 va="bottom",
                 fontsize=cfg.fontsize_annotation,
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8)
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
             )
     else:
         # No ensemble dimension - use matplotlib's plot directly
@@ -204,13 +206,15 @@ def plot_ensemble_timeseries(
             label=var_name.upper(),
             alpha=alpha,
             linewidth=cfg.linewidth_plot,
-            **kwargs
+            **kwargs,
         )
 
     # Apply smart datetime formatting using matplotlib's built-in tools
     if "time" in ds.coords:
-        apply_smart_time_ticks(ax, fig, minticks=minticks, maxticks=maxticks, rotation=rotation)
-        ax.tick_params(axis='x', which='major', labelsize=cfg.fontsize_xticks)
+        apply_smart_time_ticks(
+            ax, fig, minticks=minticks, maxticks=maxticks, rotation=rotation
+        )
+        ax.tick_params(axis="x", which="major", labelsize=cfg.fontsize_xticks)
 
     # Labels and title
     ax.set_xlabel("Time", fontsize=cfg.fontsize_xlabel)
@@ -226,7 +230,7 @@ def plot_ensemble_timeseries(
         alpha=cfg.grid_alpha,
         linestyle=cfg.grid_linestyle,
         linewidth=cfg.grid_linewidth,
-        color=cfg.grid_color
+        color=cfg.grid_color,
     )
 
     # Legend
@@ -235,16 +239,14 @@ def plot_ensemble_timeseries(
             bbox_to_anchor=(1.05, 1),
             loc="upper left",
             fontsize=cfg.fontsize_legend,
-            framealpha=0.9
+            framealpha=0.9,
         )
     else:
         ax.legend(fontsize=cfg.fontsize_legend, framealpha=0.9)
 
     # Tick parameters
     ax.tick_params(
-        axis="both",
-        labelsize=cfg.fontsize_xticks,
-        width=cfg.linewidth_tick_params
+        axis="both", labelsize=cfg.fontsize_xticks, width=cfg.linewidth_tick_params
     )
 
     return fig, ax
@@ -259,7 +261,7 @@ def plot_ensemble_statistics(
     minticks: int = 3,
     maxticks: int = 7,
     rotation: int = 30,
-    **kwargs
+    **kwargs,
 ) -> tuple[Figure, tuple[Axes, Axes]]:
     """Plot ensemble mean with standard deviation and coefficient of variation.
 
@@ -338,7 +340,7 @@ def plot_ensemble_statistics(
         data_mean.values,
         label="Ensemble Mean",
         color="black",
-        linewidth=cfg.linewidth_plot
+        linewidth=cfg.linewidth_plot,
     )
     ax1.fill_between(
         data_mean.time.values,
@@ -346,7 +348,7 @@ def plot_ensemble_statistics(
         (data_mean + data_std).values,
         alpha=0.3,
         label="±1 Std Dev",
-        color=cfg.color_cycle[0]
+        color=cfg.color_cycle[0],
     )
     ax1.set_ylabel(f"{var_name.capitalize()}", fontsize=cfg.fontsize_ylabel)
     ax1.set_xlabel("")  # Remove xlabel from top plot
@@ -357,9 +359,11 @@ def plot_ensemble_statistics(
         alpha=cfg.grid_alpha,
         linestyle=cfg.grid_linestyle,
         linewidth=cfg.grid_linewidth,
-        color=cfg.grid_color
+        color=cfg.grid_color,
     )
-    ax1.tick_params(axis="both", labelsize=cfg.fontsize_yticks, width=cfg.linewidth_tick_params)
+    ax1.tick_params(
+        axis="both", labelsize=cfg.fontsize_yticks, width=cfg.linewidth_tick_params
+    )
 
     # Plot 2: Coefficient of variation
     cv = (data_std / data_mean).where(data_mean != 0)
@@ -368,7 +372,7 @@ def plot_ensemble_statistics(
         cv.time.values,
         cv.values,
         color=cfg.color_cycle[1],
-        linewidth=cfg.linewidth_plot
+        linewidth=cfg.linewidth_plot,
     )
     ax2.set_ylabel("Coefficient of Variation", fontsize=cfg.fontsize_ylabel)
     ax2.set_xlabel("Time", fontsize=cfg.fontsize_xlabel)
@@ -378,16 +382,22 @@ def plot_ensemble_statistics(
         alpha=cfg.grid_alpha,
         linestyle=cfg.grid_linestyle,
         linewidth=cfg.grid_linewidth,
-        color=cfg.grid_color
+        color=cfg.grid_color,
     )
-    ax2.tick_params(axis="both", labelsize=cfg.fontsize_yticks, width=cfg.linewidth_tick_params)
+    ax2.tick_params(
+        axis="both", labelsize=cfg.fontsize_yticks, width=cfg.linewidth_tick_params
+    )
 
     # Apply smart datetime formatting using matplotlib's built-in tools
     if has_time:
-        apply_smart_time_ticks(ax1, fig, minticks=minticks, maxticks=maxticks, rotation=rotation)
-        apply_smart_time_ticks(ax2, fig, minticks=minticks, maxticks=maxticks, rotation=rotation)
-        ax1.tick_params(axis='x', which='major', labelsize=cfg.fontsize_xticks)
-        ax2.tick_params(axis='x', which='major', labelsize=cfg.fontsize_xticks)
+        apply_smart_time_ticks(
+            ax1, fig, minticks=minticks, maxticks=maxticks, rotation=rotation
+        )
+        apply_smart_time_ticks(
+            ax2, fig, minticks=minticks, maxticks=maxticks, rotation=rotation
+        )
+        ax1.tick_params(axis="x", which="major", labelsize=cfg.fontsize_xticks)
+        ax2.tick_params(axis="x", which="major", labelsize=cfg.fontsize_xticks)
 
     # Overall title
     # Note: With constrained_layout, don't manually set y position
