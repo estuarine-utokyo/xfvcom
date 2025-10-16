@@ -9,6 +9,7 @@ from __future__ import annotations
 # ------------------------------------------------------------------
 from .config import FvcomPlotConfig
 from .core import FvcomPlotter  # ← 追加すると便利
+from .dye_timeseries import plot_dye_timeseries_stacked
 from .markers import make_node_marker_post
 from .timeseries import (
     apply_smart_time_ticks,
@@ -39,6 +40,7 @@ __all__: list[str] = [
     "apply_smart_time_ticks",
     "plot_ensemble_timeseries",
     "plot_ensemble_statistics",
+    "plot_dye_timeseries_stacked",
 ]
 
 # Add plotly functions to __all__ if available
