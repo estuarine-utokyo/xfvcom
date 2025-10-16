@@ -15,9 +15,9 @@ from matplotlib.dates import AutoDateLocator, ConciseDateFormatter
 
 from ._timeseries_utils import (
     detect_nans_and_raise,
+    get_member_colors,
     prepare_wide_df,
     select_members,
-    get_member_colors,
 )
 
 if TYPE_CHECKING:
@@ -178,20 +178,24 @@ def plot_dye_timeseries_stacked(
     colors_list: list[Any]
     if colors is None:
         # Extract member IDs from column names for consistent color mapping
-        member_ids = []
+        extracted_member_ids: list[int | None] = []
         for col in df.columns:
             try:
                 # Try to interpret column as integer member ID
-                member_ids.append(int(col))
+                extracted_member_ids.append(int(col))
             except (ValueError, TypeError):
                 # If column name is not an integer, use position-based fallback
-                member_ids.append(None)
+                extracted_member_ids.append(None)
 
         # Use member-based color mapping for consistency across plot types
         # This ensures member N always gets the same color as in line plots
-        if all(mid is not None for mid in member_ids):
+        if all(mid is not None for mid in extracted_member_ids):
             # All columns are valid member IDs - use member-based colors
-            colors_list = get_member_colors(member_ids, colormap=colormap, custom_colors=custom_colors)
+            # Type narrowing: we know all elements are int here
+            valid_member_ids = [mid for mid in extracted_member_ids if mid is not None]
+            colors_list = get_member_colors(
+                valid_member_ids, colormap=colormap, custom_colors=custom_colors
+            )
         else:
             # Fallback to position-based colors using specified colormap
             from matplotlib import colormaps

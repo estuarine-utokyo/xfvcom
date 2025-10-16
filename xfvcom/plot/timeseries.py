@@ -19,8 +19,8 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
     import xarray as xr
 
-from .config import FvcomPlotConfig
 from ._timeseries_utils import get_member_color
+from .config import FvcomPlotConfig
 
 
 def apply_smart_time_ticks(ax, fig=None, minticks=3, maxticks=7, rotation=30):

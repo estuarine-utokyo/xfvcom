@@ -4,6 +4,11 @@ xfvcom.plot sub-package public API.
 
 from __future__ import annotations
 
+from ._timeseries_utils import (
+    get_member_color,
+    get_member_colors,
+)
+
 # ------------------------------------------------------------------
 # Re-export core plotting classes / helpers
 # ------------------------------------------------------------------
@@ -15,10 +20,6 @@ from .timeseries import (
     apply_smart_time_ticks,
     plot_ensemble_statistics,
     plot_ensemble_timeseries,
-)
-from ._timeseries_utils import (
-    get_member_color,
-    get_member_colors,
 )
 
 # Plotly utilities (optional, only if plotly is installed)
