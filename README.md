@@ -8,6 +8,8 @@
 
 xfvcom streamlines preprocessing and postprocessing workflows for the Finite Volume Community Ocean Model ([FVCOM](https://github.com/FVCOM-GitHub/FVCOM)). Built on [xarray](https://docs.xarray.dev/en/stable/), it provides powerful tools for ocean model data analysis, forcing file generation, and publication-quality visualizations.
 
+---
+
 ## 🚀 Key Features
 
 ### 📊 Data I/O & Processing
@@ -15,29 +17,33 @@ xfvcom streamlines preprocessing and postprocessing workflows for the Finite Vol
 - **Multi-format Grid Support**: Handle both ASCII (.dat) and NetCDF grid formats
 - **Coordinate Systems**: Seamless conversion between UTM and geographic (lat/lon) coordinates
 - **Depth Calculations**: Automatic depth variable computation from sigma layers and bathymetry
-- **Time Zone Handling**: Intelligent timezone conversion with configurable defaults
+- **Time Zone Handling**: Intelligent timezone conversion (default: Asia/Tokyo → UTC)
 
 ### 🔬 Analysis Tools
 - **Spatial Analysis**: KDTree-based nearest neighbor search for efficient spatial queries
 - **Physics Calculations**: Layer averages, tidal decomposition, variable filtering by dimensions
-- **Time Series Processing**: Advanced extension methods (seasonal, linear, forward-fill)
+- **Time Series Processing**: Extension methods (seasonal, linear, forward-fill), interpolation, resampling
 - **Grid Utilities**: Mesh connectivity analysis and validation tools
-- **Node Area Calculations**: FVCOM median-dual control volumes with shoreline-aware boundary closure plus legacy triangle sums
-- **Element Areas**: Retrieve per-cell triangle areas with zero/one-based index handling for targeted diagnostics
+- **Area Calculations**:
+  - **Median-dual control volumes**: FVCOM-standard node areas with shoreline-aware boundary closure
+  - **Triangle sums**: Legacy area calculation using surrounding triangles
+  - **Element areas**: Per-cell triangle areas for targeted diagnostics
+- **Ensemble Analysis**: Multi-member dye tracer analysis, linearity verification, source identification
 
 ### 🎨 Visualization
 - **Static Plots**: Time series, 2D contours, vector fields, vertical sections
 - **Animations**: Generate GIF and MP4 animations for temporal data
-- **Interactive Plots**: Plotly integration for web-based interactive visualizations
-- **Map Projections**: Full Cartopy support for geographic visualizations
+- **Interactive Plots**: Plotly integration for web-based visualizations (optional)
+- **Map Projections**: Full Cartopy support with tile providers (OSM, Google Satellite, etc.)
 - **Triangular Mesh**: Native support for FVCOM's unstructured grid visualization
-- **Enhanced Node/Marker Display**: Advanced clipping control for geographic coordinates with Cartopy
+- **Enhanced Display**: Advanced clipping control for node markers and text labels on geographic maps
+- **Ensemble Plots**: Line plots with automatic colormap selection, stacked area plots for multi-member data
 
 ### ⚡ Forcing File Generation
-- **River Forcing**: Generate river discharge and temperature/salinity inputs
+- **River Forcing**: Generate river discharge and temperature/salinity inputs from CSV or constants
 - **Meteorological Forcing**: Create atmospheric forcing files with comprehensive variables
-- **Groundwater Forcing**: Support for groundwater flux with optional dye tracers
-- **Flexible Input**: Mix constants with CSV time series, multiple data formats
+- **Groundwater Forcing**: Support for groundwater flux with temperature, salinity, and optional dye tracers
+- **Flexible Input**: Mix constants with CSV time series, node-specific or global values
 
 ---
 
@@ -60,38 +66,19 @@ xfvcom streamlines preprocessing and postprocessing workflows for the Finite Vol
 ### Prerequisites
 - Python 3.10, 3.11, or 3.12
 - Conda (Miniforge/Mambaforge recommended)
-- Git
 
 ### Quick Install
 
-#### Option 1: Automated Setup (Recommended)
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/xfvcom.git
 cd xfvcom
 
-# Run the setup script
-./setup.sh
-```
-
-#### Option 2: Using Conda Environment File
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/xfvcom.git
-cd xfvcom
-
-# Create environment from file
-conda env create -f environment.yml
-conda activate xfvcom
-```
-
-#### Option 3: Manual Installation
-```bash
 # Create conda environment
-conda create -n xfvcom python=3.11 -c conda-forge \
+conda create -n xfvcom python=3.12 -c conda-forge \
     numpy xarray pandas matplotlib cartopy pyproj \
     scipy scikit-learn imageio moviepy tqdm netcdf4 \
-    pytest mypy black isort jinja2 pyyaml
+    pytest mypy black isort jinja2 pyyaml types-pyyaml
 
 # Activate environment
 conda activate xfvcom
@@ -105,46 +92,96 @@ pip install -e .
 python -c "import xfvcom; print(f'xfvcom {xfvcom.__version__} installed successfully')"
 ```
 
+---
+
 ## 💻 Quick Start
 
-### Basic Usage
+### Load and Analyze Data
 
 ```python
 import xfvcom
 
-# Load FVCOM data
-fvcom = xfvcom.FvcomDataLoader("path/to/data", ncfile="output.nc")
-ds = fvcom.ds
+# Load FVCOM output
+loader = xfvcom.FvcomDataLoader("path/to/data", ncfile="output.nc")
+ds = loader.ds
 
-# Analyze data
+# Spatial analysis
 analyzer = xfvcom.FvcomAnalyzer(ds)
 node_idx = analyzer.nearest_neighbor(lon=140.0, lat=35.0)
+```
 
-# Calculate areas for selected nodes and elements (requires grid file)
+### Area Calculations
+
+```python
 from xfvcom import FvcomInputLoader, calculate_node_area
 
-triangle_area = calculate_node_area("path/to/grid.dat", [100, 200, 300], utm_zone=54)
+# Load grid
+grid_loader = FvcomInputLoader(grid_file="grid.dat", utm_zone=54)
 
-loader = FvcomInputLoader(grid_file="path/to/grid.dat", utm_zone=54)
-cv_area = loader.calculate_node_area_median_dual([100, 200, 300], index_base=1)
-element_areas = loader.calculate_element_area([10, 11, 12], index_base=1)
+# Median-dual control volumes (FVCOM standard)
+cv_area = grid_loader.calculate_node_area_median_dual([100, 200, 300], index_base=1)
+print(f"Control volume area: {cv_area/1e6:.2f} km²")
 
-print(f"Triangle area sum: {triangle_area/1e6:.2f} km²")
-print(f"Median-dual area sum: {cv_area/1e6:.2f} km²")
-print(f"Element areas: {[round(float(a), 1) for a in element_areas]}")
+# Triangle sum method (legacy)
+tri_area = calculate_node_area("grid.dat", [100, 200, 300], utm_zone=54, index_base=1)
+print(f"Triangle area: {tri_area/1e6:.2f} km²")
 
-# Create visualizations
-cfg = xfvcom.FvcomPlotConfig(figsize=(10, 6), dpi=150)
+# Element areas
+elem_areas = grid_loader.calculate_element_area([10, 11, 12], index_base=1)
+print(f"Element areas: {[f'{a:.1f}' for a in elem_areas]} m²")
+```
+
+### Create Visualizations
+
+```python
+# Configure plot style
+cfg = xfvcom.FvcomPlotConfig(
+    figsize=(12, 6),
+    fontsize={"xlabel": 14, "ylabel": 14, "title": 15},
+    linewidth={"plot": 1.8}
+)
+
+# Create plotter
 plotter = xfvcom.FvcomPlotter(ds, cfg)
 
 # Time series plot
 fig = plotter.plot_timeseries("temperature", index=node_idx)
 
 # 2D spatial plot
-fig = plotter.plot_2d("salinity", time="2020-07-01", siglay=0)
+opts = xfvcom.FvcomPlotOptions(
+    add_tiles=True,
+    tile_provider="satellite",  # or "osm"
+    mesh_color="lightgray"
+)
+fig = plotter.plot_2d("salinity", time="2020-07-01", siglay=0, opts=opts)
 ```
 
-### Creating Animations
+### Ensemble Time Series Analysis
+
+```python
+from xfvcom.plot import plot_ensemble_timeseries, plot_dye_timeseries_stacked
+
+# Line plot with automatic colormap selection
+# (tab20 for ≤20 members, hsv for >20 members)
+fig, ax = plot_ensemble_timeseries(
+    ds,
+    var_name="dye",
+    cfg=cfg,
+    legend_outside=True,
+    title="Ensemble Dye Concentration"
+)
+
+# Stacked area plot
+result = plot_dye_timeseries_stacked(
+    ds,
+    cfg=cfg,
+    member_ids=[1, 2, 3, 4, 5],
+    title="Dye Concentration (Stacked)",
+    output="dye_stacked.png"
+)
+```
+
+### Create Animations
 
 ```python
 from xfvcom.plot.utils import create_anim_2d_plot
@@ -160,25 +197,11 @@ create_anim_2d_plot(
 )
 ```
 
-### Interactive Visualizations
-
-```python
-from xfvcom.plot.plotly_utils import plot_timeseries_comparison
-
-# Compare multiple variables interactively
-fig = plot_timeseries_comparison(
-    ds,
-    variables=["temperature", "salinity"],
-    node_idx=node_idx,
-    start_time="2020-01-01",
-    end_time="2020-12-31"
-)
-fig.show()
-```
+---
 
 ## 🔨 Command-Line Tools
 
-### River Forcing Generation
+### River Forcing
 
 ```bash
 # Generate river namelist from CSV
@@ -194,12 +217,6 @@ xfvcom-make-river-nc rivers.nml \
 ### Meteorological Forcing
 
 ```bash
-# Basic usage with time series
-xfvcom-make-met-nc grid.nc \
-  --start 2025-01-01T00:00Z \
-  --end 2025-01-02T00:00Z \
-  --ts weather.csv:uwind,vwind,air_temperature,humidity
-
 # Mix constants with CSV data
 xfvcom-make-met-nc grid.nc \
   --start 2025-01-01T00:00Z \
@@ -220,143 +237,107 @@ xfvcom-make-groundwater-nc grid.nc \
   --temperature 15.0 \
   --salinity 0.0
 
-# Time-varying with dye tracer
+# With dye tracer
 xfvcom-make-groundwater-nc grid.nc \
   --start 2025-01-01T00:00Z \
   --end 2025-12-31T23:00Z \
   --flux groundwater.csv:datetime,node_id,flux \
-  --temperature groundwater.csv:datetime,node_id,temperature \
-  --salinity 0.0 \
   --dye-concentration 1.0
 ```
 
+### Dye Time Series Extraction
+
+```bash
+# Extract and aggregate dye concentrations from ensemble runs
+xfvcom-dye-ts \
+  --base-dir /path/to/TB-FVCOM \
+  --basename tb_w18_r16 \
+  --years 2020 2021 \
+  --members 1,2,3,4,5 \
+  --nodes 100,200,300 \
+  --output dye_timeseries.nc
+```
+
+---
+
 ## 🔍 Examples
 
-### Advanced Time Series Processing
+### Time Series Extension
 
 ```python
 from xfvcom.utils.timeseries_utils import (
     extend_timeseries_seasonal,
+    extend_timeseries_linear,
     interpolate_missing_values
 )
 
-# Extend river data using seasonal patterns
-extended_ds = extend_timeseries_seasonal(
-    ds,
-    target_end="2025-12-31",
-    variables=["river_flux", "river_temp"]
+# Extend using seasonal patterns
+extended_df = extend_timeseries_seasonal(
+    df,
+    extend_to="2025-12-31",
+    period="1Y"  # Repeat yearly pattern
 )
 
-# Fill gaps in observational data
-filled_ds = interpolate_missing_values(
-    ds,
+# Linear extrapolation
+extended_df = extend_timeseries_linear(
+    df,
+    extend_to="2025-12-31",
+    lookback_periods=30
+)
+
+# Fill gaps
+filled_df = interpolate_missing_values(
+    df,
     method="linear",
-    max_gap="7D"
+    limit=7  # Max consecutive NaNs to fill
 )
 ```
 
-### Node Area Calculations
-
-Calculate the total area of triangular elements containing specified nodes, useful for spatial analysis and domain decomposition:
-
-```python
-from xfvcom import FvcomInputLoader, calculate_node_area
-
-# Method 1: Using existing loader
-loader = FvcomInputLoader("grid.dat", utm_zone=54)
-nodes = [100, 200, 300, 500, 1000]  # 1-based node indices (FVCOM convention)
-area = loader.calculate_node_area(nodes, index_base=1)
-print(f"Total area: {area:,.0f} m² ({area/1e6:.2f} km²)")
-
-# Method 2: Direct calculation from grid file
-area = calculate_node_area(
-    grid_file="grid.dat",
-    node_indices=[100, 200, 300],
-    utm_zone=54,
-    index_base=1  # Use 0 for zero-based indexing
-)
-
-# Calculate area for all nodes
-total_area = calculate_node_area("grid.dat", None, utm_zone=54)
-print(f"Total mesh area: {total_area/1e6:.2f} km²")
-```
-
-**Features:**
-- Support for both 0-based and 1-based node indexing
-- Efficient calculation using shoelace formula
-- Returns area in square meters (assuming UTM coordinates)
-- Handles overlapping triangular elements automatically
-
-### Enhanced Node Visualization with Cartopy
-
-xfvcom provides advanced control for displaying node markers and text labels on geographic maps, addressing known Cartopy limitations with text clipping:
+### Enhanced Node Visualization
 
 ```python
 from xfvcom import make_node_marker_post
 
-# Independent buffer control for markers and text
+# Advanced clipping control for markers and text
 pp = make_node_marker_post(
-    nodes=[1, 100, 500, 1000],  # Node indices to display
+    nodes=[1, 100, 500, 1000],
     plotter=plotter,
-    marker_kwargs={"color": "red", "markersize": 4},
-    text_kwargs={"color": "yellow", "fontsize": 8, "clip_on": True},
-    index_base=1,  # FVCOM uses 1-based indexing
-    respect_bounds=True,
-    marker_clip_buffer=0.002,  # Include markers slightly outside bounds
-    text_clip_buffer=-0.001,   # Hide text near edges to prevent overflow
+    marker_kwargs={"color": "red", "markersize": 5},
+    text_kwargs={"color": "yellow", "fontsize": 10, "clip_on": True},
+    index_base=1,
+    marker_clip_buffer=0.002,   # Include markers slightly outside bounds
+    text_clip_buffer=-0.001     # Hide text near edges (fixes Cartopy bug)
 )
 
-# Apply to a map with specific extent
-opts = FvcomPlotOptions(
-    xlim=(139.85, 139.95),
-    ylim=(35.36, 35.45),
-    add_tiles=True
-)
+opts = xfvcom.FvcomPlotOptions(xlim=(139.85, 139.95), ylim=(35.36, 35.45))
 ax = plotter.plot_2d(post_process_func=pp, opts=opts)
 ```
 
-**Key Features:**
-- **`marker_clip_buffer`**: Controls marker visibility at map boundaries
-  - Positive values: Include markers outside the specified extent
-  - Negative values: Exclude markers near boundaries
-- **`text_clip_buffer`**: Controls text label visibility (fixes Cartopy `clip_on` issues)
-  - Positive values: Show text labels beyond map extent
-  - Negative values: Hide text near edges to prevent overflow
-- **Performance optimized**: Uses vectorized operations for large node sets
-- **Cartopy workaround**: Automatically handles geographic coordinate text clipping
-
-This feature is particularly useful for:
-- Dense grids where text labels may overlap at boundaries
-- Analyzing nodes at domain edges
-- Creating clean visualizations with precise boundary control
-
-### Programmatic Forcing Generation
+### Member-Node Mapping Analysis
 
 ```python
-from xfvcom.io import MetNetCDFGenerator, GroundwaterNetCDFGenerator
-
-# Meteorological forcing
-met_gen = MetNetCDFGenerator(
-    grid_nc="grid.nc",
-    start="2025-01-01T00:00Z",
-    end="2025-12-31T23:00Z",
-    dt_seconds=3600,
-    ts_specs=["weather.csv:all"],  # Read all columns
-    data_tz="UTC"
+from xfvcom.ensemble_analysis import (
+    extract_member_node_mapping,
+    get_member_summary,
+    export_member_mapping
 )
-met_gen.write("met_forcing.nc")
 
-# Groundwater with spatial variation
-gw_gen = GroundwaterNetCDFGenerator(
-    grid_nc="grid.nc",
-    start="2025-01-01T00:00Z",
-    end="2025-12-31T23:00Z",
-    groundwater_flux="flux_map.csv:node_id,flux",
-    groundwater_temp=15.0,
-    groundwater_salt=0.0
+# Extract dye release locations for each ensemble member
+mapping = extract_member_node_mapping(
+    dye_files=["dye_member1.nc", "dye_member2.nc", ...],
+    threshold=1e-6,
+    grid_file="grid.dat"
 )
-gw_gen.write("groundwater_forcing.nc")
+
+# Get summary statistics
+summary = get_member_summary(mapping)
+print(f"Total unique nodes: {summary['total_nodes']}")
+
+# Export to CSV
+export_member_mapping(mapping, "member_mapping.csv", grid_file="grid.dat")
 ```
+
+---
 
 ## 📦 API Reference
 
@@ -364,30 +345,53 @@ gw_gen.write("groundwater_forcing.nc")
 
 | Class | Module | Description |
 |-------|--------|-------------|
-| `FvcomDataLoader` | `xfvcom.io` | Load and preprocess FVCOM NetCDF files |
+| `FvcomDataLoader` | `xfvcom.io` | Load and preprocess FVCOM NetCDF output files |
+| `FvcomInputLoader` | `xfvcom.io` | Load grid files with area calculation methods |
 | `FvcomAnalyzer` | `xfvcom.analysis` | Physics calculations and spatial analysis |
 | `FvcomPlotter` | `xfvcom.plot` | Main visualization engine |
-| `FvcomPlotConfig` | `xfvcom.plot` | Configuration for plot styling |
-| `FvcomGrid` | `xfvcom.grid` | Grid manipulation utilities with area calculations |
+| `FvcomPlotConfig` | `xfvcom.plot` | Centralized plot styling configuration |
+| `FvcomPlotOptions` | `xfvcom` | Per-plot customization options |
+| `FvcomGrid` | `xfvcom.grid` | Grid manipulation and validation |
 
-### Generator Classes
+### Ensemble Analysis
 
-| Class | Module | Description |
-|-------|--------|-------------|
-| `RiverNetCDFGenerator` | `xfvcom.io` | Generate river forcing files |
-| `MetNetCDFGenerator` | `xfvcom.io` | Generate meteorological forcing |
-| `GroundwaterNetCDFGenerator` | `xfvcom.io` | Generate groundwater forcing |
-| `RiverNamelistGenerator` | `xfvcom.io` | Create FVCOM river namelists |
+| Function | Module | Description |
+|----------|--------|-------------|
+| `extract_member_node_mapping()` | `xfvcom.ensemble_analysis` | Extract dye release nodes from ensemble members |
+| `get_member_summary()` | `xfvcom.ensemble_analysis` | Get summary statistics for member mapping |
+| `export_member_mapping()` | `xfvcom.ensemble_analysis` | Export mapping to CSV with coordinates |
+
+### Dye Time Series
+
+| Function | Module | Description |
+|----------|--------|-------------|
+| `collect_member_files()` | `xfvcom.dye_timeseries` | Collect NetCDF files for ensemble members |
+| `aggregate()` | `xfvcom.dye_timeseries` | Aggregate time series across members |
+| `negative_stats()` | `xfvcom.dye_timeseries` | Analyze negative value statistics |
+| `verify_linearity()` | `xfvcom.dye_timeseries` | Verify ensemble linearity assumption |
+
+### Plotting Functions
+
+| Function | Module | Description |
+|----------|--------|-------------|
+| `plot_ensemble_timeseries()` | `xfvcom.plot` | Line plots with auto colormap selection |
+| `plot_ensemble_statistics()` | `xfvcom.plot` | Mean, std, and coefficient of variation |
+| `plot_dye_timeseries_stacked()` | `xfvcom.plot` | Stacked area plots for ensemble data |
+| `create_anim_2d_plot()` | `xfvcom.plot.utils` | Create GIF/MP4 animations |
+| `make_node_marker_post()` | `xfvcom` | Enhanced node/text display with clipping |
+| `make_element_boundary_post()` | `xfvcom` | Highlight element boundaries |
 
 ### Utility Functions
 
 | Function | Module | Description |
 |----------|--------|-------------|
-| `create_anim_2d_plot()` | `xfvcom.plot.utils` | Create animations from 2D data |
+| `calculate_node_area()` | `xfvcom.grid` | Triangle sum area calculation |
+| `calculate_element_area()` | `xfvcom.grid` | Element area calculation |
 | `extend_timeseries_*()` | `xfvcom.utils.timeseries_utils` | Time series extension methods |
-| `plot_timeseries_comparison()` | `xfvcom.plot.plotly_utils` | Interactive comparison plots |
-| `make_node_marker_post()` | `xfvcom.plot.markers` | Enhanced node/text display with clipping control |
-| `calculate_node_area()` | `xfvcom.grid` | Calculate total area for specified nodes |
+| `interpolate_missing_values()` | `xfvcom.utils.timeseries_utils` | Interpolate gaps in data |
+| `resample_timeseries()` | `xfvcom.utils.timeseries_utils` | Change time resolution |
+
+---
 
 ## 🧪 Testing
 
@@ -395,32 +399,37 @@ gw_gen.write("groundwater_forcing.nc")
 # Run all tests
 pytest
 
-# Run specific test module
-pytest tests/test_plot_2d.py
-
-# Skip PNG regression tests
+# Skip PNG regression tests (CI default)
 pytest -m "not png"
 
-# Regenerate plot baselines
+# Regenerate plot baselines (after intentional visual changes)
 pytest --regenerate-baseline
+
+# Run specific test module
+pytest tests/test_dye_timeseries_stacked.py -v
 ```
+
+---
 
 ## 🛠️ Development
 
-### Code Quality Tools
+### Code Quality
 
 ```bash
 # Format code
-black xfvcom/
+black .
 
 # Sort imports
-isort xfvcom/
+isort .
 
 # Type checking
-mypy .
+mypy xfvcom
 
-# Run all checks
-pre-commit run --all-files
+# All checks (what CI runs)
+black --check .
+isort --check-only .
+mypy xfvcom
+pytest -m "not png"
 ```
 
 ### Building Documentation
@@ -428,27 +437,31 @@ pre-commit run --all-files
 ```bash
 cd docs
 make html
-open _build/html/index.html
 ```
+
+---
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](docs/CONTRIBUTING.md) for details on:
+We welcome contributions! See [Contributing Guidelines](docs/CONTRIBUTING.md) for:
 
 - Development setup
 - Code style guidelines
 - Testing requirements
 - Pull request process
 
-### Quick Contribution Guide
+**Quick Contribution Steps:**
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
 4. Run tests (`pytest`)
-5. Commit with descriptive message
-6. Push to your fork
-7. Open a Pull Request
+5. Format code (`black . && isort .`)
+6. Commit with descriptive message
+7. Push to your fork
+8. Open a Pull Request
+
+---
 
 ## 📄 License
 
@@ -473,6 +486,7 @@ If you use xfvcom in your research, please cite:
   author = {Sasaki, Jun},
   title = {xfvcom: A Python toolkit for FVCOM data analysis},
   year = {2024},
+  version = {0.2.0},
   url = {https://github.com/yourusername/xfvcom}
 }
 ```
