@@ -37,8 +37,11 @@ from .netcdf_utils import (  # noqa: F401
 # ---------------------------------------------------------------------
 # New helper(s)
 # ---------------------------------------------------------------------
+from .nml_parser import NamelistParser, parse_member_namelist  # noqa: F401
 from .river_nml import parse_river_namelist  # noqa: F401
 
 __all__.append("parse_river_namelist")
 __all__.append("GroundwaterNetCDFGenerator")
 __all__.append("FvcomInputLoader")
+__all__.append("NamelistParser")
+__all__.append("parse_member_namelist")
