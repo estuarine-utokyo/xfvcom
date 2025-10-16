@@ -13,7 +13,12 @@ import numpy as np
 import pandas as pd
 from matplotlib.dates import AutoDateLocator, ConciseDateFormatter
 
-from ._timeseries_utils import detect_nans_and_raise, prepare_wide_df, select_members
+from ._timeseries_utils import (
+    detect_nans_and_raise,
+    prepare_wide_df,
+    select_members,
+    get_member_colors,
+)
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -147,18 +152,35 @@ def plot_dye_timeseries_stacked(
     # Get column labels
     labels = [str(col) for col in df.columns]
 
-    # Determine colors
+    # Determine colors using member-based mapping for consistency
     from typing import Any
 
     colors_list: list[Any]
     if colors is None:
-        # Use tab20 colormap for up to 20 members
-        from matplotlib import colormaps
+        # Extract member IDs from column names for consistent color mapping
+        member_ids = []
+        for col in df.columns:
+            try:
+                # Try to interpret column as integer member ID
+                member_ids.append(int(col))
+            except (ValueError, TypeError):
+                # If column name is not an integer, use position-based fallback
+                member_ids.append(None)
 
-        cmap = colormaps["tab20"]
-        n_members = len(df.columns)
-        colors_list = [cmap(i % 20) for i in range(n_members)]
+        # Use member-based color mapping (tab20) for consistency across plot types
+        # This ensures member N always gets the same color as in line plots
+        if all(mid is not None for mid in member_ids):
+            # All columns are valid member IDs - use member-based colors
+            colors_list = get_member_colors(member_ids)
+        else:
+            # Fallback to position-based tab20 colors
+            from matplotlib import colormaps
+
+            cmap = colormaps["tab20"]
+            n_members = len(df.columns)
+            colors_list = [cmap(i % 20) for i in range(n_members)]
     else:
+        # User-provided custom colors
         colors_list = [colors.get(label, f"C{i}") for i, label in enumerate(labels)]
 
     # Create stackplot

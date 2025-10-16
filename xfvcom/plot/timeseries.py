@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     import xarray as xr
 
 from .config import FvcomPlotConfig
+from ._timeseries_utils import get_member_color
 
 
 def apply_smart_time_ticks(ax, fig=None, minticks=3, maxticks=7, rotation=30):
@@ -159,7 +160,8 @@ def plot_ensemble_timeseries(
         for i in range(n_plot):
             series = data.isel(ensemble=i)
 
-            # Get label from ensemble coordinates
+            # Get label and member ID from ensemble coordinates
+            member_id = None  # Will be used for color mapping
             if hasattr(data.ensemble, "to_index") and isinstance(
                 data.ensemble.to_index(), pd.MultiIndex
             ):
@@ -167,14 +169,21 @@ def plot_ensemble_timeseries(
                 ensemble_val = data.ensemble[i].values.item()
                 if isinstance(ensemble_val, tuple):
                     year, member = ensemble_val
+                    member_id = int(member)  # Extract member ID for color mapping
                     label = f"Year {year}, Member {member}"
                 else:
                     label = f"Ensemble {i}"
             else:
                 label = f"Ensemble {i}"
 
-            # Use color cycle from config
-            color = cfg.color_cycle[i % len(cfg.color_cycle)]
+            # Use member-based color mapping for consistency across plot types
+            # This ensures member N always gets the same color (tab20[N-1])
+            if member_id is not None:
+                color = get_member_color(member_id)
+            else:
+                # Fallback to position-based color if member ID not available
+                color = cfg.color_cycle[i % len(cfg.color_cycle)]
+
             # Use matplotlib's plot directly instead of xarray's plot to avoid date formatting conflicts
             ax.plot(
                 series.time.values,

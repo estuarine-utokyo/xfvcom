@@ -631,3 +631,119 @@ def deterministic_colors(
             colors.append(default_colors[i % len(default_colors)])
 
     return colors
+
+
+def get_member_color(
+    member_id: int,
+    colormap: str = "tab20",
+    custom_colors: dict[int, str] | None = None,
+) -> str:
+    """Get consistent color for a member ID across all plot types.
+
+    This ensures that member N always gets the same color, regardless of:
+    - Which other members are plotted
+    - The plot type (line, stacked, etc.)
+    - The order of members in the data
+
+    Parameters
+    ----------
+    member_id : int
+        Member ID (1-based integer, e.g., 1, 2, 3, ...)
+    colormap : str
+        Matplotlib colormap name (default: "tab20" for up to 20 members)
+    custom_colors : dict[int, str], optional
+        Manual color overrides {member_id: color_spec}
+
+    Returns
+    -------
+    str
+        Hex color string (e.g., "#1f77b4")
+
+    Examples
+    --------
+    >>> # Member 1 always gets the first tab20 color
+    >>> get_member_color(1)
+    '#1f77b4'
+
+    >>> # Member 5 always gets the fifth tab20 color
+    >>> get_member_color(5)
+    '#9467bd'
+
+    >>> # Custom color for member 3
+    >>> get_member_color(3, custom_colors={3: 'red'})
+    'red'
+
+    Notes
+    -----
+    **Best Practice**: Use tab20 colormap for up to 20 members.
+    Colors are assigned by member ID (NOT position), ensuring:
+    - Member 1 → tab20[0] (blue)
+    - Member 2 → tab20[1] (orange)
+    - Member 3 → tab20[2] (green)
+    - etc.
+
+    This creates visual consistency across:
+    - Line plots (plot_ensemble_timeseries)
+    - Stacked plots (plot_dye_timeseries_stacked)
+    - Statistical plots
+    - Custom visualizations
+    """
+    # Check for custom override first
+    if custom_colors and member_id in custom_colors:
+        return custom_colors[member_id]
+
+    # Import matplotlib colormaps
+    from matplotlib import colormaps
+
+    # Get colormap
+    cmap = colormaps[colormap]
+
+    # Get color by member ID (subtract 1 for 0-based indexing)
+    # member_id=1 → index 0, member_id=2 → index 1, etc.
+    color_idx = (member_id - 1) % cmap.N
+    rgba = cmap(color_idx)
+
+    # Convert RGBA to hex
+    from matplotlib.colors import to_hex
+
+    return to_hex(rgba)
+
+
+def get_member_colors(
+    member_ids: list[int],
+    colormap: str = "tab20",
+    custom_colors: dict[int, str] | None = None,
+) -> list[str]:
+    """Get consistent colors for multiple members.
+
+    Parameters
+    ----------
+    member_ids : list[int]
+        List of member IDs
+    colormap : str
+        Matplotlib colormap name (default: "tab20")
+    custom_colors : dict[int, str], optional
+        Manual color overrides {member_id: color_spec}
+
+    Returns
+    -------
+    list[str]
+        List of colors in same order as member_ids
+
+    Examples
+    --------
+    >>> get_member_colors([1, 2, 3])
+    ['#1f77b4', '#ff7f0e', '#2ca02c']
+
+    >>> # Members plotted in different order get same colors
+    >>> get_member_colors([3, 1, 2])
+    ['#2ca02c', '#1f77b4', '#ff7f0e']
+
+    >>> # Subset of members keeps same colors
+    >>> get_member_colors([1, 5, 10])
+    ['#1f77b4', '#9467bd', '#aec7e8']
+    """
+    return [
+        get_member_color(mid, colormap=colormap, custom_colors=custom_colors)
+        for mid in member_ids
+    ]

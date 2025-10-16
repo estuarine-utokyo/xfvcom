@@ -16,6 +16,10 @@ from .timeseries import (
     plot_ensemble_statistics,
     plot_ensemble_timeseries,
 )
+from ._timeseries_utils import (
+    get_member_color,
+    get_member_colors,
+)
 
 # Plotly utilities (optional, only if plotly is installed)
 try:
@@ -41,6 +45,8 @@ __all__: list[str] = [
     "plot_ensemble_timeseries",
     "plot_ensemble_statistics",
     "plot_dye_timeseries_stacked",
+    "get_member_color",
+    "get_member_colors",
 ]
 
 # Add plotly functions to __all__ if available
