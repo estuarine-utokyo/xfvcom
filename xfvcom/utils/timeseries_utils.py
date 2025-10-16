@@ -210,7 +210,7 @@ def extend_timeseries_seasonal(
         try:
             period_delta = pd.Timedelta(period)
             period_days = period_delta.days
-        except:
+        except (ValueError, TypeError):
             # Default to 365 days
             period_days = 365
 
@@ -307,7 +307,7 @@ def resample_timeseries(
         Resampled DataFrame
     """
     # Determine if upsampling or downsampling
-    current_freq = (
+    (
         pd.infer_freq(df.index) if isinstance(df.index, pd.DatetimeIndex) else None
     )
 

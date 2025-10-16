@@ -1,4 +1,3 @@
-import matplotlib
 import matplotlib.tri as mtri
 from matplotlib import pyplot as plt
 from matplotlib.contour import ContourSet

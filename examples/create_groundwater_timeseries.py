@@ -3,8 +3,6 @@
 Create time series CSV files for groundwater forcing with realistic variations.
 """
 
-from datetime import datetime, timedelta
-from pathlib import Path
 
 import numpy as np
 import pandas as pd

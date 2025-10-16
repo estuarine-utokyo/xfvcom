@@ -72,8 +72,10 @@ class NamelistParser:
         ... ]
         """
         # Find &NML_DYE_RELEASE section (match until / at start of line)
-        pattern = r'&NML_DYE_RELEASE\s+(.*?)^\s*/'
-        match = re.search(pattern, self._content, re.DOTALL | re.IGNORECASE | re.MULTILINE)
+        pattern = r"&NML_DYE_RELEASE\s+(.*?)^\s*/"
+        match = re.search(
+            pattern, self._content, re.DOTALL | re.IGNORECASE | re.MULTILINE
+        )
 
         if not match:
             raise ValueError(f"&NML_DYE_RELEASE section not found in {self.filepath}")
@@ -81,31 +83,31 @@ class NamelistParser:
         section_content = match.group(1)
 
         # Parse individual parameters
-        config = {}
+        config: dict[str, Any] = {}
 
         # DYE_ON (boolean)
-        config['dye_on'] = self._parse_boolean(section_content, 'DYE_ON')
+        config["dye_on"] = self._parse_boolean(section_content, "DYE_ON")
 
         # M_SPECIFY (node IDs)
-        config['m_specify'] = self._parse_int_array(section_content, 'M_SPECIFY')
+        config["m_specify"] = self._parse_int_array(section_content, "M_SPECIFY")
 
         # DYE_SOURCE_TERM (source strengths)
-        config['dye_source_term'] = self._parse_float_array(
-            section_content, 'DYE_SOURCE_TERM'
+        config["dye_source_term"] = self._parse_float_array(
+            section_content, "DYE_SOURCE_TERM"
         )
 
         # DYE_RELEASE_START (time string)
-        config['dye_release_start'] = self._parse_string(
-            section_content, 'DYE_RELEASE_START'
+        config["dye_release_start"] = self._parse_string(
+            section_content, "DYE_RELEASE_START"
         )
 
         # DYE_RELEASE_STOP (time string)
-        config['dye_release_stop'] = self._parse_string(
-            section_content, 'DYE_RELEASE_STOP'
+        config["dye_release_stop"] = self._parse_string(
+            section_content, "DYE_RELEASE_STOP"
         )
 
         # MSPE_DYE (number of sources)
-        config['mspe_dye'] = self._parse_int(section_content, 'MSPE_DYE')
+        config["mspe_dye"] = self._parse_int(section_content, "MSPE_DYE")
 
         return config
 
@@ -131,35 +133,37 @@ class NamelistParser:
         """
         config = self.parse_dye_release()
 
-        if not config['dye_on']:
+        if not config["dye_on"]:
             return []
 
         active_sources = []
         for i, (node_id, strength) in enumerate(
-            zip(config['m_specify'], config['dye_source_term'])
+            zip(config["m_specify"], config["dye_source_term"])
         ):
             if strength > 0:
-                active_sources.append({
-                    'index': i,
-                    'node_id': node_id,
-                    'strength': strength,
-                })
+                active_sources.append(
+                    {
+                        "index": i,
+                        "node_id": node_id,
+                        "strength": strength,
+                    }
+                )
 
         return active_sources
 
     @staticmethod
     def _parse_boolean(content: str, param_name: str) -> bool:
         """Parse boolean parameter from namelist content."""
-        pattern = rf'{param_name}\s*=\s*([TF]),'
+        pattern = rf"{param_name}\s*=\s*([TF]),"
         match = re.search(pattern, content, re.IGNORECASE)
         if not match:
             raise ValueError(f"Parameter {param_name} not found")
-        return match.group(1).upper() == 'T'
+        return match.group(1).upper() == "T"
 
     @staticmethod
     def _parse_int(content: str, param_name: str) -> int:
         """Parse integer parameter from namelist content."""
-        pattern = rf'{param_name}\s*=\s*(\d+),'
+        pattern = rf"{param_name}\s*=\s*(\d+),"
         match = re.search(pattern, content, re.IGNORECASE)
         if not match:
             raise ValueError(f"Parameter {param_name} not found")
@@ -181,7 +185,7 @@ class NamelistParser:
         Handles multi-line arrays and comments.
         """
         # Find parameter line - stop at next parameter (word char at line start) or end of section
-        pattern = rf'{param_name}\s*=\s*(.*?)(?=\n\s*[A-Z_][A-Z_0-9]*\s*=|\n\s*/|\Z)'
+        pattern = rf"{param_name}\s*=\s*(.*?)(?=\n\s*[A-Z_][A-Z_0-9]*\s*=|\n\s*/|\Z)"
         match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
         if not match:
             raise ValueError(f"Parameter {param_name} not found")
@@ -189,10 +193,10 @@ class NamelistParser:
         value_str = match.group(1)
 
         # Remove comments
-        value_str = re.sub(r'!.*', '', value_str)
+        value_str = re.sub(r"!.*", "", value_str)
 
         # Extract numbers
-        numbers = re.findall(r'\d+', value_str)
+        numbers = re.findall(r"\d+", value_str)
         return [int(n) for n in numbers]
 
     @staticmethod
@@ -202,7 +206,7 @@ class NamelistParser:
         Handles multi-line arrays and comments.
         """
         # Find parameter line - stop at next parameter (word char at line start) or end of section
-        pattern = rf'{param_name}\s*=\s*(.*?)(?=\n\s*[A-Z_][A-Z_0-9]*\s*=|\n\s*/|\Z)'
+        pattern = rf"{param_name}\s*=\s*(.*?)(?=\n\s*[A-Z_][A-Z_0-9]*\s*=|\n\s*/|\Z)"
         match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
         if not match:
             raise ValueError(f"Parameter {param_name} not found")
@@ -210,16 +214,15 @@ class NamelistParser:
         value_str = match.group(1)
 
         # Remove comments
-        value_str = re.sub(r'!.*', '', value_str)
+        value_str = re.sub(r"!.*", "", value_str)
 
         # Extract numbers (including decimals and scientific notation)
-        numbers = re.findall(r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?', value_str)
+        numbers = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", value_str)
         return [float(n) for n in numbers]
 
 
 def parse_member_namelist(
-    filepath: str | Path,
-    source_names: list[str] | None = None
+    filepath: str | Path, source_names: list[str] | None = None
 ) -> dict[str, Any]:
     """Parse a member namelist file and extract dye configuration.
 
@@ -255,12 +258,12 @@ def parse_member_namelist(
     # Add source names if provided
     if source_names is not None:
         for src in active_sources:
-            idx = src['index']
+            idx = src["index"]
             if idx < len(source_names):
-                src['source_name'] = source_names[idx]
+                src["source_name"] = source_names[idx]
 
     return {
-        'filepath': Path(filepath),
-        'config': config,
-        'active_sources': active_sources,
+        "filepath": Path(filepath),
+        "config": config,
+        "active_sources": active_sources,
     }

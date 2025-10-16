@@ -5,15 +5,14 @@ Provide a minimal FVCOM-like Dataset (fvcom_ds) and a ready Plotter (plotter).
 
 from __future__ import annotations
 
-import shutil
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 
-from xfvcom.plot.core import FvcomPlotConfig, FvcomPlotter
+from xfvcom.plot.config import FvcomPlotConfig
+from xfvcom.plot.core import FvcomPlotter
 
 
 @pytest.fixture

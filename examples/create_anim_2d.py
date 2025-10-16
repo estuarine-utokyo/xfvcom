@@ -8,7 +8,6 @@ import warnings
 import pandas as pd
 
 from xfvcom import FvcomDataLoader, FvcomPlotConfig, FvcomPlotter
-from xfvcom.helpers import FrameGenerator
 from xfvcom.plot_utils import create_anim_2d_plot
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)

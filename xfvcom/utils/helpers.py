@@ -32,11 +32,9 @@ from math import ceil
 from multiprocessing import Pool
 from pathlib import Path
 
-import cartopy.crs as ccrs
 import imageio.v2 as imageio
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import xarray as xr
 
 # from moviepy.editor import ImageSequenceClip

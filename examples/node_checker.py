@@ -11,12 +11,11 @@ Created: 2025-01-14
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Sequence
+from typing import Any, Literal, Sequence
 
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
-import numpy as np
-from cartopy.io.img_tiles import OSM, GoogleTiles
+from cartopy.io.img_tiles import OSM
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 

@@ -241,7 +241,6 @@ def select_members(
         # Import xarray type for proper type checking
         from typing import cast
 
-        import xarray as xr
 
         # Try to select by member coordinate first
         if hasattr(data_or_df, "member") and "member" in data_or_df.coords:
@@ -269,7 +268,6 @@ def select_members(
                 # Cast to xarray type so mypy knows .sel() exists
                 from typing import cast
 
-                import xarray as xr
 
                 xr_data = cast("xr.DataArray | xr.Dataset", data_or_df)
                 selected = xr_data.sel(ensemble=member_ids)
@@ -343,7 +341,7 @@ def select_members(
             )
         try:
             return df[cols]
-        except KeyError as e:
+        except KeyError:
             raise KeyError(
                 f"Columns {cols} not found in DataFrame. "
                 f"Available columns: {list(df.columns)}"

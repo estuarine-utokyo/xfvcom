@@ -12,7 +12,7 @@ from matplotlib.testing.compare import compare_images
 
 pytestmark = pytest.mark.png
 
-from xfvcom.plot.core import FvcomPlotConfig, FvcomPlotOptions, FvcomPlotter
+from xfvcom.plot.core import FvcomPlotOptions, FvcomPlotter
 
 BASELINE = Path(__file__).parent / "baseline"
 BASELINE.mkdir(exist_ok=True)
@@ -46,7 +46,7 @@ def test_prepare_axis_regression(
     fig = plt.figure(figsize=(4, 4))
     ax = fig.add_subplot(projection=(ccrs.PlateCarree() if use_latlon else None))
 
-    triang = mtri.Triangulation(fvcom_ds["lon"], fvcom_ds["lat"], fvcom_ds["nv_zero"])
+    mtri.Triangulation(fvcom_ds["lon"], fvcom_ds["lat"], fvcom_ds["nv_zero"])
     da = fvcom_ds["temp"].isel(time=0, siglay=0)
 
     opts = FvcomPlotOptions(

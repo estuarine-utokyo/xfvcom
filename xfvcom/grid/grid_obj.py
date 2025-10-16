@@ -552,7 +552,6 @@ class FvcomGrid:
 
         def _edge_angle(edge: tuple[int, int]) -> float:
             u, v = edge
-            other = v if u == node_idx else u
             mx, my = _edge_midpoint(edge)
             return float(np.arctan2(my - self.y[node_idx], mx - self.x[node_idx]))
 

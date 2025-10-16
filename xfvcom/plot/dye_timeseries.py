@@ -9,7 +9,6 @@ import sys
 from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 from matplotlib.dates import AutoDateLocator, ConciseDateFormatter
 
@@ -22,8 +21,6 @@ from ._timeseries_utils import (
 
 if TYPE_CHECKING:
     import xarray as xr
-    from matplotlib.axes import Axes
-    from matplotlib.figure import Figure
 
 
 def plot_dye_timeseries_stacked(
@@ -200,8 +197,15 @@ def plot_dye_timeseries_stacked(
             # Fallback to position-based colors using specified colormap
             from matplotlib import colormaps
 
-            cmap = colormaps[colormap]
+            # Handle "auto" colormap selection
             n_members = len(df.columns)
+            if colormap == "auto":
+                # Auto-select colormap based on number of members
+                actual_colormap = "tab20" if n_members <= 20 else "hsv"
+            else:
+                actual_colormap = colormap
+
+            cmap = colormaps[actual_colormap]
             colors_list = [cmap(i % cmap.N) for i in range(n_members)]
     else:
         # User-provided custom colors
@@ -230,7 +234,7 @@ def plot_dye_timeseries_stacked(
     ax.set_xlabel("Time", fontsize=14)
     ax.set_ylabel(ylabel, fontsize=14)
     if title is None:
-        title = f"DYE Concentration Time Series (Stacked)"
+        title = "DYE Concentration Time Series (Stacked)"
     ax.set_title(title, fontsize=15)
 
     # Grid

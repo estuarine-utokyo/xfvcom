@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import glob
-import os
 import re
 import shutil
 from pathlib import Path
@@ -123,7 +122,7 @@ def create_anim_2d_plot(
     suffix = "_frame"
     len_suffix = len(suffix)
     # Convert subscripts $_x$ -> x
-    long_name = re.sub(r"\$_(\d+)\$", r"\1", da.long_name)
+    re.sub(r"\$_(\d+)\$", r"\1", da.long_name)
     # base_name = f"{long_name}_{start_date}-{end_date}{suffix}"
     base_name = f"{var_name}_{start_date}-{end_date}{suffix}"
 
@@ -145,7 +144,7 @@ def create_anim_2d_plot(
     # `plot_kwargs_final` は FrameGenerator → plot_2d にそのまま流れる
     plot_kwargs_final = {"opts": opts}
 
-    frames = FrameGenerator.generate_frames(
+    FrameGenerator.generate_frames(
         da=da,
         output_dir=output_dir,
         plotter=plotter,
@@ -186,7 +185,7 @@ def create_anim_2d_plot(
 
     if not generate_gif and not generate_mp4:
         print(
-            f"Frames have been generated and saved as PNG files. No animation created."
+            "Frames have been generated and saved as PNG files. No animation created."
         )
         return None
     # Create GIF animation

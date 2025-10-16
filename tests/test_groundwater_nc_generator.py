@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
 
 import netCDF4 as nc
 import numpy as np
-import pandas as pd
 import pytest
 import xarray as xr
 

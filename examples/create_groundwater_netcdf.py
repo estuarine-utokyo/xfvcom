@@ -188,9 +188,9 @@ def create_groundwater_netcdf(
     with nc.Dataset(output_file, "w", format="NETCDF4_CLASSIC") as ds:
 
         # Create dimensions
-        node_dim = ds.createDimension("node", node_count)
-        time_dim = ds.createDimension("time", None)  # unlimited
-        datestrlen_dim = ds.createDimension("DateStrLen", 26)
+        ds.createDimension("node", node_count)
+        ds.createDimension("time", None)  # unlimited
+        ds.createDimension("DateStrLen", 26)
 
         # Create coordinate variables
         if coordinate_system == "Geographic":
@@ -279,7 +279,7 @@ def create_groundwater_netcdf(
         if dye_value is not None:
             ds.dye_value = dye_value
 
-    print(f"NetCDF file created successfully!")
+    print("NetCDF file created successfully!")
     print(f"Active nodes (1-based): {active_nodes}")
     print(f"Flux velocity: {flux_value:.3e} m/s at {len(active_nodes)} nodes")
 

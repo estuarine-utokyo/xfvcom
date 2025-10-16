@@ -27,8 +27,8 @@ def test_get_boundaries_as_lines():
 
     # Each edge should have 2 points
     for boundary in boundaries:
-        assert len(boundary) == 2, f"Each edge should have 2 points"
-        assert len(boundary[0]) == 2, f"Each point should have (x, y) coordinates"
+        assert len(boundary) == 2, "Each edge should have 2 points"
+        assert len(boundary[0]) == 2, "Each point should have (x, y) coordinates"
 
 
 def test_get_boundaries_as_polygons():
@@ -51,7 +51,7 @@ def test_get_boundaries_as_polygons():
     assert len(polygons) == 1, f"Expected 1 polygon, got {len(polygons)}"
 
     # Triangle should be closed (4 points, first == last)
-    assert len(polygons[0]) == 4, f"Triangle should have 4 points (closed)"
+    assert len(polygons[0]) == 4, "Triangle should have 4 points (closed)"
     assert polygons[0][0] == polygons[0][-1], "First and last points should be same"
 
 
@@ -116,7 +116,7 @@ def test_boundaries_empty_nodes():
     grid = FvcomGrid(x=x, y=y, nv=nv, lon=lon, lat=lat)
 
     boundaries = grid.get_node_element_boundaries([], index_base=1, return_as="lines")
-    assert boundaries == [], f"Expected empty list for no nodes"
+    assert boundaries == [], "Expected empty list for no nodes"
 
 
 def test_boundaries_invalid_return_type():
@@ -147,7 +147,7 @@ def test_boundaries_zero_based_indexing():
     boundaries = grid.get_node_element_boundaries(
         [0, 1, 2], index_base=0, return_as="lines"
     )
-    assert len(boundaries) == 3, f"Expected 3 edges with 0-based indexing"
+    assert len(boundaries) == 3, "Expected 3 edges with 0-based indexing"
 
 
 def test_boundaries_all_nodes():
@@ -161,4 +161,4 @@ def test_boundaries_all_nodes():
     grid = FvcomGrid(x=x, y=y, nv=nv, lon=lon, lat=lat)
 
     boundaries = grid.get_node_element_boundaries(None, index_base=1, return_as="lines")
-    assert len(boundaries) == 3, f"Expected 3 edges for all nodes"
+    assert len(boundaries) == 3, "Expected 3 edges for all nodes"

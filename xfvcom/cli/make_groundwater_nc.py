@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -116,7 +116,7 @@ def parse_forcing_value(
                     time_col, node_col, value_col = col_spec
                 else:
                     raise ValueError(
-                        f"Long format requires 3 columns: datetime,node_id,value"
+                        "Long format requires 3 columns: datetime,node_id,value"
                     )
                 df = pd.read_csv(file_path)
 

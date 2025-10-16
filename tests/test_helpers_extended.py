@@ -65,7 +65,7 @@ def test_generate_frames_and_collect(tmp_path, monkeypatch):
         def load(self):
             return self
 
-    da = DummyDA()
+    DummyDA()
 
     # Mock FrameGenerator.generate_frames to generate and write dummy frame files
     def dummy_generate_frames(**kwargs):

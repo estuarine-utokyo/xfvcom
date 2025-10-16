@@ -12,7 +12,7 @@ from matplotlib.testing.compare import compare_images
 
 pytestmark = pytest.mark.png
 
-from xfvcom.plot.core import FvcomPlotOptions, FvcomPlotter
+from xfvcom.plot.core import FvcomPlotOptions
 
 BASELINE = Path(__file__).parent / "baseline"
 BASELINE.mkdir(exist_ok=True)

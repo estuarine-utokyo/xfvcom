@@ -294,7 +294,7 @@ class FvcomDataLoader:
         - lat: Latitude coordinates.
         """
         crs_from = f"+proj=utm +zone={self.zone} {'+north' if self.north else ''} +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
-        crs_to = f"+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
+        crs_to = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
         transformer = pyproj.Transformer.from_crs(crs_from, crs_to)
         return transformer.transform(x, y)
 

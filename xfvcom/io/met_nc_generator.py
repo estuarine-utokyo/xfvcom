@@ -3,13 +3,10 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import tempfile
-from datetime import timezone
-from io import BytesIO
 from os import PathLike
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Iterable, Mapping
 
 import netCDF4 as nc
 import numpy as np

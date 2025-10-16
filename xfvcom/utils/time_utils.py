@@ -34,7 +34,7 @@ def time_label(
     sel = obj.time.isel(time=idx)
 
     # Format as strings via pandas → strftime
-    formatted = (
+    (
         pd.to_datetime(sel.values).strftime
         if sel.ndim == 0
         else (pd.to_datetime(sel.values).strftime(fmt).tolist())

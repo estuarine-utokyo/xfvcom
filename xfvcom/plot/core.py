@@ -28,14 +28,10 @@ from matplotlib.ticker import LogFormatter, LogLocator
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.spatial import KDTree
 
-from ..analysis import FvcomAnalyzer
 from ..decorators import precedence
-from ..io import FvcomDataLoader
 from ..plot_options import FvcomPlotOptions
 from ..utils.helpers import PlotHelperMixin, pick_first
 from ..utils.helpers_utils import parse_coordinate as _parse
-from .config import FvcomPlotConfig
-from .utils import add_colorbar
 
 """
 Suppress Shapely RuntimeWarning when linestrings encounter NaN coords.
@@ -964,12 +960,11 @@ class FvcomPlotter(PlotHelperMixin):
         projection = opts.projection  # map projection
         use_latlon = opts.use_latlon  # lon/lat or Cartesian
         self.use_latlon = use_latlon
-        transform = ccrs.PlateCarree() if self.use_latlon else None
+        ccrs.PlateCarree() if self.use_latlon else None
 
         with_mesh = opts.with_mesh  # draw mesh lines
         coastlines = opts.coastlines  # draw coastlines
         obclines = opts.obclines  # draw open-boundary lines
-        plot_grid = opts.plot_grid  # lat/lon grid
         add_tiles = opts.add_tiles  # web tiles
         tile_provider = opts.tile_provider
         tile_zoom = opts.tile_zoom
@@ -999,7 +994,7 @@ class FvcomPlotter(PlotHelperMixin):
             _long = da.attrs.get("long_name", da.name or "")
             _units = da.attrs.get("units", "")
             default_cbar_label = f"{_long} ({_units})" if _units else _long
-            cbar_label = extra.get("cbar_label", default_cbar_label)
+            extra.get("cbar_label", default_cbar_label)
         else:
             with_mesh = True
         # Extract triangle connectivity
@@ -1060,7 +1055,6 @@ class FvcomPlotter(PlotHelperMixin):
             opts=opts,
             projection=projection,
         )
-        fig = ax.figure
 
         # Add map tiles if requested
         if add_tiles and self.use_latlon:
@@ -1083,7 +1077,7 @@ class FvcomPlotter(PlotHelperMixin):
         obcline_color = pick_first(
             (local or {}).get("obcline_color"), opts.obcline_color, "blue"
         )
-        linestyle = pick_first(
+        pick_first(
             (local or {}).get("linestyle"), opts.grid_linestyle, "--"
         )
         # Prepare color plot
@@ -1115,13 +1109,12 @@ class FvcomPlotter(PlotHelperMixin):
             data_min = float(values.min())
             data_max = float(values.max())
 
-            extend_flag = "neither"
             if data_min < vmin and data_max > vmax:
-                extend_flag = "both"
+                pass
             elif data_min < vmin:
-                extend_flag = "min"
+                pass
             elif data_max > vmax:
-                extend_flag = "max"
+                pass
 
             tc_kwargs.update(
                 {
@@ -1566,18 +1559,16 @@ class FvcomPlotter(PlotHelperMixin):
                 )
 
         # Determine vertical dimension
-        vert_dim = "siglay" if "siglay" in da.dims else "siglev"
 
         # Get depth array at same time
         z_all = self.ds["z"]
         if "time" in z_all.dims:
             if "time" in da.coords:
-                z_slice = z_all.sel(time=da["time"], method="nearest")
+                z_all.sel(time=da["time"], method="nearest")
             else:
-                z_slice = z_all.isel(time=0)
-            z2d = z_slice.values  # (vertical, node)
+                z_all.isel(time=0)
         else:
-            z2d = z_all.values
+            pass
 
         # Prepare mesh triangulation for domain test
         lon_n = self.ds["lon"].values
@@ -1596,11 +1587,11 @@ class FvcomPlotter(PlotHelperMixin):
 
         # Define transect endpoints
         if line:
-            pts = line
+            pass
         elif lat is not None:
-            pts = [(float(lon_n.min()), lat), (float(lon_n.max()), lat)]
+            [(float(lon_n.min()), lat), (float(lon_n.max()), lat)]
         elif lon is not None:
-            pts = [(lon, float(lat_n.min())), (lon, float(lat_n.max()))]
+            [(lon, float(lat_n.min())), (lon, float(lat_n.max()))]
         else:
             raise ValueError("Specify lat, lon, or line for section.")
 
@@ -1608,8 +1599,7 @@ class FvcomPlotter(PlotHelperMixin):
             lat=lat, lon=lon, line=line, spacing=spacing
         )
         # Domain mask
-        tri_idx = trifinder(lons, lats)
-        inside = tri_idx != -1
+        trifinder(lons, lats)
 
         # Nearest-node for each sample
         x_s, y_s = proj(lons, lats)

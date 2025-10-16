@@ -173,13 +173,13 @@ def main():
     export_member_mapping(
         mapping_df,
         output_path,
-        format='csv',
+        format="csv",
     )
 
     # Export summary if requested
     if args.summary:
         if not args.quiet:
-            print(f"Generating member summary...")
+            print("Generating member summary...")
 
         summary_df = get_member_summary(
             nml_dir=nml_dir,
@@ -203,7 +203,7 @@ def main():
         export_member_mapping(
             mapping_df,
             args.markdown,
-            format='markdown',
+            format="markdown",
         )
 
     # Extract coordinates if NetCDF file provided
@@ -216,7 +216,7 @@ def main():
             if not args.quiet:
                 print(f"Extracting node coordinates from: {nc_path}")
 
-            unique_nodes = mapping_df['node_id'].unique().tolist()
+            unique_nodes = mapping_df["node_id"].unique().tolist()
             coords_df = get_node_coordinates(nc_path, unique_nodes)
 
             if args.coords:
@@ -237,7 +237,7 @@ def main():
         print("=" * 80)
         print("EXTRACTION COMPLETE")
         print("=" * 80)
-        print(f"Files created:")
+        print("Files created:")
         print(f"  - {output_path}")
         if args.summary:
             print(f"  - {args.summary}")

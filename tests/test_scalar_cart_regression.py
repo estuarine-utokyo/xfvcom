@@ -13,7 +13,7 @@ from matplotlib.testing.compare import compare_images
 
 pytestmark = pytest.mark.png
 
-from xfvcom.plot.core import FvcomPlotOptions, FvcomPlotter
+from xfvcom.plot.core import FvcomPlotOptions
 
 BASELINE = Path(__file__).parent / "baseline"
 BASELINE.mkdir(exist_ok=True)
@@ -35,7 +35,7 @@ def test_scalar_cart_regression(tmp_path, fvcom_ds, plotter, regen_baseline):
         fvcom_ds["y"] = ("node", np.arange(len(fvcom_ds["lat"])))
 
     fig, ax = plt.subplots(figsize=(4, 4))  # Cartesian → projection=None
-    triang = mtri.Triangulation(fvcom_ds["x"], fvcom_ds["y"], fvcom_ds["nv_zero"])
+    mtri.Triangulation(fvcom_ds["x"], fvcom_ds["y"], fvcom_ds["nv_zero"])
     da = fvcom_ds["temp"].isel(time=0, siglay=0)
 
     opts = FvcomPlotOptions(

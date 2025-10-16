@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import tempfile
-from datetime import timezone
-from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Sequence, cast
+from typing import Any
 
 import netCDF4 as nc
 import numpy as np

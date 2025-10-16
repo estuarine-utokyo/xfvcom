@@ -9,10 +9,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-from matplotlib.dates import AutoDateLocator, ConciseDateFormatter, DateFormatter
-from matplotlib.ticker import MaxNLocator
+from matplotlib.dates import AutoDateLocator, ConciseDateFormatter
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes

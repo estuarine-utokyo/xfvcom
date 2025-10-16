@@ -7,7 +7,9 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from xfvcom.plot.core import FvcomPlotConfig, FvcomPlotOptions, FvcomPlotter
+from xfvcom.plot.config import FvcomPlotConfig
+from xfvcom.plot.core import FvcomPlotter
+from xfvcom.plot_options import FvcomPlotOptions
 
 
 def _tiny_ds() -> xr.Dataset:
@@ -16,7 +18,6 @@ def _tiny_ds() -> xr.Dataset:
     time = pd.date_range("2020-01-01 01:00", periods=3, freq="6h")
     siglay = [0]  # single layer
     node = [0, 1, 2]  # three nodes → one triangle (0,1,2)
-    nele = [0]  # one element
 
     # --- coordinates --------------------------------------------------
     lon = xr.DataArray([0.0, 1.0, 0.0], dims=("node",))

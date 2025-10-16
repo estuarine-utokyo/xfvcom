@@ -101,7 +101,7 @@ class FvcomAnalyzer:
         """
         Convert geographic coordinates to UTM or vice versa.
         """
-        crs_from = f"+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
+        crs_from = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
         crs_to = f"+proj=utm +zone={self.zone} {'+north' if self.north else ''} +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
         transformer = (
             pyproj.Transformer.from_crs(crs_to, crs_from)

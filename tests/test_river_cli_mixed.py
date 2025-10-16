@@ -1,8 +1,6 @@
 from pathlib import Path
 
-import numpy as np
 import pytest
-import xarray as xr
 
 from xfvcom.io.river_nc_generator import RiverNetCDFGenerator
 
@@ -10,7 +8,7 @@ DATA = Path(__file__).parent / "data"
 
 
 def test_cli_mixed(tmp_path):
-    out_nc = tmp_path / "river.nc"
+    tmp_path / "river.nc"
     gen = RiverNetCDFGenerator(
         nml_path=DATA / "rivers_minimal.nml",
         start="2025-01-01T00:00:00Z",

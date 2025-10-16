@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 import tempfile
-from datetime import timezone
 from pathlib import Path
-from typing import Any, Sequence
 
 import netCDF4 as nc
 import numpy as np
@@ -15,8 +13,6 @@ from numpy.typing import NDArray
 
 from ..grid.grid_obj import FvcomGrid
 from .base_generator import BaseGenerator
-from .sources.base import BaseForcingSource
-from .sources.timeseries import TimeSeriesSource
 
 
 class GroundwaterNetCDFGenerator(BaseGenerator):
@@ -125,7 +121,7 @@ class GroundwaterNetCDFGenerator(BaseGenerator):
     def _to_ideal_days(t: pd.DatetimeIndex) -> NDArray[np.float32]:
         """Convert to days since 0.0 (ideal format)."""
         # FVCOM ideal format: days since year 0
-        origin = pd.Timestamp("0000-01-01T00:00:00Z")
+        pd.Timestamp("0000-01-01T00:00:00Z")
         # pandas doesn't support year 0, so we use an offset
         # Days from year 1 to 1858-11-17 is approximately 678576 days
         mjd = GroundwaterNetCDFGenerator._to_mjd(t)

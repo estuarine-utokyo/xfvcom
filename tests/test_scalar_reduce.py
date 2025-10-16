@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from xfvcom.plot.core import FvcomPlotConfig, FvcomPlotter
+from xfvcom.plot.config import FvcomPlotConfig
+from xfvcom.plot.core import FvcomPlotter
 from xfvcom.plot_options import FvcomPlotOptions
 
 

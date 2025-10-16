@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Literal
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -341,11 +341,11 @@ def load_member_series(
             f"  Files: {[f.name for f in files]}\n"
             f"  Total NaNs: {nan_mask.sum().item()}\n"
             f"  First occurrences:\n" + "\n".join(diagnostics) + "\n"
-            f"  Remediation hints:\n"
-            f"    - Check for dry nodes (land mask)\n"
-            f"    - Verify DYE initialization and boundary conditions\n"
-            f"    - Review upstream preprocessing steps\n"
-            f"    - Check model convergence and output writing"
+            "  Remediation hints:\n"
+            "    - Check for dry nodes (land mask)\n"
+            "    - Verify DYE initialization and boundary conditions\n"
+            "    - Review upstream preprocessing steps\n"
+            "    - Check model convergence and output writing"
         )
         raise ValueError(error_msg)
 
@@ -458,9 +458,9 @@ def _aggregate_native_intersection(
             )
 
         error_msg = (
-            f"Time alignment failed: empty intersection!\n"
-            f"Time ranges for each (year, member):\n" + "\n".join(time_ranges) + "\n"
-            f"Hint: Consider using align='same_calendar' or 'climatology' instead."
+            "Time alignment failed: empty intersection!\n"
+            "Time ranges for each (year, member):\n" + "\n".join(time_ranges) + "\n"
+            "Hint: Consider using align='same_calendar' or 'climatology' instead."
         )
         raise ValueError(error_msg)
 
