@@ -184,7 +184,12 @@ def prepare_wide_df(
             if isinstance(df.index, pd.MultiIndex):
                 for level in df.index.names:
                     if level in ["ensemble", "member"] and level != "time":
-                        df = df.unstack(level)
+                        unstacked = df.unstack(level)
+                        # unstack can return Series if only one column
+                        if isinstance(unstacked, pd.Series):
+                            df = unstacked.to_frame()
+                        else:
+                            df = unstacked
                         break
 
             return df
@@ -233,10 +238,17 @@ def select_members(
     """
     # Convert to DataFrame if xarray
     if hasattr(data_or_df, "to_dataframe"):
+        # Import xarray type for proper type checking
+        from typing import cast
+
+        import xarray as xr
+
         # Try to select by member coordinate first
         if hasattr(data_or_df, "member") and "member" in data_or_df.coords:
             try:
-                selected = data_or_df.sel(member=member_ids)
+                # Cast to xarray type so mypy knows .sel() exists
+                xr_data = cast("xr.DataArray | xr.Dataset", data_or_df)
+                selected = xr_data.sel(member=member_ids)
                 df = prepare_wide_df(selected)
                 # Columns should now be integers matching member_ids
                 # Rename columns if member_map provided
@@ -254,7 +266,13 @@ def select_members(
                 )
         elif hasattr(data_or_df, "ensemble") and "ensemble" in data_or_df.coords:
             try:
-                selected = data_or_df.sel(ensemble=member_ids)
+                # Cast to xarray type so mypy knows .sel() exists
+                from typing import cast
+
+                import xarray as xr
+
+                xr_data = cast("xr.DataArray | xr.Dataset", data_or_df)
+                selected = xr_data.sel(ensemble=member_ids)
                 df = prepare_wide_df(selected)
                 # Rename columns if member_map provided
                 if member_map:
@@ -438,7 +456,7 @@ def align_same_clock_across_years(
     dict[str, pd.DataFrame]
         Dictionary mapping year label to aligned DataFrame slice
     """
-    result = {}
+    result: dict[str, pd.DataFrame] = {}
 
     years = df.index.year.unique()
 
@@ -458,7 +476,12 @@ def align_same_clock_across_years(
                     & (year_df.index.month <= end_dt.month)
                     & (year_df.index.day <= end_dt.day)
                 )
-                year_df = year_df[mask]
+                filtered = year_df[mask]
+                # Ensure result is DataFrame, not Series
+                if isinstance(filtered, pd.Series):
+                    year_df = filtered.to_frame()
+                else:
+                    year_df = filtered
 
         result[str(year)] = year_df
 
