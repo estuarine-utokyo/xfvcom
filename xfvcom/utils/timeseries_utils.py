@@ -307,9 +307,7 @@ def resample_timeseries(
         Resampled DataFrame
     """
     # Determine if upsampling or downsampling
-    (
-        pd.infer_freq(df.index) if isinstance(df.index, pd.DatetimeIndex) else None
-    )
+    (pd.infer_freq(df.index) if isinstance(df.index, pd.DatetimeIndex) else None)
 
     # Resample
     resampler = df.resample(target_freq)

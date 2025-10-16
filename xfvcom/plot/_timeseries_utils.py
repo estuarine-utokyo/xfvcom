@@ -241,7 +241,6 @@ def select_members(
         # Import xarray type for proper type checking
         from typing import cast
 
-
         # Try to select by member coordinate first
         if hasattr(data_or_df, "member") and "member" in data_or_df.coords:
             try:
@@ -267,7 +266,6 @@ def select_members(
             try:
                 # Cast to xarray type so mypy knows .sel() exists
                 from typing import cast
-
 
                 xr_data = cast("xr.DataArray | xr.Dataset", data_or_df)
                 selected = xr_data.sel(ensemble=member_ids)

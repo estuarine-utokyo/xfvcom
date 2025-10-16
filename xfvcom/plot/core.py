@@ -1077,9 +1077,7 @@ class FvcomPlotter(PlotHelperMixin):
         obcline_color = pick_first(
             (local or {}).get("obcline_color"), opts.obcline_color, "blue"
         )
-        pick_first(
-            (local or {}).get("linestyle"), opts.grid_linestyle, "--"
-        )
+        pick_first((local or {}).get("linestyle"), opts.grid_linestyle, "--")
         # Prepare color plot
         if da is not None:
             cmap_raw = extra.get("cmap", opts.cmap)

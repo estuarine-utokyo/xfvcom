@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 import netCDF4 as nc
 import numpy as np
 import pytest
