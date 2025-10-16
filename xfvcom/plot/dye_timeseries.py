@@ -18,6 +18,7 @@ from ._timeseries_utils import (
     prepare_wide_df,
     select_members,
 )
+from .config import FvcomPlotConfig
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -30,7 +31,8 @@ def plot_dye_timeseries_stacked(
     start: str | pd.Timestamp | None = None,
     end: str | pd.Timestamp | None = None,
     colors: dict[str, str] | None = None,
-    figsize: tuple[float, float] = (14, 6),
+    cfg: FvcomPlotConfig | None = None,
+    figsize: tuple[float, float] | None = None,
     title: str | None = None,
     ylabel: str = "Dye Concentration",
     output: str | None = None,
@@ -62,8 +64,12 @@ def plot_dye_timeseries_stacked(
         End time for the plot window. If None, uses all data.
     colors : dict, optional
         Custom color mapping. Keys are member labels (str), values are color specs.
-    figsize : tuple of float, default (14, 6)
-        Figure size (width, height) in inches.
+    cfg : FvcomPlotConfig, optional
+        Plot configuration object for consistent styling. If None, uses default configuration
+        matching plot_ensemble_timeseries defaults.
+    figsize : tuple of float, optional
+        Figure size (width, height) in inches. Overrides cfg.figsize if provided.
+        If None, uses cfg.figsize (default: (14, 6)).
     title : str, optional
         Plot title. If None, uses default.
     ylabel : str, default "Dye Concentration"
@@ -120,6 +126,24 @@ def plot_dye_timeseries_stacked(
     print("DYE TIMESERIES STACKED AREA PLOT", file=sys.stdout)
     print("=" * 70, file=sys.stdout)
 
+    # Create config with default font sizes matching plot_ensemble_timeseries if not provided
+    if cfg is None:
+        cfg = FvcomPlotConfig(
+            figsize=(14, 6),
+            fontsize={
+                "xticks": 13,
+                "yticks": 13,
+                "xlabel": 14,
+                "ylabel": 14,
+                "title": 15,
+                "legend": 12,
+            },
+            linewidth={"plot": 1.8},
+        )
+
+    # Use figsize parameter if provided (overrides config)
+    actual_figsize = figsize if figsize is not None else cfg.figsize
+
     # Step 1: Convert to wide DataFrame
     df = prepare_wide_df(data)
     print(
@@ -164,7 +188,7 @@ def plot_dye_timeseries_stacked(
         print("  These will be displayed as-is in the plot", file=sys.stdout)
 
     # Step 6: Create stacked area plot
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = plt.subplots(figsize=actual_figsize)
 
     # Get column labels
     labels = [str(col) for col in df.columns]
@@ -231,14 +255,21 @@ def plot_dye_timeseries_stacked(
     ax.xaxis.set_major_formatter(formatter)
 
     # Labels and title
-    ax.set_xlabel("Time", fontsize=14)
-    ax.set_ylabel(ylabel, fontsize=14)
+    ax.set_xlabel("Time", fontsize=cfg.fontsize_xlabel)
+    ax.set_ylabel(ylabel, fontsize=cfg.fontsize_ylabel)
     if title is None:
         title = "DYE Concentration Time Series (Stacked)"
-    ax.set_title(title, fontsize=15)
+    ax.set_title(title, fontsize=cfg.fontsize_title)
 
     # Grid
-    ax.grid(True, alpha=0.3, axis="y")
+    ax.grid(
+        True,
+        alpha=cfg.grid_alpha,
+        linestyle=cfg.grid_linestyle,
+        linewidth=cfg.grid_linewidth,
+        color=cfg.grid_color,
+        axis="y",
+    )
 
     # Y-axis starts at 0 if no negative values
     if not has_negatives:
@@ -253,15 +284,22 @@ def plot_dye_timeseries_stacked(
         loc="center left",
         bbox_to_anchor=(1, 0.5),
         frameon=True,
-        fontsize=12,
+        fontsize=cfg.fontsize_legend,
         title="Member",
+    )
+
+    # Tick parameters
+    ax.tick_params(
+        axis="both",
+        labelsize=cfg.fontsize_xticks,
+        width=cfg.linewidth_tick_params,
     )
 
     plt.tight_layout()
 
     # Save if output path provided
     if output:
-        fig.savefig(output, dpi=200, bbox_inches="tight")
+        fig.savefig(output, dpi=cfg.dpi, bbox_inches="tight")
         print(f"✓ Saved to: {output}", file=sys.stdout)
 
     print("=" * 70, file=sys.stdout)
