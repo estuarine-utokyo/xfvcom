@@ -635,8 +635,9 @@ def deterministic_colors(
 
 def get_member_color(
     member_id: int,
-    colormap: str = "tab20",
+    colormap: str = "auto",
     custom_colors: dict[int, str] | None = None,
+    total_members: int | None = None,
 ) -> str:
     """Get consistent color for a member ID across all plot types.
 
@@ -650,9 +651,14 @@ def get_member_color(
     member_id : int
         Member ID (1-based integer, e.g., 1, 2, 3, ...)
     colormap : str
-        Matplotlib colormap name (default: "tab20" for up to 20 members)
+        Matplotlib colormap name (default: "auto").
+        - "auto": Automatically selects tab20 (≤20 members) or hsv (>20 members)
+        - "tab20", "hsv", "rainbow", etc.: Manual colormap selection
     custom_colors : dict[int, str], optional
         Manual color overrides {member_id: color_spec}
+    total_members : int, optional
+        Total number of members (required for "auto" colormap selection).
+        If not provided with "auto", defaults to tab20.
 
     Returns
     -------
@@ -661,26 +667,27 @@ def get_member_color(
 
     Examples
     --------
-    >>> # Member 1 always gets the first tab20 color
-    >>> get_member_color(1)
-    '#1f77b4'
+    >>> # Auto-select: tab20 for ≤20 members, hsv for >20
+    >>> get_member_color(1, colormap="auto", total_members=18)
+    '#1f77b4'  # tab20[0]
 
-    >>> # Member 5 always gets the fifth tab20 color
-    >>> get_member_color(5)
-    '#9467bd'
+    >>> # Auto-select with 30 members uses HSV
+    >>> get_member_color(25, colormap="auto", total_members=30)
+    '#ff8e00'  # hsv color
 
-    >>> # Custom color for member 3
+    >>> # Manual colormap selection
+    >>> get_member_color(5, colormap="tab20")
+    '#2ca02c'  # tab20[4]
+
+    >>> # Custom color override
     >>> get_member_color(3, custom_colors={3: 'red'})
     'red'
 
     Notes
     -----
-    **Best Practice**: Use tab20 colormap for up to 20 members.
-    Colors are assigned by member ID (NOT position), ensuring:
-    - Member 1 → tab20[0] (blue)
-    - Member 2 → tab20[1] (orange)
-    - Member 3 → tab20[2] (green)
-    - etc.
+    **Auto-selection logic**:
+    - ≤20 members → tab20 (qualitative, distinct colors)
+    - >20 members → hsv (continuous, evenly distributed hues)
 
     This creates visual consistency across:
     - Line plots (plot_ensemble_timeseries)
@@ -691,6 +698,16 @@ def get_member_color(
     # Check for custom override first
     if custom_colors and member_id in custom_colors:
         return custom_colors[member_id]
+
+    # Auto-select colormap based on total_members
+    if colormap == "auto":
+        if total_members is None:
+            # Default to tab20 if total_members not provided
+            colormap = "tab20"
+        elif total_members <= 20:
+            colormap = "tab20"
+        else:
+            colormap = "hsv"
 
     # Import matplotlib colormaps
     from matplotlib import colormaps
@@ -711,17 +728,19 @@ def get_member_color(
 
 def get_member_colors(
     member_ids: list[int],
-    colormap: str = "tab20",
+    colormap: str = "auto",
     custom_colors: dict[int, str] | None = None,
 ) -> list[str]:
-    """Get consistent colors for multiple members.
+    """Get consistent colors for multiple members with auto-selection.
 
     Parameters
     ----------
     member_ids : list[int]
         List of member IDs
     colormap : str
-        Matplotlib colormap name (default: "tab20")
+        Matplotlib colormap name (default: "auto").
+        - "auto": Automatically selects tab20 (≤20 members) or hsv (>20 members)
+        - "tab20", "hsv", "rainbow", etc.: Manual colormap selection
     custom_colors : dict[int, str], optional
         Manual color overrides {member_id: color_spec}
 
@@ -732,18 +751,37 @@ def get_member_colors(
 
     Examples
     --------
+    >>> # Auto-select: uses tab20 for ≤20 members
     >>> get_member_colors([1, 2, 3])
-    ['#1f77b4', '#ff7f0e', '#2ca02c']
+    ['#1f77b4', '#aec7e8', '#ff7f0e']
+
+    >>> # Auto-select: uses hsv for >20 members
+    >>> member_ids = list(range(1, 31))  # 30 members
+    >>> colors = get_member_colors(member_ids)  # Uses HSV automatically
+    >>> len(set(colors))  # All unique
+    30
 
     >>> # Members plotted in different order get same colors
     >>> get_member_colors([3, 1, 2])
-    ['#2ca02c', '#1f77b4', '#ff7f0e']
+    ['#ff7f0e', '#1f77b4', '#aec7e8']
 
     >>> # Subset of members keeps same colors
     >>> get_member_colors([1, 5, 10])
-    ['#1f77b4', '#9467bd', '#aec7e8']
+    ['#1f77b4', '#2ca02c', '#c5b0d5']
+
+    >>> # Manual colormap override
+    >>> get_member_colors([1, 2, 3], colormap="rainbow")
+    [...rainbow colors...]
     """
+    # Auto-detect total_members for auto-selection
+    total_members = max(member_ids) if member_ids else 1
+
     return [
-        get_member_color(mid, colormap=colormap, custom_colors=custom_colors)
+        get_member_color(
+            mid,
+            colormap=colormap,
+            custom_colors=custom_colors,
+            total_members=total_members,
+        )
         for mid in member_ids
     ]

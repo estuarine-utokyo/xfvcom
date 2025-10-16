@@ -83,12 +83,18 @@ def plot_ensemble_timeseries(
     minticks: int = 3,
     maxticks: int = 7,
     rotation: int = 30,
+    colormap: str = "auto",
+    custom_colors: dict[int, str] | None = None,
     **kwargs,
 ) -> tuple[Figure, Axes]:
     """Plot time series for ensemble data with automatic datetime formatting.
 
     Uses matplotlib's AutoDateLocator and ConciseDateFormatter for clean,
     non-overlapping datetime labels.
+
+    **Auto-selects best colormap** based on number of members:
+    - ≤20 members: tab20 (qualitative, distinct colors)
+    - >20 members: hsv (continuous, evenly distributed hues)
 
     Parameters
     ----------
@@ -116,6 +122,13 @@ def plot_ensemble_timeseries(
         Maximum number of ticks on x-axis (default: 7)
     rotation : int
         Rotation angle for x-axis labels in degrees (default: 30)
+    colormap : str
+        Matplotlib colormap name for member colors (default: "auto").
+        - "auto": Automatically selects tab20 (≤20) or hsv (>20)
+        - "tab20", "hsv", "rainbow", etc.: Manual selection
+    custom_colors : dict[int, str], optional
+        Manual color overrides for specific member IDs.
+        Example: {1: "red", 5: "blue", 10: "#00ff00"}
     **kwargs
         Additional arguments passed to ax.plot()
 
@@ -123,6 +136,23 @@ def plot_ensemble_timeseries(
     -------
     tuple
         (Figure, Axes) objects
+
+    Examples
+    --------
+    >>> # Default: auto-selects colormap based on number of members
+    >>> fig, ax = plot_ensemble_timeseries(ds, var_name="dye")
+    >>> # 18 members → tab20, 30 members → hsv (automatic!)
+
+    >>> # Manual colormap override
+    >>> fig, ax = plot_ensemble_timeseries(
+    ...     ds, var_name="dye", colormap="rainbow"
+    ... )
+
+    >>> # Custom colors for specific members
+    >>> fig, ax = plot_ensemble_timeseries(
+    ...     ds, var_name="dye",
+    ...     custom_colors={1: "red", 5: "blue", 10: "green"}
+    ... )
     """
     # Create config with larger font sizes if not provided
     if cfg is None:
@@ -157,6 +187,20 @@ def plot_ensemble_timeseries(
         # If max_lines is None, plot all ensemble members
         n_plot = n_ensemble if max_lines is None else min(n_ensemble, max_lines)
 
+        # Extract all member IDs for auto-colormap selection
+        all_member_ids = []
+        for i in range(n_ensemble):
+            if hasattr(data.ensemble, "to_index") and isinstance(
+                data.ensemble.to_index(), pd.MultiIndex
+            ):
+                ensemble_val = data.ensemble[i].values.item()
+                if isinstance(ensemble_val, tuple):
+                    _, member = ensemble_val
+                    all_member_ids.append(int(member))
+
+        # Determine total_members for auto-selection
+        total_members = max(all_member_ids) if all_member_ids else n_ensemble
+
         for i in range(n_plot):
             series = data.isel(ensemble=i)
 
@@ -177,9 +221,14 @@ def plot_ensemble_timeseries(
                 label = f"Ensemble {i}"
 
             # Use member-based color mapping for consistency across plot types
-            # This ensures member N always gets the same color (tab20[N-1])
+            # Auto-selects colormap: tab20 for ≤20 members, hsv for >20
             if member_id is not None:
-                color = get_member_color(member_id)
+                color = get_member_color(
+                    member_id,
+                    colormap=colormap,
+                    custom_colors=custom_colors,
+                    total_members=total_members,
+                )
             else:
                 # Fallback to position-based color if member ID not available
                 color = cfg.color_cycle[i % len(cfg.color_cycle)]

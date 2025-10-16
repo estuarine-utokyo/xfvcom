@@ -37,12 +37,18 @@ def plot_dye_timeseries_stacked(
     title: str | None = None,
     ylabel: str = "Dye Concentration",
     output: str | None = None,
+    colormap: str = "auto",
+    custom_colors: dict[int, str] | None = None,
 ) -> dict:
     """Create stacked area plot of DYE time series.
 
     This creates a simple stacked area chart showing the contribution of each
     member to the total concentration over time, preserving the fluctuations
     in the original data.
+
+    **Auto-selects best colormap** based on number of members:
+    - ≤20 members: tab20 (qualitative, distinct colors)
+    - >20 members: hsv (continuous, evenly distributed hues)
 
     Parameters
     ----------
@@ -67,6 +73,13 @@ def plot_dye_timeseries_stacked(
         Y-axis label.
     output : str, optional
         Output file path. If provided, saves figure to this path.
+    colormap : str, default "auto"
+        Matplotlib colormap name for member colors.
+        - "auto": Automatically selects tab20 (≤20) or hsv (>20)
+        - "tab20", "hsv", "rainbow", etc.: Manual selection
+    custom_colors : dict[int, str], optional
+        Manual color overrides for specific member IDs.
+        Example: {1: "red", 5: "blue", 10: "#00ff00"}
 
     Returns
     -------
@@ -79,8 +92,9 @@ def plot_dye_timeseries_stacked(
 
     Examples
     --------
-    >>> # Simple stacked plot with all members
+    >>> # Simple stacked plot with all members (auto-selects colormap)
     >>> result = plot_dye_timeseries_stacked(ds)
+    >>> # 18 members → tab20, 30 members → hsv (automatic!)
 
     >>> # Select specific members and time window
     >>> result = plot_dye_timeseries_stacked(
@@ -97,6 +111,12 @@ def plot_dye_timeseries_stacked(
     ...     member_ids=[1, 2, 3],
     ...     member_map={1: "Urban", 2: "Forest", 3: "Agriculture"},
     ...     ylabel="Concentration (mmol m$^{-3}$)"
+    ... )
+
+    >>> # Manual colormap override
+    >>> result = plot_dye_timeseries_stacked(
+    ...     ds,
+    ...     colormap="rainbow",  # Force rainbow colormap
     ... )
     """
     print("=" * 70, file=sys.stdout)
@@ -167,18 +187,18 @@ def plot_dye_timeseries_stacked(
                 # If column name is not an integer, use position-based fallback
                 member_ids.append(None)
 
-        # Use member-based color mapping (tab20) for consistency across plot types
+        # Use member-based color mapping for consistency across plot types
         # This ensures member N always gets the same color as in line plots
         if all(mid is not None for mid in member_ids):
             # All columns are valid member IDs - use member-based colors
-            colors_list = get_member_colors(member_ids)
+            colors_list = get_member_colors(member_ids, colormap=colormap, custom_colors=custom_colors)
         else:
-            # Fallback to position-based tab20 colors
+            # Fallback to position-based colors using specified colormap
             from matplotlib import colormaps
 
-            cmap = colormaps["tab20"]
+            cmap = colormaps[colormap]
             n_members = len(df.columns)
-            colors_list = [cmap(i % 20) for i in range(n_members)]
+            colors_list = [cmap(i % cmap.N) for i in range(n_members)]
     else:
         # User-provided custom colors
         colors_list = [colors.get(label, f"C{i}") for i, label in enumerate(labels)]
