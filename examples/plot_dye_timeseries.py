@@ -225,9 +225,8 @@ def main() -> None:
     elif os.environ.get("TB_FVCOM_DIR"):
         tb_fvcom_dir = Path(os.environ["TB_FVCOM_DIR"])
     else:
-        # Default: ../../TB-FVCOM relative to this script
-        script_dir = Path(__file__).resolve().parent
-        tb_fvcom_dir = script_dir.parents[1] / "TB-FVCOM"
+        # Default: ~/Github/TB-FVCOM (absolute path from home directory)
+        tb_fvcom_dir = Path("~/Github/TB-FVCOM").expanduser()
 
     # Validate TB-FVCOM directory
     output_dir = tb_fvcom_dir / "goto2023" / "dye_run" / "output"
