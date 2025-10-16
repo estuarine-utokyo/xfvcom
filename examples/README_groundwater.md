@@ -43,18 +43,23 @@ create_groundwater_netcdf(
 )
 ```
 
-### 2. `test_groundwater_fvcom.py`
-Test script demonstrating various ways to create groundwater NetCDF files:
-- Using xfvcom's integrated generator
-- Creating time-varying groundwater flux
-- Verifying NetCDF file contents
+### 2. `add_dye_to_groundwater.py`
+Script to add dye tracer to existing groundwater NetCDF files. Useful for tracer studies.
 
-**Run the test:**
+**Usage:**
 ```bash
-python test_groundwater_fvcom.py
+python add_dye_to_groundwater.py groundwater.nc --dye-concentration 100.0
 ```
 
-### 3. `groundwater_cli_example.sh`
+### 3. `create_groundwater_timeseries.py`
+Generate time-varying groundwater forcing data. Creates CSV files that can be used with the CLI tools.
+
+**Usage:**
+```bash
+python create_groundwater_timeseries.py
+```
+
+### 4. `groundwater_cli_example.sh`
 Shell script showing how to use xfvcom CLI tools and create configuration files.
 
 ## Using xfvcom's Integrated Generator
@@ -76,12 +81,8 @@ gen = GroundwaterNetCDFGenerator(
     salinity=0.0
 )
 
-# Generate NetCDF content
-content = gen.render()
-
 # Write to file
-with open("groundwater.nc", "wb") as f:
-    f.write(content)
+gen.write("groundwater.nc")
 ```
 
 ## FVCOM Namelist Configuration
