@@ -1,0 +1,219 @@
+"""Stacked area plots for DYE time series.
+
+Simple stacked area visualization of DYE concentration time series.
+"""
+
+from __future__ import annotations
+
+import sys
+from typing import TYPE_CHECKING
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from matplotlib.dates import AutoDateLocator, ConciseDateFormatter
+
+from ._timeseries_utils import detect_nans_and_raise, prepare_wide_df, select_members
+
+if TYPE_CHECKING:
+    import xarray as xr
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
+
+
+def plot_dye_timeseries_stacked(
+    data: xr.DataArray | xr.Dataset | pd.DataFrame,
+    member_ids: list[int] | None = None,
+    member_map: dict[int, str] | None = None,
+    start: str | pd.Timestamp | None = None,
+    end: str | pd.Timestamp | None = None,
+    colors: dict[str, str] | None = None,
+    figsize: tuple[float, float] = (14, 6),
+    title: str | None = None,
+    ylabel: str = "Dye Concentration",
+    output: str | None = None,
+) -> dict:
+    """Create stacked area plot of DYE time series.
+
+    This creates a simple stacked area chart showing the contribution of each
+    member to the total concentration over time, preserving the fluctuations
+    in the original data.
+
+    Parameters
+    ----------
+    data : xr.DataArray or xr.Dataset or pd.DataFrame
+        DYE concentration time series data. If Dataset, extracts first data variable.
+    member_ids : list of int, optional
+        List of member IDs to include in the plot. If None, uses all members.
+    member_map : dict, optional
+        Mapping from member ID (int) to custom label (str).
+        Example: {1: "Urban", 2: "Forest", 3: "Agriculture"}
+    start : str or pd.Timestamp, optional
+        Start time for the plot window. If None, uses all data.
+    end : str or pd.Timestamp, optional
+        End time for the plot window. If None, uses all data.
+    colors : dict, optional
+        Custom color mapping. Keys are member labels (str), values are color specs.
+    figsize : tuple of float, default (14, 6)
+        Figure size (width, height) in inches.
+    title : str, optional
+        Plot title. If None, uses default.
+    ylabel : str, default "Dye Concentration"
+        Y-axis label.
+    output : str, optional
+        Output file path. If provided, saves figure to this path.
+
+    Returns
+    -------
+    dict
+        Dictionary with keys:
+        - 'fig': matplotlib Figure object
+        - 'ax': matplotlib Axes object
+        - 'data_used': pandas DataFrame with data that was plotted
+        - 'legend_labels': list of legend labels in plot order
+
+    Examples
+    --------
+    >>> # Simple stacked plot with all members
+    >>> result = plot_dye_timeseries_stacked(ds)
+
+    >>> # Select specific members and time window
+    >>> result = plot_dye_timeseries_stacked(
+    ...     ds,
+    ...     member_ids=[1, 2, 3, 4, 5],
+    ...     start="2021-01-01",
+    ...     end="2021-01-31",
+    ...     title="DYE Concentration - January 2021"
+    ... )
+
+    >>> # Custom member labels
+    >>> result = plot_dye_timeseries_stacked(
+    ...     ds,
+    ...     member_ids=[1, 2, 3],
+    ...     member_map={1: "Urban", 2: "Forest", 3: "Agriculture"},
+    ...     ylabel="Concentration (mmol m$^{-3}$)"
+    ... )
+    """
+    print("=" * 70, file=sys.stdout)
+    print("DYE TIMESERIES STACKED AREA PLOT", file=sys.stdout)
+    print("=" * 70, file=sys.stdout)
+
+    # Step 1: Convert to wide DataFrame
+    df = prepare_wide_df(data)
+    print(
+        f"Data loaded: {df.shape[0]} timesteps × {df.shape[1]} members",
+        file=sys.stdout,
+    )
+    print(f"Time range: {df.index.min()} to {df.index.max()}", file=sys.stdout)
+
+    # Step 2: NaN detection - HARD FAIL
+    detect_nans_and_raise(df)
+    print("✓ No NaNs detected", file=sys.stdout)
+
+    # Step 3: Member selection
+    if member_ids is not None:
+        print(f"Selecting members: {member_ids}", file=sys.stdout)
+        df = select_members(df, member_ids, member_map)
+        print(
+            f"After selection: {df.shape[0]} timesteps × {df.shape[1]} members",
+            file=sys.stdout,
+        )
+
+    # Step 4: Time window selection
+    if start is not None or end is not None:
+        if start is None:
+            start = df.index.min()
+        if end is None:
+            end = df.index.max()
+        start_ts = pd.Timestamp(start)
+        end_ts = pd.Timestamp(end)
+        df = df[(df.index >= start_ts) & (df.index <= end_ts)]
+        print(f"Time window: {start} to {end}", file=sys.stdout)
+        print(f"  {len(df)} timesteps in window", file=sys.stdout)
+
+    # Step 5: Check for negative values
+    has_negatives = (df < 0).any().any()
+    if has_negatives:
+        min_val = df.min().min()
+        print(
+            f"⚠ Warning: Negative values detected (min={min_val:.6e})",
+            file=sys.stdout,
+        )
+        print("  These will be displayed as-is in the plot", file=sys.stdout)
+
+    # Step 6: Create stacked area plot
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Get column labels
+    labels = [str(col) for col in df.columns]
+
+    # Determine colors
+    from typing import Any
+
+    colors_list: list[Any]
+    if colors is None:
+        # Use tab20 colormap for up to 20 members
+        from matplotlib import colormaps
+
+        cmap = colormaps["tab20"]
+        n_members = len(df.columns)
+        colors_list = [cmap(i % 20) for i in range(n_members)]
+    else:
+        colors_list = [colors.get(label, f"C{i}") for i, label in enumerate(labels)]
+
+    # Create stackplot
+    ax.stackplot(
+        df.index,
+        df.T.values,
+        labels=labels,
+        colors=colors_list,
+        alpha=0.8,
+        edgecolor="white",
+        linewidth=0.5,
+    )
+
+    # Format x-axis
+    locator = AutoDateLocator()
+    formatter = ConciseDateFormatter(locator)
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(formatter)
+
+    # Labels and title
+    ax.set_xlabel("Time", fontsize=14)
+    ax.set_ylabel(ylabel, fontsize=14)
+    if title is None:
+        title = f"DYE Concentration Time Series (Stacked)"
+    ax.set_title(title, fontsize=15)
+
+    # Grid
+    ax.grid(True, alpha=0.3, axis="y")
+
+    # Y-axis starts at 0 if no negative values
+    if not has_negatives:
+        ax.set_ylim(bottom=0)
+
+    # Legend
+    ax.legend(
+        loc="center left",
+        bbox_to_anchor=(1, 0.5),
+        frameon=True,
+        fontsize=12,
+        title="Member",
+    )
+
+    plt.tight_layout()
+
+    # Save if output path provided
+    if output:
+        fig.savefig(output, dpi=200, bbox_inches="tight")
+        print(f"✓ Saved to: {output}", file=sys.stdout)
+
+    print("=" * 70, file=sys.stdout)
+    print()
+
+    return {
+        "fig": fig,
+        "ax": ax,
+        "data_used": df,
+        "legend_labels": labels,
+    }
