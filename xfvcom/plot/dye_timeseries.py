@@ -204,11 +204,13 @@ def plot_dye_timeseries_stacked(
         colors_list = [colors.get(label, f"C{i}") for i, label in enumerate(labels)]
 
     # Create stackplot
+    # Note: Reverse the order so the first member (top of legend) is visually on top
+    # matplotlib.stackplot draws first series at bottom, but legend shows first at top
     ax.stackplot(
         df.index,
-        df.T.values,
-        labels=labels,
-        colors=colors_list,
+        df.T.values[::-1],  # Reverse data order
+        labels=labels[::-1],  # Reverse label order
+        colors=colors_list[::-1],  # Reverse color order
         alpha=0.8,
         edgecolor="white",
         linewidth=0.5,
@@ -234,8 +236,12 @@ def plot_dye_timeseries_stacked(
     if not has_negatives:
         ax.set_ylim(bottom=0)
 
-    # Legend
+    # Legend - reverse the order to match the visual stacking
+    # (since we reversed the stackplot order, we need to reverse legend too)
+    handles, legend_labels = ax.get_legend_handles_labels()
     ax.legend(
+        handles[::-1],  # Reverse handles
+        legend_labels[::-1],  # Reverse labels
         loc="center left",
         bbox_to_anchor=(1, 0.5),
         frameon=True,
