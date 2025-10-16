@@ -461,7 +461,7 @@ def align_same_clock_across_years(
     years = df.index.year.unique()
 
     for year in sorted(years):
-        year_df = df[df.index.year == year].copy()
+        year_df: pd.DataFrame = df[df.index.year == year].copy()
 
         # Apply calendar-based filtering
         if start is not None or end is not None:
@@ -480,8 +480,11 @@ def align_same_clock_across_years(
                 # Ensure result is DataFrame, not Series
                 if isinstance(filtered, pd.Series):
                     year_df = filtered.to_frame()
-                else:
+                elif isinstance(filtered, pd.DataFrame):
                     year_df = filtered
+                else:
+                    # Should never happen, but for type safety
+                    year_df = pd.DataFrame(filtered)
 
         result[str(year)] = year_df
 
