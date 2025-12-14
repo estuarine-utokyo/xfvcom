@@ -1,204 +1,149 @@
-# Plotting 2-D Horizontal (sigma layer) Fields with **xfvcom**
+# Plotting with xfvcom
 
-[← Back to README](../README.md)
+[Back to README](../README.md)
 
-This document is the **definitive guide** to the `plot_2d` method in the `xfvcom.plot` sub‑package.
-Starting from a data preparation, it walks through mesh overlays, map tiles,
-scalar fields, vector fields, and advanced hooks.
-
----
-
-## 1. Prepare data and plotter instance
+## Setup
 
 ```python
-import cartopy.crs as ccrs
-from xfvcom import FvcomDataLoader
-from xfvcom import FvcomPlotter, FvcomPlotConfig, FvcomPlotOptions
+from xfvcom import FvcomDataLoader, FvcomPlotter, FvcomPlotConfig, FvcomPlotOptions
 
-fvcom = FvcomDataLoader(
-    base_path="/path/to/data",
-    ncfile="sample.nc",
-)
-da_s = fvcom.ds["temp"]   # scalar  (time, siglay, node)
-da_u = fvcom.ds["u"]      # vector-x(time, siglay, nele)
-da_v = fvcom.ds["v"]      # vector-y(time, siglay, nele)
+loader = FvcomDataLoader(base_path="/path/to/data", ncfile="output.nc")
+ds = loader.ds
 
-plotter = FvcomPlotter(fvcom.ds, FvcomPlotConfig())
-
+cfg = FvcomPlotConfig(figsize=(12, 8))
+plotter = FvcomPlotter(ds, cfg)
 ```
 
 ---
 
-## 2. Option cheat‑sheet
+## 2D Horizontal Plots
 
-| Category       | Key fields (type)                                       | Example                         |
-| -------------- | ------------------------------------------------------- | ------------------------------- |
-| Colour & range | `cmap`, `vmin/vmax`, `levels`                           | `levels=30`, `cmap="jet"`       |
-| Mesh           | `with_mesh`, `mesh_color`, `mesh_lw` 　　　　            | `with_mesh=True`                |
-| Coast / OBC    | `coastlines`, `obclines`, `coastline_color`             | `obclines=True`                 |
-| Projection     | `use_latlon`, `projection`, `add_tiles`, `tile_*`       | `projection=ccrs.PlateCarree()` |
-| Vectors        | `plot_vec2d`, `vec_siglay`, `arrow_color`, `vec_reduce` | `vec_reduce={"time": "mean"}`   |
+### Basic Plot
 
-| Option | Type / default | Effect |
-| ------ | -------------- | ------ |
-| `figsize`    | `tuple[float, float] \| None = None` | Matplotlib Figure size| 
-| `use_latlon` | `bool, auto‑detected` | Treat coords as lon/lat |
-| `with_mesh` | `bool = True` | Draw element edges |
-| `plot_vec2d` | `bool = False` | Overlay 2‑D velocity vectors |
-| `vec_siglay` | `int \| slice = "thickness"` | Which σ‑layer for vectors |
-| `arrow_color` | CSS color str | Quiver arrow colour |
-| `coastlines` | `bool = False` | Draw land–sea boundary |
-| `obclines` | `bool = False` | Draw open‑boundary segments |
-| `add_tiles` | `"terrain" \| "toner" \| None` | Fetch Stamen background tiles |
-| `levels` | `int \| list` | Contour levels |
-| `cmap` | Matplotlib colormap name or object | Colour map for scalar field |
-| `scalar_reduce` | `dict[str, str] \| None` | `None` | Reduction to apply to the scalar - field DataArray before plotting.<br/>Keys = dimension names (`"time"`, `"siglay"`…), values = NumPy reduction functions (`"mean"`, `"max"`, `"min"`, `"sum"`…). |
-| `vec_reduce`    | `dict[str, str] \| None` | `None` | Same as `scalar_reduce`, but applied to the vector components (`u`, `v`) **and** the derived magnitude \|U\|. |
-| `xlim`| `tuple[float \| str, float \| str] \| None = None` | x coordinate extent |
-| `ylim`| `tuple[float \| str, float \| str] \| None = None` | y coordinate extent |
-| `lon_tick_skip` | `int \| None = None` | Skip longitute axis label  (e.g., =2 → 1/2 ) |
-| `lat_tick_skip` | `int \| None = None` | Skip latitude axis label (e.g., =2 → 1/2 ) |
+```python
+fig = plotter.plot_2d("temp", time="2020-07-01", siglay=0)
+```
 
+### With Options
 
-*All* fields are documented in
-[`xfvcom.plot_options.FvcomPlotOptions`](../../xfvcom/plot_options.py).
+```python
+opts = FvcomPlotOptions(
+    add_tiles=True,
+    tile_provider="satellite",
+    with_mesh=True,
+    mesh_color="white",
+    cmap="RdYlBu_r",
+    vmin=15, vmax=30,
+)
+fig = plotter.plot_2d("temp", time="2020-07-01", siglay=0, opts=opts)
+```
 
----
-
-## 3. Scalar + vector overlay (quick style with u and v retrieved in plotter instance)
+### Vector Overlay
 
 ```python
 opts = FvcomPlotOptions(
     plot_vec2d=True,
     vec_siglay=0,
-    arrow_color="k",
-    with_mesh=True,
-    coastlines=True,
+    arrow_color="black",
+    with_mesh=False,
 )
-
-da = da_s.isel(time=2, siglay=0)
-ax = plotter.plot_2d(da=da, opts=opts)
-ax.figure.savefig("scalar_vec.png")
+fig = plotter.plot_2d("temp", time="2020-07-01", siglay=0, opts=opts)
 ```
 
-*To average scalar and vector time‑series independently, use
-`scalar_reduce` and `vec_reduce` separately.*
+### FvcomPlotOptions Reference
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `figsize` | `tuple` | Figure size |
+| `cmap` | `str` | Colormap name |
+| `vmin`, `vmax` | `float` | Color range |
+| `levels` | `int` | Number of contour levels |
+| `with_mesh` | `bool` | Draw mesh edges |
+| `mesh_color` | `str` | Mesh edge color |
+| `add_tiles` | `bool` | Add map tiles |
+| `tile_provider` | `str` | `"osm"`, `"satellite"`, or Cartopy tile object |
+| `plot_vec2d` | `bool` | Overlay velocity vectors |
+| `vec_siglay` | `int` | Sigma layer for vectors |
+| `arrow_color` | `str` | Vector arrow color |
+| `xlim`, `ylim` | `tuple` | Map extent |
+| `coastlines` | `bool` | Draw coastlines |
 
 ---
 
-## 4. Mesh and map tiles only
+## Time Series
+
+### Single Node
 
 ```python
-from cartopy.io.img_tiles import GoogleTiles
-
-opts = FvcomPlotOptions(
-    add_tiles=True,
-    tile_provider=GoogleTiles(style="satellite"),
-    mesh_color="#ffffff",
-    mesh_linewidth=0.3,
-)
-
-plotter.plot_2d(da=None, opts=opts)
+fig = plotter.plot_timeseries("temp", index=100)
 ```
 
----
-
-## 5. Custom post‑processing hook
-
-`plot_2d()` accepts a callable that is executed **after** the figure is
-completed:
+### Ensemble Plots
 
 ```python
-def add_timestamp(ax, da, time):
-    import pandas as pd
-    txt = pd.to_datetime(time).strftime("%Y-%m-%d %H:%M")
-    ax.text(
-        0.02, 0.95, txt,
-        transform=ax.transAxes,
-        ha="left", va="top",
-        color="white",
-        fontsize=10,
-        bbox=dict(fc="0.2", ec="none", alpha=0.7, pad=2),
-    )
+from xfvcom.plot import plot_ensemble_timeseries, plot_dye_timeseries_stacked
 
-plotter.plot_2d(
-    da=da_s.isel(time=5, siglay=0),
-    opts=FvcomPlotOptions(),
-    post_process_func=add_timestamp,
-)
+# Line plot (auto colormap: tab20 for <=20 members, hsv otherwise)
+fig, ax = plot_ensemble_timeseries(ds, var_name="dye", cfg=cfg)
+
+# Stacked area plot
+result = plot_dye_timeseries_stacked(ds, cfg=cfg, output="stacked.png")
 ```
 
 ---
 
-## 6. Scalar + vector overlay with time/vertical averaging
-Specify DataArrays explicitly.
+## Animations
 
 ```python
-opts = FvcomPlotOptions(
-    # scalar: 2 day-mean of surface layer
-    scalar_time   = slice("2020-01-03", "2020-01-04"),
-    scalar_siglay = slice(None),                 # all layers
-    scalar_reduce = {"time": "mean", "siglay": "mean"},
+from xfvcom.plot.utils import create_anim_2d_plot
 
-    # vector overlay: same range, all layers mean
-    plot_vec2d    = True,
-    vec_time      = slice("2020-01-03", "2020-01-04"),
-    vec_siglay    = slice(None),
-    vec_reduce    = {"time": "mean", "siglay": "mean"},
-    arrow_color   = "k",
-
-    # decorations
-    with_mesh     = True,
-    coastlines    = True,
+create_anim_2d_plot(
+    plotter=plotter,
+    var_name="temp",
+    siglay=0,
+    fps=10,
+    output_format="gif",  # or "mp4"
+    plot_kwargs={"vmin": 15, "vmax": 30, "cmap": "RdYlBu_r"}
 )
-
-# ------------------------------------------------------------
-# Draw & save
-# ------------------------------------------------------------
-ax = plotter.plot_2d(
-    da     = da_s,   # scalar DataArray
-    da_u  = da_u,   # vector-U DataArray
-    da_v  = da_v,   # vector-V DataArray
-    opts   = opts,
-)
-
-ax.figure.savefig("scalar_vec.png", dpi=150)
 ```
 
-## 7. Batch frames for animation
+---
+
+## Post-Processing Hooks
 
 ```python
-from pathlib import Path
-outdir = Path("frames"); outdir.mkdir(exist_ok=True)
+def add_markers(ax, da, time):
+    ax.plot([139.8], [35.4], 'ro', markersize=10)
+    ax.text(139.8, 35.41, 'Station A', color='red')
 
-for ti in range(len(ds.time)):
-    ax = plotter.plot_2d(
-        da   = da_s.isel(time=ti, siglay=0),
-        opts = FvcomPlotOptions(),
-        post_process_func = add_timestamp,
-    )
-    ax.figure.savefig(outdir / f"frame_{ti:04d}.png", dpi=120, bbox_inches="tight")
-    ax.figure.clf()
+fig = plotter.plot_2d(
+    "temp", time="2020-07-01", siglay=0,
+    post_process_func=add_markers
+)
+```
+
+### Node Markers
+
+```python
+from xfvcom import make_node_marker_post
+
+pp = make_node_marker_post(
+    nodes=[100, 200, 300],
+    plotter=plotter,
+    marker_kwargs={"color": "red", "markersize": 8},
+    index_base=1,
+)
+fig = plotter.plot_2d("temp", post_process_func=pp)
 ```
 
 ---
 
-## 8. Troubleshooting and tips
+## Troubleshooting
 
-| Symptom                                       | Cause & fix                                                                                        |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `ValueError: z array must have same length …` | Ensure the DataArray is nodal (`node` dimension) and the triangulation uses nodal coords.          |
-| Map is flipped or shifted                     | `use_latlon=True` but `projection` is `None`. Pass `ccrs.PlateCarree()` or set `use_latlon=False`. |
-| Vector legend size changes too much           | Fix the reference speed with `vec_legend_speed=<float in m/s>`.                                    |
+| Issue | Solution |
+|-------|----------|
+| Map flipped/shifted | Set `projection=ccrs.PlateCarree()` in options |
+| Vector scale wrong | Use `vec_legend_speed` to fix reference speed |
+| Tiles not loading | Check internet connection; try `tile_provider="osm"` |
 
----
-
-## 9. API reference
-
-* **`FvcomPlotter.plot_2d`** — combined scalar/vector/mesh routine.
-* **`FvcomPlotter.plot_vector2d`** — depth‑averaged (or layer‑specific) vector field.
-* **`FvcomPlotOptions`** — dataclass holding all plotting options.
-
----
-
-[← Back to README](../README.md)
+[Back to README](../README.md)

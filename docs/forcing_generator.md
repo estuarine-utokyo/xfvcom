@@ -1,190 +1,132 @@
-# FVCOM Forcing‐file Generator
-*Create river & atmospheric forcing NetCDF/NML files with `xfvcom`*
+# Forcing File Generation
 
+[Back to README](../README.md)
 
-This document explains how to create river forcing NetCDF files and the accompanying `river.nml` namelist with **xfvcom**.
-It also covers generation of constant meteorology NetCDF files.
+## Overview
 
----
-
-## 1. Overview
-
-| Generator | Output | Typical use |
-|-----------|--------|-------------|
-| **`RiverNetCDFGenerator`** | `river_forcing.nc` (NetCDF-4) | River discharge (`river_flux`), temperature (`river_temp`), salinity (`river_salt`) |
-| **`RiverNmlGenerator`** | `rivers.nml` (FVCOM namelist) | Geometric / static info for each river source |
-| **`MetNetCDFGenerator`** | `met.nc` (NetCDF-4) | Constant or time-series atmospheric fields |
-
-The same **time-series CSV / TSV** can be reused for both.
-
-
-The generator takes one or more *time‑series* tables plus optional constant values and converts them into a single NetCDF‑4 file that FVCOM can read.  A helper class automatically writes the matching `&RIVER_INFO` namelist.
-
-```
-xfvcom/io/river_nc_generator.py   ← NetCDF writer
-xfvcom/io/river_nml_generator.py  ← namelist writer
-```
+| Generator | CLI Command | Output |
+|-----------|-------------|--------|
+| River | `xfvcom-make-river-nc` | River discharge, temperature, salinity |
+| Meteorological | `xfvcom-make-met-nc` | Wind, radiation, pressure, humidity |
+| Groundwater | `xfvcom-make-groundwater-nc` | Groundwater flux, temperature, salinity, dye |
 
 ---
 
-## 2. Usage patterns
+## River Forcing
 
-
-| Path | Description | Sample |
-|------|-------------|--------|
-| `tests/data/arakawa_flux.csv` | Discharge time series | `time,flux` |
-| `tests/data/global_temp.tsv` | Water temperature time series (UTF-8/TSV) | `time\ttemp` |
-| `tests/data/rivers_minimal.nml` | Base namelist shipped with the grid | — |
-| `river_cfg.yaml` (optional) | YAML overrides (defaults / const values) | see below |
-
-**The NML file is mandatory and must exist.** A ``FileNotFoundError`` is raised
-if the path does not point to a real file.
-
-
-### 2.1  One‑liner CLI
+### Generate Namelist
 
 ```bash
-make_river_nc.py   --nml rivers_minimal.nml   --start 2025‑01‑01T00:00Z   --end   2025‑01‑02T00:00Z   --dt    3600   --ts  Arakawa=arakawa_flux.csv:flux   --ts  global_temp.tsv:temp   --const Arakawa.salt=0.05   --const flux=30        # global fallback for other rivers
+xfvcom-make-river-nml river_data.csv --output rivers.nml
 ```
 
-* `--ts RIVER=path:column` &nbsp;adds a *per‑river* time‑series.
-* `--ts path:column` (without a river name) defines a global file shared by all rivers.
-* `--const RIVER.var=value` sets a river‑specific constant.
-* `--const var=value` sets a global fallback.
-
-Input tables are interpreted in ``Asia/Tokyo`` timezone unless you pass
-``--data-tz``.  The ``--start-tz`` option defines the timezone for
-``--start``/``--end`` when those arguments are given without explicit
-timezone information.
-
-### 2.2  Example **YAML**
-
-```yaml
-# river_cfg.yaml
-defaults:
-  flux: 5                 # global fallback (m³ s⁻¹)
-  temp: 20                #   ″     (°C)
-  salt: 0.1               #   ″     (PSU)
-
-rivers:
-  - name: Arakawa
-    ts:
-      - arakawa_flux.csv:flux
-    const:
-      salt: 0.05          # override only for Arakawa
-
-interp:
-  method: linear          # allowed: linear (only)
-```
-
-Run with:
+### Generate NetCDF
 
 ```bash
-make_river_nc.py   --nml rivers_minimal.nml   --start 2025‑01‑01T00:00Z   --end   2025‑01‑01T12:00Z   --dt    21600   --config river_cfg.yaml
+xfvcom-make-river-nc rivers.nml \
+  --start 2025-01-01T00:00Z \
+  --end 2025-12-31T23:00Z \
+  --dt 3600 \
+  --ts Arakawa=discharge.csv:flux \
+  --const Arakawa.salt=0.05
 ```
 
-### 2.3  Constant meteorology CLI
-
-```bash
-make_met_nc.py grid.dat --utm-zone 54 \
-  --start 2025-01-01T00:00Z --end 2025-01-02T00:00Z \
-  --ts met.csv:uwind,vwind --data-tz Asia/Tokyo
-```
-
-The `--ts` option may be repeated to provide CSV/TSV files with
-time-series data.  Any variable not supplied by `--ts` falls back to the
-corresponding command-line constant (e.g. `--uwind`).
-
-### 2.4  Mixed constants and time-series
-
-```bash
-make_met_nc.py grid.dat --utm-zone 54 \
-  --start 2025-01-01T00:00Z --end 2025-01-01T06:00Z \
-  --ts swrad.csv:swrad \
-  --uwind 2 --vwind -1
-```
-
-This mixes a short‑wave radiation table with constant wind components.
-### 2.5  MetNetCDFGenerator with constant overrides
-
-```bash
-make_met_nc.py grid.dat --utm-zone 54 \
-  --start 2025-01-01T00:00Z --end 2025-01-02T00:00Z \
-  --ts met.csv:uwind,vwind --data-tz Asia/Tokyo \
-  --air_temp 26 --rh 70
-```
-
-Input tables are interpreted in ``Asia/Tokyo`` timezone unless you pass
-``--data-tz``.  The ``--start-tz`` option defines the timezone for
-``--start``/``--end`` when those arguments are given without explicit
-timezone information.
-
----
-
-## 3. Time‑series format
-
-* **Delimiter**: auto‑detected (CSV / TSV).
-* **Encoding**: auto‑detected via *chardet*; UTF‑8 recommended.
-* Required column: `time` (ISO 8601 or any pandas‑supported date).
-* Additional numeric columns hold variables (e.g. `flux`, `temp`).
-
-```text
-time,flux
-2024‑12‑31T15:00Z,100
-2024‑12‑31T21:00Z,105
-2025‑01‑01T03:00Z,110
-```
-
-### 3.1  Interpolation rules
-
-* Only **linear** interpolation is implemented.
-* All requested timestamps must be **inside** the source span.  
-  Outside → raises `ValueError`.
-* NaNs remaining *inside* the span also raise an error.
-* No extrapolation, ffill or bfill is ever applied.
-
----
-
-## 4. Programmatic API
+### Python API
 
 ```python
-from pathlib import Path
-
 from xfvcom.io.river_nc_generator import RiverNetCDFGenerator
 
 gen = RiverNetCDFGenerator(
-    nml_path       = Path("rivers_minimal.nml"),
-    start          = "2025‑01‑01T00:00Z",
-    end            = "2025‑01‑02T00:00Z",
-    dt_seconds     = 3600,
-    ts_specs       = ["Arakawa=arakawa_flux.csv:flux"],
-    const_specs    = ["Arakawa.salt=0.05", "flux=30"],
+    nml_path="rivers.nml",
+    start="2025-01-01T00:00Z",
+    end="2025-12-31T23:00Z",
+    dt_seconds=3600,
+    ts_specs=["Arakawa=discharge.csv:flux"],
+    const_specs=["Arakawa.salt=0.05"],
 )
-
-nc_bytes = gen.render()          # → bytes; write() or open with xarray
-(Path("river.nc")).write_bytes(nc_bytes)
+gen.write("river_forcing.nc")
 ```
 
 ---
 
-## 5. Tips & gotchas
+## Meteorological Forcing
 
-| Problem                                   | Remedy |
-|-------------------------------------------|--------|
-| “outside the available data range” error  | extend source table to cover *start…end* period |
-| “Column 'temp' not found”                 | add the column to the CSV/TSV or correct `:column` spec |
-| multi‑river run                           | give `--const flux=<val>` as a global fallback or provide per‑river time‑series |
+### CLI
+
+```bash
+xfvcom-make-met-nc grid.nc \
+  --start 2025-01-01T00:00Z \
+  --end 2025-01-07T00:00Z \
+  --utm-zone 54 \
+  --ts wind.csv:uwind,vwind \
+  --air-temperature 20.0 \
+  --humidity 0.7
+```
+
+### Variables
+
+| Variable | Option | Units |
+|----------|--------|-------|
+| `uwind_speed` | `--uwind` | m/s |
+| `vwind_speed` | `--vwind` | m/s |
+| `air_temperature` | `--air-temperature` | C |
+| `relative_humidity` | `--humidity` | fraction |
+| `short_wave` | `--swrad` | W/m2 |
+| `long_wave` | `--lwrad` | W/m2 |
+| `air_pressure` | `--pressure` | hPa |
 
 ---
 
-## 6. File locations
+## Groundwater Forcing
 
-| Path | Purpose |
-|------|---------|
-| `tests/data/arakawa_flux.csv` | sample discharge table |
-| `tests/data/global_temp.tsv` | sample temperature table |
-| `tests/data/river_cfg.yaml`  | YAML used in unit tests |
+### Constant Values
+
+```bash
+xfvcom-make-groundwater-nc grid.nc \
+  --start 2025-01-01T00:00Z \
+  --end 2025-12-31T23:00Z \
+  --flux 0.001 \
+  --temperature 15.0 \
+  --salinity 0.0
+```
+
+### With Dye Tracer
+
+```bash
+xfvcom-make-groundwater-nc grid.nc \
+  --start 2025-01-01T00:00Z \
+  --end 2025-12-31T23:00Z \
+  --flux groundwater.csv:datetime,node_id,flux \
+  --dye-concentration 1.0
+```
 
 ---
 
-*Last updated: 2025‑06‑20*
+## Time Series Format
+
+CSV/TSV with `time` column (ISO 8601):
+
+```csv
+time,flux
+2025-01-01T00:00Z,100
+2025-01-01T06:00Z,105
+2025-01-01T12:00Z,110
+```
+
+- Delimiter: auto-detected
+- Encoding: auto-detected (UTF-8 recommended)
+- Interpolation: linear only
+- Timezone: `Asia/Tokyo` by default (`--data-tz` to override)
+
+---
+
+## Validation
+
+Check forcing files for errors:
+
+```bash
+xf-check-met met_forcing.nc
+xf-check-met met_forcing.nc -o anomalies.csv
+```
+
+[Back to README](../README.md)
