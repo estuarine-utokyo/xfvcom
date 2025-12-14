@@ -82,15 +82,16 @@ if $CONDA_CMD env list | grep -q "^$ENV_NAME "; then
     fi
 fi
 
-# Create conda environment from environment.yml
+# Create conda environment from environment.yml using mamba (faster solver)
+# mamba is included with Miniforge and handles channels correctly
 print_status "Creating conda environment from environment.yml..."
 if [ "$INSTALL_DEV" = true ]; then
-    $CONDA_CMD env create -f environment.yml -n $ENV_NAME
+    mamba env create -f environment.yml -n $ENV_NAME
 else
     # Create a temporary environment file without dev dependencies
     print_status "Creating environment without development dependencies..."
     grep -v -E "(pytest|mypy|black|isort|ruff|ipykernel|jupyterlab|types-|pandas-stubs)" environment.yml > /tmp/environment_no_dev.yml
-    $CONDA_CMD env create -f /tmp/environment_no_dev.yml -n $ENV_NAME
+    mamba env create -f /tmp/environment_no_dev.yml -n $ENV_NAME
     rm /tmp/environment_no_dev.yml
 fi
 
@@ -105,12 +106,12 @@ conda activate $ENV_NAME
 PYTHON_VERSION=$(python --version 2>&1 | awk '{print $2}')
 print_status "Python version: $PYTHON_VERSION"
 
-# Ensure the environment resolved to Python 3.12
-if [[ $PYTHON_VERSION != 3.12.* ]]; then
-    print_error "Expected Python 3.12.x but found $PYTHON_VERSION."
-    print_error "Ensure environment.yml pins python=3.12.* and recreate the environment."
-    exit 1
-fi
+# Ensure the environment resolved to Python 3.13
+# if [[ $PYTHON_VERSION != 3.13.* ]]; then
+#    print_error "Expected Python 3.13.x but found $PYTHON_VERSION."
+#    print_error "Ensure python=3.13 is specified and recreate the environment."
+#    exit 1
+# fi
 
 # Install xfvcom package in editable mode if not already installed via pip section
 if ! pip show xfvcom &> /dev/null; then

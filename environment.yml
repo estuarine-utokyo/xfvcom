@@ -1,10 +1,9 @@
 name: xfvcom
 channels:
   - conda-forge
-  - defaults
 dependencies:
   # Python runtime
-  - python=3.12.*
+  - python=3.13.*
 
   # Core scientific packages
   - numpy
