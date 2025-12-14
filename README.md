@@ -1,6 +1,6 @@
 # xfvcom
 
-[![Python Version](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-blue)](https://www.python.org/)
+[![Python Version](https://img.shields.io/badge/python-3.12+-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -10,16 +10,16 @@ xfvcom streamlines preprocessing and postprocessing workflows for the Finite Vol
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
-### 📊 Data I/O & Processing
+### Data I/O & Processing
 - **FVCOM NetCDF Support**: Load and process model output files with automatic mesh completion
 - **Multi-format Grid Support**: Handle both ASCII (.dat) and NetCDF grid formats
 - **Coordinate Systems**: Seamless conversion between UTM and geographic (lat/lon) coordinates
 - **Depth Calculations**: Automatic depth variable computation from sigma layers and bathymetry
-- **Time Zone Handling**: Intelligent timezone conversion (default: Asia/Tokyo → UTC)
+- **Time Zone Handling**: Intelligent timezone conversion (default: Asia/Tokyo to UTC)
 
-### 🔬 Analysis Tools
+### Analysis Tools
 - **Spatial Analysis**: KDTree-based nearest neighbor search for efficient spatial queries
 - **Physics Calculations**: Layer averages, tidal decomposition, variable filtering by dimensions
 - **Time Series Processing**: Extension methods (seasonal, linear, forward-fill), interpolation, resampling
@@ -30,7 +30,7 @@ xfvcom streamlines preprocessing and postprocessing workflows for the Finite Vol
   - **Element areas**: Per-cell triangle areas for targeted diagnostics
 - **Ensemble Analysis**: Multi-member dye tracer analysis, linearity verification, source identification
 
-### 🎨 Visualization
+### Visualization
 - **Static Plots**: Time series, 2D contours, vector fields, vertical sections
 - **Animations**: Generate GIF and MP4 animations for temporal data
 - **Interactive Plots**: Plotly integration for web-based visualizations (optional)
@@ -39,62 +39,80 @@ xfvcom streamlines preprocessing and postprocessing workflows for the Finite Vol
 - **Enhanced Display**: Advanced clipping control for node markers and text labels on geographic maps
 - **Ensemble Plots**: Line plots with automatic colormap selection, stacked area plots for multi-member data
 
-### ⚡ Forcing File Generation
+### Forcing File Generation
 - **River Forcing**: Generate river discharge and temperature/salinity inputs from CSV or constants
 - **Meteorological Forcing**: Create atmospheric forcing files with comprehensive variables
 - **Groundwater Forcing**: Support for groundwater flux with temperature, salinity, and optional dye tracers
 - **Flexible Input**: Mix constants with CSV time series, node-specific or global values
 
+### Validation Tools
+- **Meteorological Forcing Validation**: Check for NaN, Inf, and out-of-bounds values
+- **Detailed Reporting**: Node/element locations (1-based indexing) with lon/lat coordinates
+- **CSV Export**: Export anomaly reports for further analysis
+
 ---
 
-## 📚 Documentation
+## Documentation
 
-### Core Documentation
 - [2-D Horizontal Plotting](docs/plot_2d.md) - Spatial visualization techniques
 - [Time-series & Depth-profiles](docs/plot_ts.md) - Temporal data analysis
 - [Vertical Sections](docs/plot_section.md) - Cross-sectional views
 - [Forcing File Generator](docs/forcing_generator.md) - Input file creation
 
-### Quick Links
-- [API Reference](#-api-reference)
-- [Examples](#-examples)
-- [CLI Commands](#-command-line-tools)
-- [Contributing Guidelines](docs/CONTRIBUTING.md)
+---
 
-## 🔧 Installation
+## Installation
 
 ### Prerequisites
-- Python 3.10, 3.11, or 3.12
-- Conda (Miniforge/Mambaforge recommended)
+- Python 3.13 or later
+- Conda with mamba (Miniforge recommended)
 
 ### Quick Install
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/xfvcom.git
+git clone https://github.com/jsasaki-utokyo/xfvcom.git
 cd xfvcom
 
-# Create conda environment
-conda create -n xfvcom python=3.12 -c conda-forge \
-    numpy xarray pandas matplotlib cartopy pyproj \
-    scipy scikit-learn imageio moviepy tqdm netcdf4 \
-    pytest mypy black isort jinja2 pyyaml types-pyyaml
+# Run setup script (creates conda environment and installs xfvcom)
+./setup.sh
 
 # Activate environment
 conda activate xfvcom
-
-# Install xfvcom in editable mode
-pip install -e .
 ```
 
-### Verify Installation
+### Setup Script Options
+
 ```bash
-python -c "import xfvcom; print(f'xfvcom {xfvcom.__version__} installed successfully')"
+# Show help
+./setup.sh --help
+
+# Custom environment name
+./setup.sh --env-name myenv
+
+# Force recreate existing environment
+./setup.sh --force
+
+# Skip development dependencies
+./setup.sh --no-dev
+```
+
+### Manual Installation
+
+If you prefer manual installation:
+
+```bash
+# Create environment from environment.yml
+mamba env create -f environment.yml
+
+# Activate and verify
+conda activate xfvcom
+python -c "import xfvcom; print(f'xfvcom {xfvcom.__version__}')"
 ```
 
 ---
 
-## 💻 Quick Start
+## Quick Start
 
 ### Load and Analyze Data
 
@@ -120,15 +138,15 @@ grid_loader = FvcomInputLoader(grid_file="grid.dat", utm_zone=54)
 
 # Median-dual control volumes (FVCOM standard)
 cv_area = grid_loader.calculate_node_area_median_dual([100, 200, 300], index_base=1)
-print(f"Control volume area: {cv_area/1e6:.2f} km²")
+print(f"Control volume area: {cv_area/1e6:.2f} km2")
 
 # Triangle sum method (legacy)
 tri_area = calculate_node_area("grid.dat", [100, 200, 300], utm_zone=54, index_base=1)
-print(f"Triangle area: {tri_area/1e6:.2f} km²")
+print(f"Triangle area: {tri_area/1e6:.2f} km2")
 
 # Element areas
 elem_areas = grid_loader.calculate_element_area([10, 11, 12], index_base=1)
-print(f"Element areas: {[f'{a:.1f}' for a in elem_areas]} m²")
+print(f"Element areas: {[f'{a:.1f}' for a in elem_areas]} m2")
 ```
 
 ### Create Visualizations
@@ -162,7 +180,7 @@ fig = plotter.plot_2d("salinity", time="2020-07-01", siglay=0, opts=opts)
 from xfvcom.plot import plot_ensemble_timeseries, plot_dye_timeseries_stacked
 
 # Line plot with automatic colormap selection
-# (tab20 for ≤20 members, hsv for >20 members)
+# (tab20 for <=20 members, hsv for >20 members)
 fig, ax = plot_ensemble_timeseries(
     ds,
     var_name="dye",
@@ -199,7 +217,26 @@ create_anim_2d_plot(
 
 ---
 
-## 🔨 Command-Line Tools
+## Command-Line Tools
+
+### Meteorological Forcing Validation
+
+```bash
+# Check for abnormal values (NaN, Inf, out-of-bounds)
+xf-check-met met_forcing.nc
+
+# Quiet mode with CSV export
+xf-check-met met_forcing.nc -q -o anomalies.csv
+
+# Custom bounds for specific variable
+xf-check-met met_forcing.nc --bound 'air_temperature:-40:50'
+
+# Check specific variables only
+xf-check-met met_forcing.nc --var uwind_speed --var vwind_speed
+
+# Disable progress bar
+xf-check-met met_forcing.nc --no-progress
+```
 
 ### River Forcing
 
@@ -260,7 +297,7 @@ xfvcom-dye-ts \
 
 ---
 
-## 🔍 Examples
+## Examples
 
 ### Time Series Extension
 
@@ -339,7 +376,7 @@ export_member_mapping(mapping, "member_mapping.csv", grid_file="grid.dat")
 
 ---
 
-## 📦 API Reference
+## API Reference
 
 ### Core Classes
 
@@ -352,6 +389,15 @@ export_member_mapping(mapping, "member_mapping.csv", grid_file="grid.dat")
 | `FvcomPlotConfig` | `xfvcom.plot` | Centralized plot styling configuration |
 | `FvcomPlotOptions` | `xfvcom` | Per-plot customization options |
 | `FvcomGrid` | `xfvcom.grid` | Grid manipulation and validation |
+
+### Validation Classes
+
+| Class | Module | Description |
+|-------|--------|-------------|
+| `MetValidator` | `xfvcom.validation` | Validate meteorological forcing files |
+| `AnomalyReport` | `xfvcom.validation` | Container for validation results |
+| `AnomalyRecord` | `xfvcom.validation` | Single anomaly with location and value |
+| `PhysicalBounds` | `xfvcom.validation` | Define min/max bounds for variables |
 
 ### Ensemble Analysis
 
@@ -393,7 +439,7 @@ export_member_mapping(mapping, "member_mapping.csv", grid_file="grid.dat")
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run all tests
@@ -411,7 +457,7 @@ pytest tests/test_dye_timeseries_stacked.py -v
 
 ---
 
-## 🛠️ Development
+## Development
 
 ### Code Quality
 
@@ -441,59 +487,8 @@ make html
 
 ---
 
-## 🤝 Contributing
-
-We welcome contributions! See [Contributing Guidelines](docs/CONTRIBUTING.md) for:
-
-- Development setup
-- Code style guidelines
-- Testing requirements
-- Pull request process
-
-**Quick Contribution Steps:**
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run tests (`pytest`)
-5. Format code (`black . && isort .`)
-6. Commit with descriptive message
-7. Push to your fork
-8. Open a Pull Request
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 👥 Authors
-
-- **Jun Sasaki** - *Initial work* - [jsasaki.ece@gmail.com](mailto:jsasaki.ece@gmail.com)
-
-## 🙏 Acknowledgments
-
-- FVCOM development team for the ocean model
-- xarray developers for the excellent data structure
-- All contributors who have helped improve this package
-
-## 📚 Citation
-
-If you use xfvcom in your research, please cite:
-
-```bibtex
-@software{xfvcom,
-  author = {Sasaki, Jun},
-  title = {xfvcom: A Python toolkit for FVCOM data analysis},
-  year = {2024},
-  version = {0.2.0},
-  url = {https://github.com/yourusername/xfvcom}
-}
-```
-
-## 🔗 Links
+## Links
 
 - [FVCOM Official Site](http://fvcom.smast.umassd.edu/fvcom/)
 - [xarray Documentation](https://docs.xarray.dev/)
 - [Cartopy Documentation](https://scitools.org.uk/cartopy/)
-- [Issue Tracker](https://github.com/yourusername/xfvcom/issues)
