@@ -20,6 +20,7 @@ from .timeseries import (
     apply_smart_time_ticks,
     plot_ensemble_statistics,
     plot_ensemble_timeseries,
+    plot_timeseries,
 )
 
 # Plotly utilities (optional, only if plotly is installed)
@@ -43,6 +44,7 @@ __all__: list[str] = [
     "FvcomPlotter",
     "make_node_marker_post",
     "apply_smart_time_ticks",
+    "plot_timeseries",
     "plot_ensemble_timeseries",
     "plot_ensemble_statistics",
     "plot_dye_timeseries_stacked",
@@ -58,5 +60,25 @@ if PLOTLY_AVAILABLE:
             "plot_timeseries_multi_variable",
             "create_river_extension_plot",
             "print_plotly_instructions",
+        ]
+    )
+
+# hvPlot utilities (optional, only if hvplot is installed)
+try:
+    from .hvplot_utils import (
+        InteractivePlotter,
+        hvplot_timeseries,
+    )
+
+    HVPLOT_AVAILABLE = True
+except ImportError:
+    HVPLOT_AVAILABLE = False
+
+# Add hvplot functions to __all__ if available
+if HVPLOT_AVAILABLE:
+    __all__.extend(
+        [
+            "InteractivePlotter",
+            "hvplot_timeseries",
         ]
     )

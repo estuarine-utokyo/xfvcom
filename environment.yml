@@ -20,6 +20,11 @@ dependencies:
   - imageio-ffmpeg
   - moviepy
 
+  # Interactive visualization (optional but recommended)
+  - hvplot
+  - bokeh
+  - holoviews
+
   # NetCDF support
   - netcdf4
   - h5netcdf

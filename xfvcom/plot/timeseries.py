@@ -6,16 +6,18 @@ with intelligent time axis formatting and consistent styling using FvcomPlotConf
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import xarray as xr
 from matplotlib.dates import AutoDateLocator, ConciseDateFormatter
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
-    import xarray as xr
 
 from ._timeseries_utils import get_member_color
 from .config import FvcomPlotConfig
@@ -66,6 +68,198 @@ def apply_smart_time_ticks(ax, fig=None, minticks=3, maxticks=7, rotation=30):
             label.set_ha("right")
 
     return ax
+
+
+def plot_timeseries(
+    data: xr.DataArray | xr.Dataset,
+    var_name: str | None = None,
+    ax: Axes | None = None,
+    cfg: FvcomPlotConfig | None = None,
+    title: str | None = None,
+    ylabel: str | None = None,
+    xlabel: str = "Time",
+    color: str = "steelblue",
+    linewidth: float | None = None,
+    alpha: float = 1.0,
+    minticks: int = 3,
+    maxticks: int = 7,
+    rotation: int = 30,
+    grid: bool = True,
+    output: str | Path | None = None,
+    dpi: int = 150,
+    **kwargs: Any,
+) -> tuple[Figure, Axes]:
+    """Plot a simple time series from xarray DataArray or Dataset.
+
+    This function creates a publication-quality time series plot for a single
+    variable. It handles datetime axis formatting automatically and supports
+    both xarray DataArray and Dataset inputs.
+
+    Parameters
+    ----------
+    data : xr.DataArray or xr.Dataset
+        Data to plot. If Dataset, var_name must be specified.
+    var_name : str, optional
+        Variable name to plot (required if data is Dataset)
+    ax : Axes, optional
+        Matplotlib axes to plot on. If None, creates new figure
+    cfg : FvcomPlotConfig, optional
+        Plot configuration for styling. If None, uses sensible defaults
+    title : str, optional
+        Plot title. If None, auto-generates from variable attributes
+    ylabel : str, optional
+        Y-axis label. If None, uses variable long_name and units
+    xlabel : str
+        X-axis label (default: "Time")
+    color : str
+        Line color (default: "steelblue")
+    linewidth : float, optional
+        Line width. If None, uses cfg.linewidth_plot or 1.5
+    alpha : float
+        Line transparency (default: 1.0)
+    minticks : int
+        Minimum number of x-axis ticks (default: 3)
+    maxticks : int
+        Maximum number of x-axis ticks (default: 7)
+    rotation : int
+        X-axis label rotation in degrees (default: 30)
+    grid : bool
+        Whether to show grid (default: True)
+    output : str or Path, optional
+        Path to save figure. If None, figure is not saved
+    dpi : int
+        DPI for saved figure (default: 150)
+    **kwargs
+        Additional arguments passed to ax.plot()
+
+    Returns
+    -------
+    tuple[Figure, Axes]
+        Matplotlib figure and axes objects
+
+    Examples
+    --------
+    >>> import xarray as xr
+    >>> from xfvcom.plot import plot_timeseries
+    >>>
+    >>> # Load weather forcing file
+    >>> ds = xr.open_dataset("weather.nc")
+    >>>
+    >>> # Plot air temperature at first node
+    >>> fig, ax = plot_timeseries(
+    ...     ds["air_temperature"].isel(node=0),
+    ...     title="Air Temperature at Node 0",
+    ... )
+    >>>
+    >>> # Plot from Dataset with variable name
+    >>> fig, ax = plot_timeseries(
+    ...     ds.isel(node=0),
+    ...     var_name="air_temperature",
+    ...     output="air_temp.png",
+    ... )
+    """
+    # Handle Dataset vs DataArray input
+    if isinstance(data, xr.Dataset):
+        if var_name is None:
+            raise ValueError("var_name must be specified when data is a Dataset")
+        if var_name not in data:
+            raise ValueError(
+                f"Variable '{var_name}' not found. Available: {list(data.data_vars)}"
+            )
+        da = data[var_name]
+    else:
+        da = data
+        if var_name is None:
+            var_name = da.name or "value"
+
+    # Create default config if not provided
+    if cfg is None:
+        cfg = FvcomPlotConfig(
+            figsize=(12, 5),
+            fontsize={
+                "xticks": 11,
+                "yticks": 11,
+                "xlabel": 12,
+                "ylabel": 12,
+                "title": 14,
+            },
+            linewidth={"plot": 1.5},
+        )
+
+    # Set linewidth
+    if linewidth is None:
+        linewidth = cfg.linewidth_plot
+
+    # Create figure if needed
+    if ax is None:
+        fig, ax = plt.subplots(figsize=cfg.figsize, constrained_layout=True)
+    else:
+        fig = ax.figure
+
+    # Get time coordinate
+    time_coord = None
+    for coord_name in ["time", "Time", "datetime"]:
+        if coord_name in da.coords:
+            time_coord = coord_name
+            break
+
+    if time_coord is None:
+        raise ValueError("No time coordinate found in data")
+
+    time_values = da[time_coord].values
+    data_values = da.values
+
+    # Plot
+    ax.plot(
+        time_values,
+        data_values,
+        color=color,
+        linewidth=linewidth,
+        alpha=alpha,
+        **kwargs,
+    )
+
+    # Apply smart time ticks
+    apply_smart_time_ticks(
+        ax, fig, minticks=minticks, maxticks=maxticks, rotation=rotation
+    )
+
+    # Get labels from attributes
+    long_name = da.attrs.get("long_name", var_name)
+    units = da.attrs.get("units", "")
+
+    # Set labels
+    if ylabel is None:
+        ylabel = f"{long_name} [{units}]" if units else long_name
+    ax.set_ylabel(ylabel, fontsize=cfg.fontsize_ylabel)
+    ax.set_xlabel(xlabel, fontsize=cfg.fontsize_xlabel)
+
+    # Set title
+    if title is None:
+        title = long_name
+    ax.set_title(title, fontsize=cfg.fontsize_title)
+
+    # Grid
+    if grid:
+        ax.grid(
+            True,
+            alpha=cfg.grid_alpha,
+            linestyle=cfg.grid_linestyle,
+            linewidth=cfg.grid_linewidth,
+            color=cfg.grid_color,
+        )
+
+    # Tick parameters
+    ax.tick_params(axis="both", labelsize=cfg.fontsize_xticks)
+
+    # Save if output path provided
+    if output is not None:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        print(f"Figure saved to: {output_path}")
+
+    return fig, ax
 
 
 def plot_ensemble_timeseries(

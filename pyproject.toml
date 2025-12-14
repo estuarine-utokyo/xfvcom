@@ -46,6 +46,7 @@ dependencies = [
 
 [project.optional-dependencies]
 video = ["moviepy>=1.0.3", "imageio-ffmpeg>=0.6.0"]
+interactive = ["hvplot>=0.10.0", "bokeh>=3.4.0", "holoviews>=1.19.0"]
 dev = [
   "pytest>=8.3.0",
   "mypy>=1.10.0",
