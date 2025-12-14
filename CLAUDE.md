@@ -16,7 +16,7 @@ xfvcom is a Python package for preprocessing and postprocessing data from the Fi
 conda activate fvcom
 
 # Verify environment is active
-python --version  # Should show Python 3.11.x or 3.12.x
+python --version  # Should show Python 3.12.x
 python -c "import xfvcom; print(f'xfvcom {xfvcom.__version__}')"
 ```
 
@@ -66,7 +66,7 @@ Run exactly what GitHub CI executes:
 ```bash
 black --check .
 isort --check-only .
-mypy xfvcom
+mypy .
 pytest -m "not png"
 ```
 
@@ -78,8 +78,8 @@ pytest -m "not png"
 black .
 isort .
 
-# Type check
-mypy xfvcom
+# Type check (entire project, same as CI)
+mypy .
 
 # View linting suggestions (informational, not enforced)
 ruff check .
@@ -262,12 +262,17 @@ CSV/Constants → Force Generators → FVCOM Input Files (.nc, .nml)
 - `@pytest.mark.png` - PNG regression tests (skipped in CI)
 - Default: All tests run locally, PNG skipped in CI
 
+**Key Fixtures** (from `tests/conftest.py`):
+- `fvcom_ds` - Minimal 3-D FVCOM-like xarray Dataset for testing
+- `plotter` - FvcomPlotter instance bound to fvcom_ds
+- `regen_baseline` - True when `--regenerate-baseline` flag is set
+
 **PNG Regression Tests:**
 ```python
 @pytest.mark.png
-def test_plot_produces_expected_output(plotter, baseline_dir, regen_baseline):
+def test_plot_produces_expected_output(plotter, regen_baseline):
     fig = plotter.plot_2d(...)
-    # Compare against baseline or regenerate if --regenerate-baseline
+    # Compare against tests/baseline/ or regenerate if --regenerate-baseline
 ```
 
 **When to Regenerate Baselines:**

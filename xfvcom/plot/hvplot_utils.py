@@ -36,7 +36,16 @@ from .variable_meta import get_label
 # =============================================================================
 DEFAULT_WIDTH = 800
 DEFAULT_HEIGHT = 250
-DEFAULT_FONTSIZE = "12pt"
+DEFAULT_FONTSIZE = "11pt"
+
+
+def _apply_normal_font_style(plot: Any, element: Any) -> None:
+    """Bokeh hook to set axis labels to normal (non-italic) font style."""
+    p = plot.state
+    if hasattr(p, "yaxis"):
+        p.yaxis.axis_label_text_font_style = "normal"
+    if hasattr(p, "xaxis"):
+        p.xaxis.axis_label_text_font_style = "normal"
 
 
 def check_hvplot_availability() -> None:
@@ -177,6 +186,7 @@ class InteractivePlotter:
         # Build hvplot options
         plot_opts: dict[str, Any] = {
             "x": time_coord,
+            "xlabel": xlabel,  # Empty string removes redundant "time" label
             "ylabel": ylabel,
             "width": width or self.width,
             "height": height or self.height,
@@ -196,11 +206,10 @@ class InteractivePlotter:
         if title is not None:
             plot_opts["title"] = title
 
-        # Only add xlabel if provided
-        if xlabel:
-            plot_opts["xlabel"] = xlabel
-
         plot = da.hvplot.line(**plot_opts, **kwargs)
+
+        # Apply normal (non-italic) font style for axis labels
+        plot = plot.opts(hooks=[_apply_normal_font_style])
 
         if output is not None:
             self._save_plot(plot, output)
@@ -250,6 +259,7 @@ class InteractivePlotter:
 
             plot = da.hvplot.line(
                 x=time_coord,
+                xlabel="",  # Remove redundant "time" label
                 ylabel=ylabel,
                 width=width or self.width,
                 height=height,
@@ -260,6 +270,8 @@ class InteractivePlotter:
                 },
                 **kwargs,
             )
+            # Apply normal (non-italic) font style for axis labels
+            plot = plot.opts(hooks=[_apply_normal_font_style])
             plots.append(plot)
 
         if not plots:

@@ -21,6 +21,7 @@ from .timeseries import (
     plot_ensemble_statistics,
     plot_ensemble_timeseries,
     plot_timeseries,
+    plot_timeseries_multi,
 )
 from .variable_meta import (
     VARIABLE_REGISTRY,
@@ -51,6 +52,7 @@ __all__: list[str] = [
     "make_node_marker_post",
     "apply_smart_time_ticks",
     "plot_timeseries",
+    "plot_timeseries_multi",
     "plot_ensemble_timeseries",
     "plot_ensemble_statistics",
     "plot_dye_timeseries_stacked",

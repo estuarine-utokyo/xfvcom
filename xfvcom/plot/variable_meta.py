@@ -46,11 +46,11 @@ class VariableMeta:
         Returns
         -------
         str
-            Formatted label like "Temperature [$^\\circ$C]"
+            Formatted label like "Temperature ($^\\circ$C)"
         """
         units_str = self.units_latex if use_latex else self.units
         if units_str and units_str != "-":
-            return f"{self.long_name} [{units_str}]"
+            return f"{self.long_name} ({units_str})"
         return self.long_name
 
 
@@ -59,20 +59,20 @@ class VariableMeta:
 # =============================================================================
 MET_VARIABLES: dict[str, VariableMeta] = {
     "uwind_speed": VariableMeta(
-        long_name="Eastward Wind Speed",
+        long_name="W-E Wind Speed",
         units="m/s",
-        units_latex=r"m s$^{-1}$",
+        units_latex="m/s",
         symbol="u",
     ),
     "vwind_speed": VariableMeta(
-        long_name="Northward Wind Speed",
+        long_name="S-N Wind Speed",
         units="m/s",
-        units_latex=r"m s$^{-1}$",
+        units_latex="m/s",
         symbol="v",
     ),
     "air_temperature": VariableMeta(
         long_name="Air Temperature",
-        units="Celsius",
+        units="°C",
         units_latex=r"$^\circ$C",
         symbol="T_a",
     ),
@@ -83,21 +83,21 @@ MET_VARIABLES: dict[str, VariableMeta] = {
         symbol="C",
     ),
     "short_wave": VariableMeta(
-        long_name="Shortwave Radiation",
-        units="W/m2",
+        long_name="Shortwave Rad",
+        units="W/m²",
         units_latex=r"W m$^{-2}$",
         symbol="Q_sw",
     ),
     "long_wave": VariableMeta(
-        long_name="Longwave Radiation",
-        units="W/m2",
+        long_name="Longwave Rad",
+        units="W/m²",
         units_latex=r"W m$^{-2}$",
         symbol="Q_lw",
     ),
     "relative_humidity": VariableMeta(
         long_name="Relative Humidity",
         units="%",
-        units_latex=r"\%",
+        units_latex="%",
         symbol="RH",
     ),
     "air_pressure": VariableMeta(
@@ -114,7 +114,7 @@ MET_VARIABLES: dict[str, VariableMeta] = {
     ),
     "net_heat_flux": VariableMeta(
         long_name="Net Heat Flux",
-        units="W/m2",
+        units="W/m²",
         units_latex=r"W m$^{-2}$",
         symbol="Q_net",
     ),
@@ -126,13 +126,13 @@ MET_VARIABLES: dict[str, VariableMeta] = {
 RIVER_VARIABLES: dict[str, VariableMeta] = {
     "river_flux": VariableMeta(
         long_name="River Discharge",
-        units="m3/s",
+        units="m³/s",
         units_latex=r"m$^3$ s$^{-1}$",
         symbol="Q",
     ),
     "river_temp": VariableMeta(
         long_name="River Temperature",
-        units="Celsius",
+        units="°C",
         units_latex=r"$^\circ$C",
         symbol="T_r",
     ),
@@ -156,7 +156,7 @@ GROUNDWATER_VARIABLES: dict[str, VariableMeta] = {
     ),
     "groundwater_temp": VariableMeta(
         long_name="Groundwater Temperature",
-        units="Celsius",
+        units="°C",
         units_latex=r"$^\circ$C",
         symbol="T_gw",
     ),
@@ -174,7 +174,7 @@ GROUNDWATER_VARIABLES: dict[str, VariableMeta] = {
 OUTPUT_VARIABLES: dict[str, VariableMeta] = {
     "temp": VariableMeta(
         long_name="Temperature",
-        units="Celsius",
+        units="°C",
         units_latex=r"$^\circ$C",
         symbol="T",
     ),
@@ -228,7 +228,7 @@ OUTPUT_VARIABLES: dict[str, VariableMeta] = {
     ),
     "dye": VariableMeta(
         long_name="Dye Concentration",
-        units="kg/m3",
+        units="kg/m³",
         units_latex=r"kg m$^{-3}$",
         symbol="C",
     ),
@@ -305,12 +305,41 @@ def get_label(
     units = da.attrs.get("units", "")
 
     # Clean up common unit formats
-    if use_latex and units:
-        units = _to_latex_units(units)
+    if units:
+        units = _to_latex_units(units) if use_latex else _to_unicode_units(units)
 
     if units and units != "-":
-        return f"{long_name} [{units}]"
+        return f"{long_name} ({units})"
     return long_name
+
+
+def _to_unicode_units(units: str) -> str:
+    """Convert common unit strings to Unicode format.
+
+    Parameters
+    ----------
+    units : str
+        Plain text units
+
+    Returns
+    -------
+    str
+        Unicode-formatted units
+    """
+    conversions = {
+        "Celsius": "°C",
+        "Celsius Degree": "°C",
+        "degrees Celsius": "°C",
+        "degC": "°C",
+        "W/m2": "W/m²",
+        "W m-2": "W/m²",
+        "Watts meter-2": "W/m²",
+        "m3/s": "m³/s",
+        "m^3/s": "m³/s",
+        "kg/m3": "kg/m³",
+        "kg m-3": "kg/m³",
+    }
+    return conversions.get(units, units)
 
 
 def _to_latex_units(units: str) -> str:
@@ -342,7 +371,7 @@ def _to_latex_units(units: str) -> str:
         "Celsius Degree": r"$^\circ$C",
         "degrees Celsius": r"$^\circ$C",
         "degC": r"$^\circ$C",
-        "percentage": r"\%",
-        "percent": r"\%",
+        "percentage": "%",
+        "percent": "%",
     }
     return conversions.get(units, units)

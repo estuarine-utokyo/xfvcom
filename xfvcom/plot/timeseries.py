@@ -28,7 +28,7 @@ from .variable_meta import get_label
 # =============================================================================
 DEFAULT_FIGSIZE = (8, 2)
 DEFAULT_DPI = 300
-DEFAULT_FONTSIZE = 12
+DEFAULT_FONTSIZE = 11
 DEFAULT_LINEWIDTH = 1.0
 DEFAULT_MINTICKS = 6
 DEFAULT_MAXTICKS = 12
@@ -200,7 +200,7 @@ def plot_timeseries(
 
     # Create figure if needed
     if ax is None:
-        fig, ax = plt.subplots(figsize=cfg.figsize, constrained_layout=True)
+        fig, ax = plt.subplots(figsize=cfg.figsize)
     else:
         fig = ax.figure
 
@@ -256,14 +256,190 @@ def plot_timeseries(
     # Tick parameters
     ax.tick_params(axis="both", labelsize=cfg.fontsize_xticks)
 
+    # Adjust layout
+    fig.tight_layout()
+
     # Save if output path provided
     if output is not None:
         output_path = Path(output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        fig.savefig(output_path, dpi=dpi)
         print(f"Saved: {output_path}")
 
     return fig, ax
+
+
+def plot_timeseries_multi(
+    ds: xr.Dataset,
+    var_names: list[str],
+    cfg: FvcomPlotConfig | None = None,
+    use_latex: bool = True,
+    grid: bool = True,
+    minticks: int = DEFAULT_MINTICKS,
+    maxticks: int = DEFAULT_MAXTICKS,
+    output: str | Path | None = None,
+    dpi: int = DEFAULT_DPI,
+    panel_height: float = 1.6,
+    suptitle: str | None = None,
+    **kwargs: Any,
+) -> tuple[Figure, list[Axes]]:
+    """Plot multiple time series variables in a single multi-panel figure.
+
+    Creates a vertically stacked figure with one panel per variable,
+    saved as a single PNG file.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset containing the variables to plot
+    var_names : list[str]
+        List of variable names to plot
+    cfg : FvcomPlotConfig, optional
+        Plot configuration for styling
+    use_latex : bool
+        Use LaTeX-formatted units in labels (default: True)
+    grid : bool
+        Whether to show grid (default: True)
+    minticks : int
+        Minimum number of x-axis ticks (default: 6)
+    maxticks : int
+        Maximum number of x-axis ticks (default: 12)
+    output : str or Path, optional
+        Path to save figure as single PNG file.
+    dpi : int
+        DPI for saved figure (default: 300)
+    panel_height : float
+        Height of each panel in inches (default: 1.6)
+    suptitle : str, optional
+        Super title displayed above all panels
+    **kwargs
+        Additional arguments passed to ax.plot()
+
+    Returns
+    -------
+    tuple[Figure, list[Axes]]
+        Matplotlib figure and list of axes objects
+
+    Examples
+    --------
+    >>> import xarray as xr
+    >>> from xfvcom.plot import plot_timeseries_multi
+    >>>
+    >>> ds = xr.open_dataset("weather.nc")
+    >>> fig, axes = plot_timeseries_multi(
+    ...     ds.isel(node=0),
+    ...     ["air_temperature", "short_wave", "relative_humidity"],
+    ...     output="weather_multi.png",
+    ... )
+    """
+    n_vars = len(var_names)
+    if n_vars == 0:
+        raise ValueError("var_names must not be empty")
+
+    # Filter to valid variables only
+    valid_vars = [v for v in var_names if v in ds.data_vars]
+    if not valid_vars:
+        raise ValueError(
+            f"None of the variables found in dataset. "
+            f"Available: {list(ds.data_vars)}"
+        )
+
+    n_panels = len(valid_vars)
+
+    # Create default config optimized for compact multi-panel display
+    if cfg is None:
+        fontsize = 9  # Smaller font for multi-panel
+        cfg = FvcomPlotConfig(
+            figsize=(8, panel_height * n_panels),
+            fontsize={
+                "xticks": fontsize,
+                "yticks": fontsize,
+                "xlabel": fontsize,
+                "ylabel": fontsize,
+                "title": fontsize + 1,
+            },
+            linewidth={"plot": DEFAULT_LINEWIDTH},
+        )
+
+    # Create figure with subplots
+    fig_width = cfg.figsize[0] if cfg.figsize else 8
+    fig_height = panel_height * n_panels
+    fig, axes = plt.subplots(
+        n_panels, 1, figsize=(fig_width, fig_height), sharex=True
+    )
+
+    # Handle single panel case
+    if n_panels == 1:
+        axes = [axes]
+
+    # Get time coordinate name
+    time_coord = None
+    for coord_name in ["time", "Time", "datetime"]:
+        if coord_name in ds.coords:
+            time_coord = coord_name
+            break
+
+    if time_coord is None:
+        raise ValueError("No time coordinate found in dataset")
+
+    # Plot each variable
+    for i, var_name in enumerate(valid_vars):
+        ax = axes[i]
+        da = ds[var_name]
+
+        time_values = da[time_coord].values
+        data_values = da.values
+
+        # Plot
+        ax.plot(
+            time_values,
+            data_values,
+            color="#1f77b4",
+            linewidth=cfg.linewidth_plot,
+            **kwargs,
+        )
+
+        # Y-axis label with units
+        ylabel = get_label(da, var_name, use_latex=use_latex)
+        ax.set_ylabel(ylabel, fontsize=cfg.fontsize_ylabel)
+
+        # Grid
+        if grid:
+            ax.grid(
+                True,
+                alpha=cfg.grid_alpha,
+                linestyle=cfg.grid_linestyle,
+                linewidth=cfg.grid_linewidth,
+                color=cfg.grid_color,
+            )
+
+        # Tick parameters
+        ax.tick_params(axis="both", labelsize=cfg.fontsize_xticks)
+
+    # Apply smart time ticks to bottom panel only (shared x-axis)
+    apply_smart_time_ticks(
+        axes[-1], fig, minticks=minticks, maxticks=maxticks, rotation=0
+    )
+
+    # Add super title if provided
+    if suptitle is not None:
+        fig.suptitle(suptitle, fontsize=cfg.fontsize_title, y=1.0)
+
+    # Adjust layout
+    fig.tight_layout()
+
+    # Adjust top margin if suptitle is present
+    if suptitle is not None:
+        fig.subplots_adjust(top=0.96)
+
+    # Save if output path provided
+    if output is not None:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=dpi)
+        print(f"Saved: {output_path}")
+
+    return fig, axes
 
 
 def plot_ensemble_timeseries(
