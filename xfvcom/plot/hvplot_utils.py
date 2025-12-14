@@ -29,6 +29,15 @@ except ImportError:
 if TYPE_CHECKING:
     import holoviews as hv
 
+from .variable_meta import get_label
+
+# =============================================================================
+# Default settings for interactive plots
+# =============================================================================
+DEFAULT_WIDTH = 800
+DEFAULT_HEIGHT = 250
+DEFAULT_FONTSIZE = "12pt"
+
 
 def check_hvplot_availability() -> None:
     """Check if hvplot is available and raise informative error if not."""
@@ -44,18 +53,19 @@ def check_hvplot_availability() -> None:
 class InteractivePlotter:
     """Interactive plotter for xarray data using hvPlot/Bokeh.
 
-    This class provides methods for creating interactive visualizations
-    that can be displayed in Jupyter notebooks or saved as standalone
-    HTML files.
+    Creates publication-quality interactive plots with:
+    - Proper axis labels with LaTeX-style units
+    - Pan/zoom/reset tools
+    - Standalone HTML export
 
     Parameters
     ----------
     ds : xr.Dataset
         Dataset to plot from
     width : int
-        Default plot width in pixels (default: 900)
+        Default plot width in pixels (default: 800)
     height : int
-        Default plot height in pixels (default: 400)
+        Default plot height in pixels (default: 250)
 
     Examples
     --------
@@ -76,8 +86,8 @@ class InteractivePlotter:
     def __init__(
         self,
         ds: xr.Dataset,
-        width: int = 900,
-        height: int = 400,
+        width: int = DEFAULT_WIDTH,
+        height: int = DEFAULT_HEIGHT,
     ) -> None:
         check_hvplot_availability()
         self.ds = ds
@@ -92,11 +102,10 @@ class InteractivePlotter:
                 return coord_name
         raise ValueError("No time coordinate found in data")
 
-    def _make_ylabel(self, da: xr.DataArray, var_name: str) -> str:
-        """Generate y-axis label from DataArray attributes."""
-        long_name = da.attrs.get("long_name", var_name)
-        units = da.attrs.get("units", "")
-        return f"{long_name} [{units}]" if units else long_name
+    def _get_label(self, da: xr.DataArray, var_name: str) -> str:
+        """Generate y-axis label using variable metadata."""
+        # Use plain text for Bokeh (no LaTeX support)
+        return get_label(da, var_name, use_latex=False)
 
     def _save_plot(self, plot: hv.Element, output: str | Path) -> None:
         """Save plot to HTML file."""
@@ -110,9 +119,9 @@ class InteractivePlotter:
         var_name: str,
         title: str | None = None,
         ylabel: str | None = None,
-        xlabel: str = "Time",
-        color: str = "steelblue",
-        line_width: float = 1.5,
+        xlabel: str = "",
+        color: str = "#1f77b4",
+        line_width: float = 1.0,
         width: int | None = None,
         height: int | None = None,
         grid: bool = True,
@@ -127,15 +136,15 @@ class InteractivePlotter:
         var_name : str
             Variable name to plot
         title : str, optional
-            Plot title. If None, uses variable long_name
+            Plot title. If None, no title
         ylabel : str, optional
-            Y-axis label. If None, auto-generates from attributes
+            Y-axis label. If None, auto-generates from variable metadata
         xlabel : str
-            X-axis label (default: "Time")
+            X-axis label (default: "" - datetime ticks are self-explanatory)
         color : str
-            Line color (default: "steelblue")
+            Line color (default: "#1f77b4")
         line_width : float
-            Line width (default: 1.5)
+            Line width (default: 1.0)
         width : int, optional
             Plot width. If None, uses instance default
         height : int, optional
@@ -163,24 +172,35 @@ class InteractivePlotter:
         time_coord = self._get_time_coord(da)
 
         if ylabel is None:
-            ylabel = self._make_ylabel(da, var_name)
-        if title is None:
-            title = da.attrs.get("long_name", var_name)
+            ylabel = self._get_label(da, var_name)
 
-        plot = da.hvplot.line(
-            x=time_coord,
-            title=title,
-            xlabel=xlabel,
-            ylabel=ylabel,
-            width=width or self.width,
-            height=height or self.height,
-            color=color,
-            line_width=line_width,
-            grid=grid,
-            hover=hover,
-            tools=self._default_tools,
-            **kwargs,
-        )
+        # Build hvplot options
+        plot_opts: dict[str, Any] = {
+            "x": time_coord,
+            "ylabel": ylabel,
+            "width": width or self.width,
+            "height": height or self.height,
+            "color": color,
+            "line_width": line_width,
+            "grid": grid,
+            "hover": hover,
+            "tools": self._default_tools,
+            "fontsize": {
+                "labels": DEFAULT_FONTSIZE,
+                "ticks": DEFAULT_FONTSIZE,
+                "title": DEFAULT_FONTSIZE,
+            },
+        }
+
+        # Only add title if provided
+        if title is not None:
+            plot_opts["title"] = title
+
+        # Only add xlabel if provided
+        if xlabel:
+            plot_opts["xlabel"] = xlabel
+
+        plot = da.hvplot.line(**plot_opts, **kwargs)
 
         if output is not None:
             self._save_plot(plot, output)
@@ -192,7 +212,7 @@ class InteractivePlotter:
         var_names: list[str],
         title: str | None = None,
         width: int | None = None,
-        height: int = 300,
+        height: int = DEFAULT_HEIGHT,
         output: str | Path | None = None,
         **kwargs: Any,
     ) -> hv.Layout:
@@ -207,7 +227,7 @@ class InteractivePlotter:
         width : int, optional
             Plot width. If None, uses instance default
         height : int
-            Height per subplot (default: 300)
+            Height per subplot (default: 250)
         output : str or Path, optional
             Path to save as HTML file
         **kwargs
@@ -226,7 +246,7 @@ class InteractivePlotter:
 
             da = self.ds[var_name]
             time_coord = self._get_time_coord(da)
-            ylabel = self._make_ylabel(da, var_name)
+            ylabel = self._get_label(da, var_name)
 
             plot = da.hvplot.line(
                 x=time_coord,
@@ -234,6 +254,10 @@ class InteractivePlotter:
                 width=width or self.width,
                 height=height,
                 tools=self._default_tools,
+                fontsize={
+                    "labels": DEFAULT_FONTSIZE,
+                    "ticks": DEFAULT_FONTSIZE,
+                },
                 **kwargs,
             )
             plots.append(plot)

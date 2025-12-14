@@ -22,6 +22,12 @@ from .timeseries import (
     plot_ensemble_timeseries,
     plot_timeseries,
 )
+from .variable_meta import (
+    VARIABLE_REGISTRY,
+    VariableMeta,
+    get_label,
+    get_variable_meta,
+)
 
 # Plotly utilities (optional, only if plotly is installed)
 try:
@@ -50,6 +56,11 @@ __all__: list[str] = [
     "plot_dye_timeseries_stacked",
     "get_member_color",
     "get_member_colors",
+    # Variable metadata
+    "VariableMeta",
+    "get_variable_meta",
+    "get_label",
+    "VARIABLE_REGISTRY",
 ]
 
 # Add plotly functions to __all__ if available

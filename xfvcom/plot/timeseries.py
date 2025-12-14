@@ -21,13 +21,29 @@ if TYPE_CHECKING:
 
 from ._timeseries_utils import get_member_color
 from .config import FvcomPlotConfig
+from .variable_meta import get_label
+
+# =============================================================================
+# Default plot settings for publication-quality figures
+# =============================================================================
+DEFAULT_FIGSIZE = (8, 2)
+DEFAULT_DPI = 300
+DEFAULT_FONTSIZE = 12
+DEFAULT_LINEWIDTH = 1.0
+DEFAULT_MINTICKS = 6
+DEFAULT_MAXTICKS = 12
 
 
-def apply_smart_time_ticks(ax, fig=None, minticks=3, maxticks=7, rotation=30):
+def apply_smart_time_ticks(
+    ax: Axes,
+    fig: Figure | None = None,
+    minticks: int = DEFAULT_MINTICKS,
+    maxticks: int = DEFAULT_MAXTICKS,
+    rotation: int = 0,
+) -> Axes:
     """Apply smart datetime tick formatting using matplotlib's built-in tools.
 
-    This is the proper way to handle datetime axes without overlap issues.
-    Uses AutoDateLocator + ConciseDateFormatter with manual label rotation.
+    Uses AutoDateLocator + ConciseDateFormatter for clean, non-overlapping labels.
 
     Parameters
     ----------
@@ -36,21 +52,20 @@ def apply_smart_time_ticks(ax, fig=None, minticks=3, maxticks=7, rotation=30):
     fig : Figure, optional
         Matplotlib figure. If None, gets from ax.figure
     minticks : int
-        Minimum number of ticks (default: 3)
+        Minimum number of ticks (default: 6)
     maxticks : int
-        Maximum number of ticks (default: 7)
+        Maximum number of ticks (default: 12)
     rotation : int
-        Label rotation angle in degrees (default: 30)
+        Label rotation angle in degrees (default: 0, horizontal)
 
     Returns
     -------
     Axes
         The modified axes object
     """
-    if fig is None:
-        fig = ax.figure
+    _ = fig  # unused, kept for API compatibility
 
-    # Use matplotlib's intelligent date locator
+    # Use matplotlib's intelligent date locator with more ticks
     locator = AutoDateLocator(minticks=minticks, maxticks=maxticks)
 
     # Use ConciseDateFormatter for clean, non-overlapping labels
@@ -60,8 +75,7 @@ def apply_smart_time_ticks(ax, fig=None, minticks=3, maxticks=7, rotation=30):
     ax.xaxis.set_major_locator(locator)
     ax.xaxis.set_major_formatter(formatter)
 
-    # Rotate labels manually (compatible with constrained_layout)
-    # Note: We don't use fig.autofmt_xdate() because it's incompatible with constrained_layout
+    # Rotate labels if requested (default is horizontal)
     if rotation != 0:
         for label in ax.get_xticklabels():
             label.set_rotation(rotation)
@@ -77,23 +91,25 @@ def plot_timeseries(
     cfg: FvcomPlotConfig | None = None,
     title: str | None = None,
     ylabel: str | None = None,
-    xlabel: str = "Time",
-    color: str = "steelblue",
-    linewidth: float | None = None,
+    xlabel: str = "",
+    color: str = "#1f77b4",
+    linewidth: float = DEFAULT_LINEWIDTH,
     alpha: float = 1.0,
-    minticks: int = 3,
-    maxticks: int = 7,
-    rotation: int = 30,
+    minticks: int = DEFAULT_MINTICKS,
+    maxticks: int = DEFAULT_MAXTICKS,
     grid: bool = True,
+    use_latex: bool = True,
     output: str | Path | None = None,
-    dpi: int = 150,
+    dpi: int = DEFAULT_DPI,
     **kwargs: Any,
 ) -> tuple[Figure, Axes]:
-    """Plot a simple time series from xarray DataArray or Dataset.
+    """Plot a publication-quality time series from xarray data.
 
-    This function creates a publication-quality time series plot for a single
-    variable. It handles datetime axis formatting automatically and supports
-    both xarray DataArray and Dataset inputs.
+    Creates a clean, publication-ready time series plot with:
+    - LaTeX-formatted axis labels with proper units
+    - Horizontal datetime labels with many ticks
+    - Compact figure size suitable for papers
+    - High DPI output (300)
 
     Parameters
     ----------
@@ -104,31 +120,31 @@ def plot_timeseries(
     ax : Axes, optional
         Matplotlib axes to plot on. If None, creates new figure
     cfg : FvcomPlotConfig, optional
-        Plot configuration for styling. If None, uses sensible defaults
+        Plot configuration for styling
     title : str, optional
-        Plot title. If None, auto-generates from variable attributes
+        Plot title. If None, no title is shown
     ylabel : str, optional
-        Y-axis label. If None, uses variable long_name and units
+        Y-axis label. If None, auto-generates from variable metadata with LaTeX units
     xlabel : str
-        X-axis label (default: "Time")
+        X-axis label (default: "" - no label, datetime ticks are self-explanatory)
     color : str
-        Line color (default: "steelblue")
-    linewidth : float, optional
-        Line width. If None, uses cfg.linewidth_plot or 1.5
+        Line color (default: "#1f77b4" - matplotlib default blue)
+    linewidth : float
+        Line width (default: 1.0)
     alpha : float
         Line transparency (default: 1.0)
     minticks : int
-        Minimum number of x-axis ticks (default: 3)
+        Minimum number of x-axis ticks (default: 6)
     maxticks : int
-        Maximum number of x-axis ticks (default: 7)
-    rotation : int
-        X-axis label rotation in degrees (default: 30)
+        Maximum number of x-axis ticks (default: 12)
     grid : bool
         Whether to show grid (default: True)
+    use_latex : bool
+        Use LaTeX-formatted units in labels (default: True)
     output : str or Path, optional
-        Path to save figure. If None, figure is not saved
+        Path to save figure. Parent directories created automatically.
     dpi : int
-        DPI for saved figure (default: 150)
+        DPI for saved figure (default: 300)
     **kwargs
         Additional arguments passed to ax.plot()
 
@@ -142,20 +158,16 @@ def plot_timeseries(
     >>> import xarray as xr
     >>> from xfvcom.plot import plot_timeseries
     >>>
-    >>> # Load weather forcing file
+    >>> # Simple one-liner for publication plot
     >>> ds = xr.open_dataset("weather.nc")
+    >>> plot_timeseries(ds["air_temperature"].isel(node=0), output="temp.png")
     >>>
-    >>> # Plot air temperature at first node
-    >>> fig, ax = plot_timeseries(
+    >>> # Customize appearance
+    >>> plot_timeseries(
     ...     ds["air_temperature"].isel(node=0),
-    ...     title="Air Temperature at Node 0",
-    ... )
-    >>>
-    >>> # Plot from Dataset with variable name
-    >>> fig, ax = plot_timeseries(
-    ...     ds.isel(node=0),
-    ...     var_name="air_temperature",
-    ...     output="air_temp.png",
+    ...     title="Station A",
+    ...     color="red",
+    ...     output="temp_custom.png",
     ... )
     """
     # Handle Dataset vs DataArray input
@@ -172,23 +184,19 @@ def plot_timeseries(
         if var_name is None:
             var_name = da.name or "value"
 
-    # Create default config if not provided
+    # Create default config optimized for publication
     if cfg is None:
         cfg = FvcomPlotConfig(
-            figsize=(12, 5),
+            figsize=DEFAULT_FIGSIZE,
             fontsize={
-                "xticks": 11,
-                "yticks": 11,
-                "xlabel": 12,
-                "ylabel": 12,
-                "title": 14,
+                "xticks": DEFAULT_FONTSIZE,
+                "yticks": DEFAULT_FONTSIZE,
+                "xlabel": DEFAULT_FONTSIZE,
+                "ylabel": DEFAULT_FONTSIZE,
+                "title": DEFAULT_FONTSIZE + 2,
             },
-            linewidth={"plot": 1.5},
+            linewidth={"plot": linewidth},
         )
-
-    # Set linewidth
-    if linewidth is None:
-        linewidth = cfg.linewidth_plot
 
     # Create figure if needed
     if ax is None:
@@ -219,25 +227,21 @@ def plot_timeseries(
         **kwargs,
     )
 
-    # Apply smart time ticks
-    apply_smart_time_ticks(
-        ax, fig, minticks=minticks, maxticks=maxticks, rotation=rotation
-    )
+    # Apply smart time ticks (horizontal, many ticks)
+    apply_smart_time_ticks(ax, fig, minticks=minticks, maxticks=maxticks, rotation=0)
 
-    # Get labels from attributes
-    long_name = da.attrs.get("long_name", var_name)
-    units = da.attrs.get("units", "")
-
-    # Set labels
+    # Set y-axis label with LaTeX units from variable metadata
     if ylabel is None:
-        ylabel = f"{long_name} [{units}]" if units else long_name
+        ylabel = get_label(da, var_name, use_latex=use_latex)
     ax.set_ylabel(ylabel, fontsize=cfg.fontsize_ylabel)
-    ax.set_xlabel(xlabel, fontsize=cfg.fontsize_xlabel)
 
-    # Set title
-    if title is None:
-        title = long_name
-    ax.set_title(title, fontsize=cfg.fontsize_title)
+    # Set x-axis label (usually empty for datetime axes)
+    if xlabel:
+        ax.set_xlabel(xlabel, fontsize=cfg.fontsize_xlabel)
+
+    # Set title (optional)
+    if title is not None:
+        ax.set_title(title, fontsize=cfg.fontsize_title)
 
     # Grid
     if grid:
@@ -257,7 +261,7 @@ def plot_timeseries(
         output_path = Path(output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
-        print(f"Figure saved to: {output_path}")
+        print(f"Saved: {output_path}")
 
     return fig, ax
 
