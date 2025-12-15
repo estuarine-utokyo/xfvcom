@@ -61,6 +61,7 @@ def main(args: list[str] | None = None) -> int:
             "  xfvcom-check-met met_forcing.nc --no-bounds\n"
             "  xfvcom-check-met met_forcing.nc -o report.csv\n"
             "  xfvcom-check-met met_forcing.nc --bound 'air_temperature:-40:50'\n"
+            "  xfvcom-check-met met_forcing.nc --uniform\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -122,6 +123,11 @@ def main(args: list[str] | None = None) -> int:
         action="store_true",
         help="Disable progress bar",
     )
+    parser.add_argument(
+        "--uniform",
+        action="store_true",
+        help="Check spatial uniformity of each variable (skip anomaly checks)",
+    )
 
     parsed = parser.parse_args(args)
 
@@ -142,9 +148,23 @@ def main(args: list[str] | None = None) -> int:
                 print(f"Error: {e}", file=sys.stderr)
                 return 2
 
-    # Run validation
+    # Run validation or uniformity check
     try:
         validator = MetValidator(parsed.input)
+
+        if parsed.uniform:
+            # Uniformity check mode
+            uniformity_reports = validator.check_uniformity(
+                variables=parsed.var,
+                show_progress=not parsed.no_progress,
+            )
+            print(validator.uniformity_summary(uniformity_reports))
+
+            # Return 0 if all uniform, 1 if any non-uniform
+            non_uniform_count = sum(1 for r in uniformity_reports if not r.is_uniform)
+            return 0 if non_uniform_count == 0 else 1
+
+        # Normal anomaly validation mode
         reports = validator.validate(
             check_nan=not parsed.no_nan,
             check_inf=not parsed.no_inf,

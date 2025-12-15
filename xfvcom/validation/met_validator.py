@@ -65,6 +65,50 @@ class AnomalyRecord:
 
 
 @dataclass
+class NonUniformExample:
+    """Example of a non-uniform value at a specific location.
+
+    Parameters
+    ----------
+    index : int
+        1-based (Fortran) node or element index.
+    value : float
+        The value at this location.
+    """
+
+    index: int
+    value: float
+
+
+@dataclass
+class UniformityReport:
+    """Report of spatial uniformity check for a single variable.
+
+    Parameters
+    ----------
+    var_name : str
+        Name of the variable.
+    location_type : Literal["node", "element"]
+        Whether indices refer to nodes or elements.
+    is_uniform : bool
+        True if the variable is spatially uniform at all time steps.
+    examples : list[NonUniformExample]
+        Up to 3 examples of non-uniform values (only if is_uniform=False).
+    reference_value : float | None
+        The reference value used for comparison (first location's value).
+    first_nonuniform_time_idx : int | None
+        0-based time index where non-uniformity was first detected.
+    """
+
+    var_name: str
+    location_type: Literal["node", "element"]
+    is_uniform: bool
+    examples: list[NonUniformExample] = field(default_factory=list)
+    reference_value: float | None = None
+    first_nonuniform_time_idx: int | None = None
+
+
+@dataclass
 class AnomalyReport:
     """Report of anomalous values for a single variable.
 
@@ -603,3 +647,225 @@ class MetValidator:
                     }
                 )
         return pd.DataFrame(rows)
+
+    def check_uniformity(
+        self,
+        variables: list[str] | None = None,
+        rtol: float = 1e-9,
+        atol: float = 1e-12,
+        show_progress: bool = False,
+    ) -> list[UniformityReport]:
+        """Check spatial uniformity of each variable.
+
+        For each variable and each time step, check if all spatial values
+        are uniform (identical within tolerance). This is useful to verify
+        that spatially uniform forcing data is actually uniform and won't
+        cause interpolation failures.
+
+        Parameters
+        ----------
+        variables : list[str] | None
+            Specific variables to check (None = all data variables).
+        rtol : float
+            Relative tolerance for uniformity check (default: 1e-9).
+        atol : float
+            Absolute tolerance for uniformity check (default: 1e-12).
+        show_progress : bool
+            Display progress bar for each variable.
+
+        Returns
+        -------
+        list[UniformityReport]
+            Uniformity reports for each checked variable.
+        """
+        vars_to_check = variables if variables else self.data_vars
+        reports: list[UniformityReport] = []
+
+        with nc.Dataset(self.nc_path, "r") as ds:
+            # Create iterator with optional progress bar
+            var_iter: list[str] | tqdm[str]
+            if show_progress:
+                var_iter = tqdm(
+                    vars_to_check,
+                    desc="Checking uniformity",
+                    unit="var",
+                    ncols=80,
+                )
+            else:
+                var_iter = vars_to_check
+
+            for var_name in var_iter:
+                if var_name not in ds.variables:
+                    continue
+
+                # Update progress bar description with current variable
+                if show_progress and isinstance(var_iter, tqdm):
+                    var_iter.set_postfix_str(var_name)
+
+                data: NDArray[np.float64] = np.asarray(ds.variables[var_name][:])
+                report = self._check_variable_uniformity(var_name, data, rtol, atol)
+                reports.append(report)
+
+        return reports
+
+    def _check_variable_uniformity(
+        self,
+        var_name: str,
+        data: NDArray[np.float64],
+        rtol: float,
+        atol: float,
+    ) -> UniformityReport:
+        """Check spatial uniformity for a single variable.
+
+        Parameters
+        ----------
+        var_name : str
+            Variable name.
+        data : NDArray
+            Data array with shape (time, node/element).
+        rtol : float
+            Relative tolerance.
+        atol : float
+            Absolute tolerance.
+
+        Returns
+        -------
+        UniformityReport
+            Uniformity report for this variable.
+        """
+        location_type = self._get_location_type(var_name)
+
+        # Check each time step for spatial uniformity
+        # Data shape is (time, space)
+        for t_idx in range(data.shape[0]):
+            time_slice = data[t_idx, :]
+
+            # Skip if all NaN
+            valid_mask = ~np.isnan(time_slice) & ~np.isinf(time_slice)
+            valid_values = time_slice[valid_mask]
+
+            if len(valid_values) == 0:
+                continue
+
+            # Use first valid value as reference
+            ref_value = valid_values[0]
+
+            # Check if all values are close to reference
+            if not np.allclose(valid_values, ref_value, rtol=rtol, atol=atol):
+                # Non-uniform: collect up to 3 examples of different values
+                examples: list[NonUniformExample] = []
+                seen_values: set[float] = set()
+
+                # Always include the reference value as first example
+                ref_idx = int(np.where(valid_mask)[0][0])
+                examples.append(
+                    NonUniformExample(index=ref_idx + 1, value=float(ref_value))
+                )
+                seen_values.add(float(ref_value))
+
+                # Find other distinct values
+                for loc_idx in range(len(time_slice)):
+                    if not valid_mask[loc_idx]:
+                        continue
+                    val = float(time_slice[loc_idx])
+                    # Check if this value is different from seen values
+                    is_new = True
+                    for seen_val in seen_values:
+                        if np.isclose(val, seen_val, rtol=rtol, atol=atol):
+                            is_new = False
+                            break
+                    if is_new:
+                        examples.append(NonUniformExample(index=loc_idx + 1, value=val))
+                        seen_values.add(val)
+                        if len(examples) >= 3:
+                            break
+
+                return UniformityReport(
+                    var_name=var_name,
+                    location_type=location_type,
+                    is_uniform=False,
+                    examples=examples,
+                    reference_value=float(ref_value),
+                    first_nonuniform_time_idx=t_idx,
+                )
+
+        # All time steps are uniform
+        # Get reference value from first time step
+        first_valid = data[~np.isnan(data) & ~np.isinf(data)]
+        ref_val = float(first_valid[0]) if len(first_valid) > 0 else None
+
+        return UniformityReport(
+            var_name=var_name,
+            location_type=location_type,
+            is_uniform=True,
+            examples=[],
+            reference_value=ref_val,
+            first_nonuniform_time_idx=None,
+        )
+
+    def uniformity_summary(self, reports: list[UniformityReport]) -> str:
+        """Generate human-readable uniformity summary.
+
+        Parameters
+        ----------
+        reports : list[UniformityReport]
+            Uniformity reports from check_uniformity().
+
+        Returns
+        -------
+        str
+            Formatted summary string.
+        """
+        lines: list[str] = []
+        lines.append("=" * 60)
+        lines.append("Spatial Uniformity Check")
+        lines.append("=" * 60)
+        lines.append(f"File: {self.nc_path.name}")
+        lines.append(
+            f"Nodes: {self.n_nodes}, Elements: {self.n_elements}, "
+            f"Time steps: {self.n_times}"
+        )
+        lines.append("")
+
+        uniform_vars: list[str] = []
+        non_uniform_vars: list[str] = []
+
+        for report in reports:
+            loc_label = "node" if report.location_type == "node" else "element"
+
+            if report.is_uniform:
+                val_str = (
+                    f"{report.reference_value:.6g}"
+                    if report.reference_value is not None
+                    else "N/A"
+                )
+                lines.append(f"{report.var_name}: Uniform (value={val_str})")
+                uniform_vars.append(report.var_name)
+            else:
+                lines.append(f"{report.var_name}: Non-Uniform ({loc_label}-based)")
+                # Show examples
+                if report.first_nonuniform_time_idx is not None:
+                    lines.append(
+                        f"  First detected at time index: "
+                        f"{report.first_nonuniform_time_idx}"
+                    )
+                lines.append(f"  Example values (1-based {loc_label} index):")
+                for ex in report.examples:
+                    lines.append(
+                        f"    {loc_label.capitalize()} {ex.index}: {ex.value:.6g}"
+                    )
+                non_uniform_vars.append(report.var_name)
+
+            lines.append("")
+
+        # Summary
+        lines.append("=" * 60)
+        lines.append("Summary")
+        lines.append("=" * 60)
+        lines.append(f"Uniform variables: {len(uniform_vars)}")
+        lines.append(f"Non-uniform variables: {len(non_uniform_vars)}")
+
+        if non_uniform_vars:
+            lines.append(f"Non-uniform: {', '.join(non_uniform_vars)}")
+
+        return "\n".join(lines)

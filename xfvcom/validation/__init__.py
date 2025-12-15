@@ -7,12 +7,16 @@ from .met_validator import (
     AnomalyRecord,
     AnomalyReport,
     MetValidator,
+    NonUniformExample,
     PhysicalBounds,
+    UniformityReport,
 )
 
 __all__ = [
     "AnomalyRecord",
     "AnomalyReport",
     "MetValidator",
+    "NonUniformExample",
     "PhysicalBounds",
+    "UniformityReport",
 ]

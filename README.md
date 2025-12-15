@@ -36,6 +36,7 @@ conda activate xfvcom
 xfvcom-check-met met_forcing.nc                    # Check for NaN/Inf/out-of-bounds
 xfvcom-check-met met_forcing.nc -o anomalies.csv   # Export to CSV
 xfvcom-check-met met_forcing.nc --var uwind_speed  # Check specific variable
+xfvcom-check-met met_forcing.nc --uniform          # Check spatial uniformity
 ```
 
 ### Forcing File Generation
