@@ -33,9 +33,9 @@ conda activate xfvcom
 ### Validation
 
 ```bash
-xf-check-met met_forcing.nc                    # Check for NaN/Inf/out-of-bounds
-xf-check-met met_forcing.nc -o anomalies.csv   # Export to CSV
-xf-check-met met_forcing.nc --var uwind_speed  # Check specific variable
+xfvcom-check-met met_forcing.nc                    # Check for NaN/Inf/out-of-bounds
+xfvcom-check-met met_forcing.nc -o anomalies.csv   # Export to CSV
+xfvcom-check-met met_forcing.nc --var uwind_speed  # Check specific variable
 ```
 
 ### Forcing File Generation

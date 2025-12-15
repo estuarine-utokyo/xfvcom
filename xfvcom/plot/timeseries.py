@@ -364,9 +364,7 @@ def plot_timeseries_multi(
     # Create figure with subplots
     fig_width = cfg.figsize[0] if cfg.figsize else 8
     fig_height = panel_height * n_panels
-    fig, axes = plt.subplots(
-        n_panels, 1, figsize=(fig_width, fig_height), sharex=True
-    )
+    fig, axes = plt.subplots(n_panels, 1, figsize=(fig_width, fig_height), sharex=True)
 
     # Handle single panel case
     if n_panels == 1:

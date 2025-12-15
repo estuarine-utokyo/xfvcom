@@ -53,14 +53,14 @@ def main(args: list[str] | None = None) -> int:
         Exit code (0 = clean, 1 = anomalies found, 2 = error).
     """
     parser = argparse.ArgumentParser(
-        prog="xf-check-met",
+        prog="xfvcom-check-met",
         description="Check meteorological forcing NetCDF for abnormal values.",
         epilog=(
             "Examples:\n"
-            "  xf-check-met met_forcing.nc\n"
-            "  xf-check-met met_forcing.nc --no-bounds\n"
-            "  xf-check-met met_forcing.nc -o report.csv\n"
-            "  xf-check-met met_forcing.nc --bound 'air_temperature:-40:50'\n"
+            "  xfvcom-check-met met_forcing.nc\n"
+            "  xfvcom-check-met met_forcing.nc --no-bounds\n"
+            "  xfvcom-check-met met_forcing.nc -o report.csv\n"
+            "  xfvcom-check-met met_forcing.nc --bound 'air_temperature:-40:50'\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

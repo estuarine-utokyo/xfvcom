@@ -125,8 +125,8 @@ time,flux
 Check forcing files for errors:
 
 ```bash
-xf-check-met met_forcing.nc
-xf-check-met met_forcing.nc -o anomalies.csv
+xfvcom-check-met met_forcing.nc
+xfvcom-check-met met_forcing.nc -o anomalies.csv
 ```
 
 [Back to README](../README.md)
