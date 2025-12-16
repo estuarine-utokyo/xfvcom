@@ -400,25 +400,16 @@ def get_station_coordinates(station: str) -> dict[str, float]:
 
 def get_cache_path() -> Path:
     """
-    Get the default cache path for correlations.
+    Get the path to the correlation cache file.
 
     Returns
     -------
     Path
-        Path to the correlation cache file
+        Path to xfvcom/data/gwo_correlations_cache.yaml
     """
-    import importlib.resources
+    from xfvcom.data import DATA_DIR
 
-    try:
-        # Python 3.9+
-        data_dir = importlib.resources.files("xfvcom.data")
-        return Path(str(data_dir)) / "gwo_correlations_cache.yaml"
-    except (TypeError, AttributeError):
-        # Fallback for older Python
-        import xfvcom
-
-        pkg_dir = Path(xfvcom.__file__).parent
-        return pkg_dir / "data" / "gwo_correlations_cache.yaml"
+    return DATA_DIR / "gwo_correlations_cache.yaml"
 
 
 def get_cached_correlations(

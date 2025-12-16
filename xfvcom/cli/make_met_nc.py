@@ -158,7 +158,7 @@ Examples:
     gap_group.add_argument(
         "--no-correlation-cache",
         action="store_true",
-        help="Disable auto-caching (use raw fallback data without conversion)",
+        help="Disable auto-caching of correlations (recompute every time)",
     )
 
     # Constant parameters (any omitted key falls back to default)
