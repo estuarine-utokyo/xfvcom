@@ -6,8 +6,8 @@
 
 | Generator | CLI Command | Output |
 |-----------|-------------|--------|
-| River | `xfvcom-make-river-nc` | River discharge, temperature, salinity |
 | Meteorological | `xfvcom-make-met-nc` | Wind, radiation, pressure, humidity |
+| River | `xfvcom-make-river-nc` | River discharge, temperature, salinity |
 | Groundwater | `xfvcom-make-groundwater-nc` | Groundwater flux, temperature, salinity, dye |
 
 ---
