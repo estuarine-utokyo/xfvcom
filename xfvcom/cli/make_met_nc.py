@@ -19,16 +19,23 @@ def main() -> int:
         description="Generate FVCOM meteorological forcing NetCDF-4.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # Constant values only
-  xfvcom-make-met-nc grid.dat --start 2020 --utm-zone 54
+Example bash script (edit variables as needed):
 
-  # GWO-AMD with gap filling (typical usage)
-  xfvcom-make-met-nc grid.dat --start 2020 --utm-zone 54 \\
-      --gwo-dir /path/to/GWO/Hourly \\
-      --station-map "slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba" \\
-      --fill-gaps --fallback-stations "Chiba:Tokyo,Yokohama,Tateyama" \\
-      --solar-model empirical --wind-factor 1.8 -o met_2020.nc
+  #!/bin/bash
+  GRID=grid.dat
+  YEAR=2020
+  GWO_DIR=/path/to/GWO/Hourly
+  STATION_MAP="slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba"
+  WIND_FACTOR=1.8
+  UTM_ZONE=54
+  OUTPUT=met_forcing.nc
+
+  xfvcom-make-met-nc "$GRID" --start "$YEAR" \\
+      --gwo-dir "$GWO_DIR" \\
+      --station-map "$STATION_MAP" \\
+      --wind-factor "$WIND_FACTOR" \\
+      --utm-zone "$UTM_ZONE" \\
+      -o "$OUTPUT"
 """,
     )
     p.add_argument("grid", type=Path, help="FVCOM grid file (.dat or .nc)")
