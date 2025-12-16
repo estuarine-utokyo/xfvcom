@@ -672,9 +672,9 @@ def parse_period(
     ----------
     start_str : str
         Start specification:
-        - Year only ("2020"): 2020-01-01T00:00 to 2021-01-01T00:00
-        - Date only ("2020-06-15"): 2020-06-15T00:00 to 2020-06-16T00:00
-        - Full datetime: Exact as specified
+        - Year only ("2020"): END optional, defaults to full year
+        - Date only ("2020-06-15"): END required
+        - Full datetime: END required
     end_str : str, optional
         End specification (same format as start_str):
         - Year only: end_year+1-01-01T00:00
@@ -699,7 +699,7 @@ def parse_period(
         if end_str and len(end_str) == 10:
             end = datetime.strptime(end_str, "%Y-%m-%d") + timedelta(days=1)
         else:
-            end = start + timedelta(days=1)
+            raise ValueError("End date required for date-only start (e.g., --end 2020-01-07)")
     else:  # Full datetime
         start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
         if end_str:
