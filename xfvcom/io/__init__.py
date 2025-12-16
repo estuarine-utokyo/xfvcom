@@ -45,3 +45,31 @@ __all__.append("GroundwaterNetCDFGenerator")
 __all__.append("FvcomInputLoader")
 __all__.append("NamelistParser")
 __all__.append("parse_member_namelist")
+
+# ---------------------------------------------------------------------
+# GWO-AMD meteorological data support
+# ---------------------------------------------------------------------
+from .gwo_correlations import (  # noqa: F401
+    StationCorrelations,
+    get_cache_path,
+    get_cached_correlations,
+    get_station_coordinates,
+    parse_fallback_stations,
+)
+from .gwo_reader import GWOReader, parse_period, parse_station_map  # noqa: F401
+from .solar_estimation import SolarEstimator, estimate_solar_radiation  # noqa: F401
+
+__all__.extend(
+    [
+        "GWOReader",
+        "parse_period",
+        "parse_station_map",
+        "StationCorrelations",
+        "get_cache_path",
+        "get_cached_correlations",
+        "get_station_coordinates",
+        "parse_fallback_stations",
+        "SolarEstimator",
+        "estimate_solar_radiation",
+    ]
+)
