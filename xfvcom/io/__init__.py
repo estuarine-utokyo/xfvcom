@@ -60,3 +60,40 @@ __all__.append("GWOReader")
 __all__.append("GWOForcingSource")
 __all__.append("parse_station_map")
 __all__.append("parse_period")
+
+# ---------------------------------------------------------------------
+# GWO-AMD gap filling and correlations
+# ---------------------------------------------------------------------
+from .gwo_correlations import (  # noqa: F401
+    StationCorrelations,
+    get_station_coordinates,
+    parse_fallback_stations,
+)
+from .gwo_gap_filler import (  # noqa: F401
+    GapFiller,
+    GapFillResult,
+    MissingValueInfo,
+    print_gap_fill_report,
+    print_missing_value_report,
+)
+
+__all__.append("StationCorrelations")
+__all__.append("parse_fallback_stations")
+__all__.append("get_station_coordinates")
+__all__.append("GapFiller")
+__all__.append("GapFillResult")
+__all__.append("MissingValueInfo")
+__all__.append("print_gap_fill_report")
+__all__.append("print_missing_value_report")
+
+# Solar estimation (optional, requires pvlib)
+try:
+    from .solar_estimation import (  # noqa: F401
+        SolarEstimator,
+        estimate_solar_radiation,
+    )
+
+    __all__.append("SolarEstimator")
+    __all__.append("estimate_solar_radiation")
+except ImportError:
+    pass  # pvlib not installed

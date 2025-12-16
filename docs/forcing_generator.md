@@ -152,6 +152,137 @@ This convention means that a time value of `2020-01-01 09:00` in the NetCDF file
 
 When using CSV time series (`--ts` option), the input timezone is controlled by `--data-tz` (default: `Asia/Tokyo`) and data is converted to UTC. For GWO-AMD mode, this conversion is skipped to maintain compatibility with existing FVCOM setups.
 
+### Gap Filling
+
+GWO-AMD data often contains missing values due to equipment failures or maintenance. The `--fill-gaps` option enables comprehensive gap filling using a 4-step process:
+
+```bash
+xfvcom-make-met-nc grid.dat --start 2020 \
+  --gwo-dir /path/to/GWO/Hourly \
+  --station-map "*:Chiba" \
+  --fill-gaps \
+  --fallback-stations "Chiba:Tokyo,Yokohama,Tateyama" \
+  --correlation-file gwo_correlations.yaml \
+  --solar-model empirical \
+  -o met_forcing.nc
+```
+
+#### Gap Filling Steps
+
+| Step | Method | Description |
+|------|--------|-------------|
+| 1 | Temporal Interpolation | Linear interpolation for gaps ≤ max_gap_hours (default: 6) |
+| 2 | Boundary Interpolation | Uses adjacent year data for start/end gaps |
+| 3 | Fallback Station | Uses correlated station data with linear conversion |
+| 4 | Solar Estimation | pvlib-based estimation for solar radiation (slht only) |
+
+#### Gap Filling Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--fill-gaps` | Enable 4-step gap filling | disabled |
+| `--fallback-stations` | Station fallback chain (e.g., "Chiba:Tokyo,Yokohama") | none |
+| `--correlation-file` | YAML file with pre-computed correlations | none |
+| `--solar-model` | Solar estimation model: `empirical`, `pvlib-kasten`, `pvlib-larson` | `empirical` |
+| `--no-extend-boundary` | Disable boundary interpolation (step 2) | enabled |
+| `--strict` | Fail if any gaps remain after filling | disabled |
+
+#### Computing Station Correlations
+
+Before using fallback station gap filling, compute correlations between stations:
+
+```bash
+xfvcom-calc-gwo-corr --gwo-dir /path/to/GWO/Hourly \
+  --stations Tokyo,Chiba,Yokohama,Tateyama \
+  --years 2015-2020 \
+  --include-solar-model \
+  -o gwo_correlations.yaml
+```
+
+This generates a YAML file containing:
+- Linear regression parameters (slope, intercept, R², RMSE) for each station pair and variable
+- Solar model calibration parameters (if `--include-solar-model` is specified)
+
+#### Solar Model Comparison
+
+Compare different solar estimation models:
+
+```bash
+xfvcom-calc-gwo-corr --gwo-dir /path/to/GWO/Hourly \
+  --stations Tokyo \
+  --compare-solar-models \
+  --train-years 2015-2019 \
+  --test-year 2020 \
+  -o gwo_correlations.yaml
+```
+
+Output includes R², RMSE, MAE, and bias for each model.
+
+#### Gap Fill Report
+
+When `--fill-gaps` is enabled, a detailed report is printed:
+
+```
+================================================================================
+Gap Filling Report
+================================================================================
+
+[slht] Chiba - 24 gaps detected
+  +-- Step 1 (Temporal): 12 filled
+  +-- Step 2 (Boundary): 4 filled
+  +-- Step 3 (Fallback Tokyo): 6 filled
+  +-- Step 4 (Solar model): 2 filled
+  `-- Remaining: 0
+
+================================================================================
+Fill Summary
+================================================================================
+Variable     Total    Step1    Step2    Step3    Step4   Remain     Rate
+--------------------------------------------------------------------------------
+slht            24        12        4        6        2        0   100.0%
+--------------------------------------------------------------------------------
+TOTAL           24        12        4        6        2        0   100.0%
+
+[OK] All gaps filled successfully.
+```
+
+### Python API for Gap Filling
+
+```python
+from xfvcom.io import (
+    GWOReader,
+    GapFiller,
+    StationCorrelations,
+    SolarEstimator,
+)
+
+# Load correlation data
+correlations = StationCorrelations.from_yaml("gwo_correlations.yaml")
+
+# Create gap filler
+reader = GWOReader("/path/to/GWO/Hourly")
+filler = GapFiller(
+    gwo_reader=reader,
+    fallback_stations={"Chiba": ["Tokyo", "Yokohama", "Tateyama"]},
+    correlations=correlations,
+    max_gap_hours=6,
+    solar_model="empirical",
+)
+
+# Fill gaps
+df = reader.load_station_year("Chiba", 2020)
+df_filled, results = filler.fill_all(
+    df,
+    station="Chiba",
+    start=datetime(2020, 1, 1),
+    end=datetime(2020, 12, 31, 23),
+)
+
+# Print report
+from xfvcom.io import print_gap_fill_report
+print_gap_fill_report(results)
+```
+
 ---
 
 ## Groundwater Forcing

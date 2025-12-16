@@ -22,13 +22,14 @@ print_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
-# Check if conda is installed
-if command -v conda &> /dev/null; then
-    CONDA_CMD="conda"
-    print_status "Found conda installation"
+# Check if mamba is installed (preferred over conda for supercomputer compatibility)
+if command -v mamba &> /dev/null; then
+    MAMBA_CMD="mamba"
+    print_status "Found mamba installation"
 else
-    print_error "Conda is not installed. Please install Miniforge or Anaconda first."
+    print_error "Mamba is not installed. Please install Miniforge first."
     echo "Visit: https://github.com/conda-forge/miniforge for installation instructions"
+    echo "Note: Use mamba instead of conda to avoid conflicts with Intel oneAPI Python."
     exit 1
 fi
 
@@ -72,19 +73,18 @@ done
 print_status "Setting up xfvcom environment: $ENV_NAME"
 
 # Check if environment already exists
-if $CONDA_CMD env list | grep -q "^$ENV_NAME "; then
+if $MAMBA_CMD env list | grep -q "^$ENV_NAME "; then
     if [ "$FORCE_RECREATE" = true ]; then
         print_warning "Removing existing environment: $ENV_NAME"
-        $CONDA_CMD env remove -n $ENV_NAME -y
+        $MAMBA_CMD env remove -n $ENV_NAME -y
     else
         print_error "Environment '$ENV_NAME' already exists. Use --force to recreate."
         exit 1
     fi
 fi
 
-# Create conda environment from environment.yml using mamba (faster solver)
-# mamba is included with Miniforge and handles channels correctly
-print_status "Creating conda environment from environment.yml..."
+# Create environment from environment.yml using mamba
+print_status "Creating mamba environment from environment.yml..."
 if [ "$INSTALL_DEV" = true ]; then
     mamba env create -f environment.yml -n $ENV_NAME
 else
@@ -96,7 +96,7 @@ else
 fi
 
 # Initialize conda for the current shell if needed
-eval "$($CONDA_CMD shell.bash hook)"
+eval "$(conda shell.bash hook)"
 
 # Activate the environment
 print_status "Activating environment: $ENV_NAME"

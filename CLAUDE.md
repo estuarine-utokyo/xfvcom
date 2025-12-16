@@ -12,28 +12,34 @@ xfvcom is a Python package for preprocessing and postprocessing data from the Fi
 
 ### Quick Start
 ```bash
-# Activate the existing fvcom environment
-conda activate fvcom
+# Activate the existing xfvcom environment
+conda activate xfvcom
 
 # Verify environment is active
-python --version  # Should show Python 3.12.x
+python --version  # Should show Python 3.13.x
 python -c "import xfvcom; print(f'xfvcom {xfvcom.__version__}')"
 ```
 
 ### Available Environments
-- `fvcom` - Main development environment with xfvcom installed in editable mode
-- `xfvcom-docs` - Documentation building environment
+- `xfvcom` - Main development environment with xfvcom installed in editable mode
 - Other project-specific environments: `era_dl`, `moewq`, `pylag`, `river_dl`
+
+**Note**: Use `mamba` for installation to avoid conflicts with Intel oneAPI Python on supercomputers. Activation works with both `conda activate` and `mamba activate`.
 
 ## Essential Commands
 
 ### Development Setup (if creating new environment)
 ```bash
-# Create and activate conda environment
-conda create -n xfvcom python=3.12 -c conda-forge \
+# Create environment from environment.yml using mamba
+mamba env create -f environment.yml
+
+conda activate xfvcom
+
+# Or manually create environment
+mamba create -n xfvcom python=3.13 -c conda-forge \
   numpy xarray pandas matplotlib cartopy pyproj scipy scikit-learn \
   imageio moviepy tqdm pytest mypy black isort jinja2 pyyaml types-pyyaml \
-  netcdf4
+  netcdf4 pvlib
 
 conda activate xfvcom
 
@@ -125,6 +131,28 @@ make html
   - Wind conversion: Direction + speed → u,v components
   - Long-wave estimation: Brutsaert formula from T, RH, cloud
 
+- **GWO Gap Filling** (`io/gwo_gap_filler.py`): Comprehensive gap filling
+  - `GapFiller`: 4-step gap filling process
+    1. Temporal interpolation (short gaps ≤ max_gap_hours)
+    2. Boundary interpolation (using adjacent year data)
+    3. Fallback station interpolation (with correlation conversion)
+    4. Solar radiation estimation (pvlib + cloud model)
+  - `GapFillResult`, `MissingValueInfo`: Result dataclasses
+  - `print_gap_fill_report()`, `print_missing_value_report()`: Reporting
+
+- **Station Correlations** (`io/gwo_correlations.py`): Station correlation management
+  - `StationCorrelations`: Compute/load correlation parameters
+  - `CorrelationParams`: Linear regression parameters (slope, intercept, R², RMSE)
+  - `get_station_coordinates()`: Station coordinate lookup
+  - Physical constraint definitions for validation
+
+- **Solar Estimation** (`io/solar_estimation.py`): Solar radiation estimation
+  - `SolarEstimator`: Clear-sky model with cloud attenuation
+  - Models: `empirical`, `pvlib-kasten`, `pvlib-larson`
+  - `build_empirical_model()`: Calibrate from GWO observations
+  - `compare_models()`: Model validation and comparison
+  - Requires `pvlib` package
+
 #### 2. **Analysis** (xfvcom/analysis.py)
 - **FvcomAnalyzer**: Physics calculations
   - KDTree nearest neighbor search
@@ -206,9 +234,11 @@ make html
 Command-line interfaces for common tasks:
 - `xfvcom-make-river-nml`: River namelist generation
 - `xfvcom-make-river-nc`: River forcing NetCDF
-- `xfvcom-make-met-nc`: Meteorological forcing
+- `xfvcom-make-met-nc`: Meteorological forcing (with gap filling support)
 - `xfvcom-make-groundwater-nc`: Groundwater forcing
 - `xfvcom-dye-ts`: Dye time series extraction and aggregation
+- `xfvcom-check-met`: Meteorological forcing validation
+- `xfvcom-calc-gwo-corr`: Compute station correlations for gap filling
 
 #### 8. **Utilities** (xfvcom/utils/)
 - **Time Series** (`utils/timeseries_utils.py`):
@@ -236,6 +266,8 @@ Grid File → FvcomInputLoader → Area Calculations
 CSV/Constants → Force Generators → FVCOM Input Files (.nc, .nml)
 
 GWO CSV Files → GWOReader → GWOForcingSource → MetNetCDFGenerator → met.nc
+                    ↓
+              GapFiller → StationCorrelations + SolarEstimator → Gap-filled data
 ```
 
 ### Key Dependencies
@@ -249,6 +281,7 @@ GWO CSV Files → GWOReader → GWOForcingSource → MetNetCDFGenerator → met.
 - **scikit-learn**: Machine learning utilities
 - **netCDF4**: Low-level NetCDF I/O (for FVCOM compatibility)
 - **imageio/moviepy**: Animation creation
+- **pvlib**: Solar radiation estimation (clear-sky models, solar position)
 - **plotly** (optional): Interactive visualizations
 
 ---

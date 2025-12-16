@@ -1,5 +1,63 @@
 # Documentation Updates
 
+## December 2024 - GWO-AMD Gap Filling
+
+### Summary
+
+Added comprehensive gap filling support for GWO-AMD meteorological data, including station correlations, solar radiation estimation, and detailed reporting.
+
+### New Features
+
+1. **Gap Filling Module** (`xfvcom/io/gwo_gap_filler.py`)
+   - `GapFiller`: 4-step gap filling process
+     - Step 1: Temporal interpolation (short gaps ≤ max_gap_hours)
+     - Step 2: Boundary interpolation (using adjacent year data)
+     - Step 3: Fallback station interpolation (with correlation conversion)
+     - Step 4: Solar radiation estimation (pvlib + cloud model)
+   - `GapFillResult`, `MissingValueInfo`: Result dataclasses
+   - `print_gap_fill_report()`, `print_missing_value_report()`: Detailed reporting
+
+2. **Station Correlations** (`xfvcom/io/gwo_correlations.py`)
+   - `StationCorrelations`: Compute/load correlation parameters from YAML
+   - `CorrelationParams`: Linear regression parameters (slope, intercept, R², RMSE)
+   - `get_station_coordinates()`: Station coordinate lookup for Tokyo Bay stations
+   - Physical constraint definitions for validation
+
+3. **Solar Estimation** (`xfvcom/io/solar_estimation.py`)
+   - `SolarEstimator`: Clear-sky model with cloud attenuation (requires pvlib)
+   - Models: `empirical`, `pvlib-kasten`, `pvlib-larson`
+   - `build_empirical_model()`: Calibrate from GWO observations
+   - `compare_models()`: Model validation and comparison
+
+4. **CLI Updates** (`xfvcom-make-met-nc`)
+   - `--fill-gaps`: Enable 4-step gap filling
+   - `--fallback-stations`: Station fallback chain (e.g., "Chiba:Tokyo,Yokohama")
+   - `--correlation-file`: Pre-computed correlation YAML file
+   - `--solar-model`: Solar estimation model selection
+   - `--no-extend-boundary`: Disable boundary interpolation
+   - `--strict`: Fail if any gaps remain
+
+5. **New CLI Tool** (`xfvcom-calc-gwo-corr`)
+   - Compute correlations between GWO weather stations
+   - Build and compare solar estimation models
+   - Output to YAML for use with gap filling
+
+### Bug Fixes
+
+- Removed incorrect `fillna(0.0)` for solar radiation (slht) and precipitation (kous)
+- These variables should retain NaN for missing values, not be zero-filled
+
+### Files Updated
+
+- `docs/forcing_generator.md` - Added gap filling section with examples
+- `README.md` - Added new CLI commands and API classes
+- `CLAUDE.md` - Added new modules to architecture, updated data flow diagram
+- `pyproject.toml` - Added `pvlib>=0.10.0` dependency, new CLI script
+- `environment.yml` - Added pvlib to conda dependencies
+- `xfvcom/io/__init__.py` - Added exports for gap filling classes
+
+---
+
 ## December 2024 - GWO-AMD Meteorological Forcing
 
 ### Summary

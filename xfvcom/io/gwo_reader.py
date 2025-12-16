@@ -263,6 +263,7 @@ class GWOReader:
         df: pd.DataFrame,
         *,
         max_gap_hours: int = 6,
+        fill_gaps: bool = True,
     ) -> dict[str, pd.Series]:
         """
         Convert GWO raw values to physical units.
@@ -273,6 +274,9 @@ class GWOReader:
             DataFrame with GWO columns
         max_gap_hours : int
             Maximum gap to interpolate
+        fill_gaps : bool
+            If True, apply temporal interpolation to fill short gaps.
+            If False, leave NaN values for gap filler to handle.
 
         Returns
         -------
@@ -289,48 +293,56 @@ class GWOReader:
         """
         result = {}
 
+        def maybe_interp(series: pd.Series) -> pd.Series:
+            """Apply interpolation if fill_gaps is True."""
+            if fill_gaps:
+                return self.interpolate_gaps(series, max_gap_hours)
+            return series
+
         # Sea-level pressure: 0.1 hPa -> hPa
         shpa = self.apply_rmk_mask(df, "shpa")
-        result["shpa"] = self.interpolate_gaps(shpa * 0.1, max_gap_hours)
+        result["shpa"] = maybe_interp(shpa * 0.1)
 
         # Air temperature: 0.1°C -> °C
         kion = self.apply_rmk_mask(df, "kion")
-        result["kion"] = self.interpolate_gaps(kion * 0.1, max_gap_hours)
+        result["kion"] = maybe_interp(kion * 0.1)
 
         # Relative humidity: keep as % (FVCOM expects %)
         rhum = self.apply_rmk_mask(df, "rhum")
-        result["rhum"] = self.interpolate_gaps(rhum, max_gap_hours)
+        result["rhum"] = maybe_interp(rhum)
 
         # Wind direction: code 0-16 -> angle
         # 0=calm/undefined, 1=NNE, 2=NE, ..., 8=S, ..., 16=N
         # Formula: angle = (-90.0 - muki * 22.5) % 360.0
         muki = self.apply_rmk_mask(df, "muki")
         muki_angle = (-90.0 - muki * 22.5) % 360.0
-        result["muki"] = self.interpolate_gaps(muki_angle, max_gap_hours)
+        result["muki"] = maybe_interp(muki_angle)
 
         # Wind speed: 0.1 m/s -> m/s
         sped = self.apply_rmk_mask(df, "sped")
-        result["sped"] = self.interpolate_gaps(sped * 0.1, max_gap_hours)
+        result["sped"] = maybe_interp(sped * 0.1)
 
         # Cloud cover: 0-10 -> 0-1 (3-hourly in GWO, needs interpolation)
         clod = self.apply_rmk_mask(df, "clod")
-        result["clod"] = self.interpolate_gaps(clod / 10.0, max_gap_hours)
+        result["clod"] = maybe_interp(clod / 10.0)
 
         # Short-wave radiation: 0.01 MJ/m²/h -> W/m²
         # 0.01 MJ/m²/h = 0.01 * 1e6 J / 3600 s = 2.7778 W/m²
         slht = self.apply_rmk_mask(df, "slht", is_solar=True)
-        # Solar radiation: nighttime (RMK=2) should be 0, already masked
         slht_wm2: pd.Series = slht * 0.01 * 1e6 / 3600.0  # type: ignore[assignment]
-        # Fill nighttime NaNs with 0 after masking
-        slht_wm2 = slht_wm2.fillna(0.0)
+        # DO NOT use fillna(0.0) - let gap filler handle daytime gaps
+        # Only apply interpolation if fill_gaps is True
+        if fill_gaps:
+            slht_wm2 = self.interpolate_gaps(slht_wm2, max_gap_hours)
         result["slht"] = slht_wm2.clip(lower=0.0)
 
         # Precipitation: 0.1 mm/h -> m/s
         # 0.1 mm/h = 0.0001 m / 3600 s = 2.778e-8 m/s
         kous = self.apply_rmk_mask(df, "kous")
         kous_ms: pd.Series = kous * 0.1 * 0.001 / 3600.0  # type: ignore[assignment]
-        # Fill missing precipitation with 0
-        kous_ms = kous_ms.fillna(0.0)
+        # Use interpolation instead of fillna(0.0)
+        if fill_gaps:
+            kous_ms = self.interpolate_gaps(kous_ms, max_gap_hours)
         result["kous"] = kous_ms.clip(lower=0.0)
 
         return result

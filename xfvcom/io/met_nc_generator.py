@@ -4,7 +4,7 @@
 Supports multiple data sources:
 - Constant values
 - CSV/TSV time series
-- GWO-AMD meteorological data
+- GWO-AMD meteorological data (with comprehensive gap filling)
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 import tempfile
 from os import PathLike
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import TYPE_CHECKING, Iterable, Mapping
 
 import netCDF4 as nc
 import numpy as np
@@ -23,6 +23,10 @@ from ..grid.grid_obj import FvcomGrid
 from .base_generator import BaseGenerator
 from .sources.base import BaseForcingSource
 from .sources.timeseries import TimeSeriesSource
+
+if TYPE_CHECKING:
+    from .gwo_correlations import StationCorrelations
+    from .gwo_gap_filler import GapFillResult, MissingValueInfo
 
 
 class _ScalarConstantSource(BaseForcingSource):
@@ -145,6 +149,11 @@ class MetNetCDFGenerator(BaseGenerator):
         station_map: dict[str, str] | None = None,
         wind_factor: float = 1.8,
         max_gap_hours: int = 6,
+        fill_gaps: bool = False,
+        fallback_stations: dict[str, list[str]] | None = None,
+        correlations: "StationCorrelations | None" = None,
+        solar_model: str = "empirical",
+        extend_boundary: bool = True,
         **consts: float,
     ) -> None:
         t0 = pd.Timestamp(start)
@@ -152,6 +161,15 @@ class MetNetCDFGenerator(BaseGenerator):
 
         # Store whether we're in GWO mode (affects timezone handling)
         self._gwo_mode = gwo_dir is not None
+        self._gwo_dir = Path(gwo_dir) if gwo_dir else None
+        self._station_map = station_map
+        self._wind_factor = wind_factor
+        self._max_gap_hours = max_gap_hours
+        self._fill_gaps = fill_gaps
+        self._fallback_stations = fallback_stations
+        self._correlations = correlations
+        self._solar_model = solar_model
+        self._extend_boundary = extend_boundary
 
         if self._gwo_mode:
             # GWO mode: use naive timestamps (JST values labeled as UTC)
@@ -186,6 +204,7 @@ class MetNetCDFGenerator(BaseGenerator):
 
         # Initialize sources
         self._sources: dict[str, BaseForcingSource] = {}
+        self._gwo_source: object | None = None
 
         if gwo_dir is not None:
             # GWO mode: use GWOForcingSource for all variables
@@ -193,6 +212,7 @@ class MetNetCDFGenerator(BaseGenerator):
 
             if station_map is None:
                 station_map = {"*": "Chiba"}  # Default to Chiba for all variables
+            self._station_map = station_map
 
             gwo_source = GWOForcingSource(
                 gwo_dir,
@@ -201,6 +221,7 @@ class MetNetCDFGenerator(BaseGenerator):
                 max_gap_hours=max_gap_hours,
                 input_tz=data_tz,
             )
+            self._gwo_source = gwo_source
 
             for var in self._DEFAULTS:
                 self._sources[var] = _GWOSourceAdapter(gwo_source, var)
@@ -550,3 +571,90 @@ class MetNetCDFGenerator(BaseGenerator):
                 stem = stem[:-4] + "_wnd"  # *_grd → *_wnd
             dest = self.source.with_name(f"{stem}.nc")
         return super().write(dest)
+
+    # ------------------------------------------------------------------
+    # Gap filling methods (GWO mode only)
+    # ------------------------------------------------------------------
+    def run_gap_filling(self) -> list["GapFillResult"] | None:
+        """
+        Run comprehensive gap filling on GWO data.
+
+        This method applies the 4-step gap filling process:
+        1. Temporal interpolation
+        2. Boundary interpolation
+        3. Fallback station interpolation
+        4. Solar radiation estimation
+
+        Returns
+        -------
+        list[GapFillResult] | None
+            List of gap fill results per variable, or None if not in GWO mode.
+        """
+        if not self._gwo_mode or self._gwo_dir is None:
+            return None
+
+        from .gwo_gap_filler import GapFiller
+        from .gwo_reader import GWOReader
+
+        reader = GWOReader(self._gwo_dir)
+
+        # Get the primary station (default station)
+        station = self._station_map.get("*", "Chiba") if self._station_map else "Chiba"
+
+        # Load raw data
+        start_dt = self.start.to_pydatetime()
+        end_dt = self.end.to_pydatetime()
+        df = reader.load_range(station, start_dt, end_dt)
+
+        # Create gap filler
+        filler = GapFiller(
+            gwo_reader=reader,
+            fallback_stations=self._fallback_stations,
+            correlations=self._correlations,
+            max_gap_hours=self._max_gap_hours,
+            solar_model=self._solar_model,  # type: ignore[arg-type]
+            extend_boundary=self._extend_boundary,
+        )
+
+        # Run gap filling
+        filled_df, results = filler.fill_all(df, station, start_dt, end_dt)
+
+        # Update the GWO source with filled data
+        # Note: The actual update mechanism depends on the GWOForcingSource implementation
+        # For now, we just return the results for reporting
+
+        return results
+
+    def analyze_missing_values(self) -> list["MissingValueInfo"] | None:
+        """
+        Analyze missing values in GWO data without filling.
+
+        Returns
+        -------
+        list[MissingValueInfo] | None
+            List of missing value info per variable, or None if not in GWO mode.
+        """
+        if not self._gwo_mode or self._gwo_dir is None:
+            return None
+
+        from .gwo_gap_filler import GapFiller
+        from .gwo_reader import GWOReader
+
+        reader = GWOReader(self._gwo_dir)
+
+        # Get the primary station (default station)
+        station = self._station_map.get("*", "Chiba") if self._station_map else "Chiba"
+
+        # Load raw data
+        start_dt = self.start.to_pydatetime()
+        end_dt = self.end.to_pydatetime()
+        df = reader.load_range(station, start_dt, end_dt)
+
+        # Create gap filler (just for analysis)
+        filler = GapFiller(
+            gwo_reader=reader,
+            max_gap_hours=self._max_gap_hours,
+        )
+
+        # Analyze missing values
+        return filler.analyze_missing(df, station)

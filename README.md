@@ -10,12 +10,16 @@ A Python toolkit for [FVCOM](https://github.com/FVCOM-GitHub/FVCOM) ocean model 
 
 ## Installation
 
+Requires [Miniforge](https://github.com/conda-forge/miniforge) (mamba).
+
 ```bash
 git clone https://github.com/jsasaki-utokyo/xfvcom.git
 cd xfvcom
 ./setup.sh
 conda activate xfvcom
 ```
+
+**Note**: Installation uses `mamba` (via setup.sh) to avoid conflicts with Intel oneAPI Python on supercomputers. Activation works with both `conda activate` and `mamba activate`.
 
 ---
 
@@ -53,6 +57,16 @@ xfvcom-make-met-nc grid.nc --start 2025-01-01T00:00Z --end 2025-01-07T00:00Z \
 # Meteorological forcing (GWO-AMD)
 xfvcom-make-met-nc grid.dat --start 2020 --gwo-dir /path/to/GWO/Hourly \
   --station-map "slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba" --wind-factor 1.8 --utm-zone 54
+
+# Meteorological forcing with gap filling
+xfvcom-make-met-nc grid.dat --start 2020 --gwo-dir /path/to/GWO/Hourly \
+  --station-map "*:Chiba" --fill-gaps --fallback-stations "Chiba:Tokyo,Yokohama" \
+  --correlation-file gwo_correlations.yaml --solar-model empirical --utm-zone 54
+
+# Compute station correlations for gap filling
+xfvcom-calc-gwo-corr --gwo-dir /path/to/GWO/Hourly \
+  --stations Tokyo,Chiba,Yokohama,Tateyama --years 2015-2020 \
+  --include-solar-model -o gwo_correlations.yaml
 
 # Groundwater forcing
 xfvcom-make-groundwater-nc grid.nc --start 2025-01-01T00:00Z --end 2025-12-31T23:00Z \
@@ -140,6 +154,9 @@ create_anim_2d_plot(plotter, "temperature", siglay=0, fps=10, output_format="gif
 | `MetValidator` | `xfvcom.validation` | Forcing file validation |
 | `GWOReader` | `xfvcom.io` | GWO-AMD meteorological data reader |
 | `GWOForcingSource` | `xfvcom.io` | GWO data source for forcing generation |
+| `GapFiller` | `xfvcom.io` | 4-step gap filling for GWO data |
+| `StationCorrelations` | `xfvcom.io` | Station correlation management |
+| `SolarEstimator` | `xfvcom.io` | Solar radiation estimation (pvlib) |
 
 ### Key Functions
 

@@ -35,6 +35,7 @@ dependencies:
   - jinja2
   - pyyaml
   - chardet
+  - pvlib  # Solar radiation estimation for gap filling
 
   # Development tools
   - pytest

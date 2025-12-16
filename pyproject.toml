@@ -33,7 +33,7 @@ dependencies = [
   "scipy>=1.11.0",
   "scikit-learn>=1.5.0",
   "imageio>=2.34.0",
-  "moviepy>=1.0.3", 
+  "moviepy>=1.0.3",
   "imageio-ffmpeg>=0.6.0",
   "tqdm>=4.66.0",
   "jinja2>=3.1.4",
@@ -41,7 +41,8 @@ dependencies = [
   "netCDF4>=1.6.5",
   "h5netcdf>=1.2.0",
   "cftime>=1.6.4",
-  "chardet>=5.2.0", 
+  "chardet>=5.2.0",
+  "pvlib>=0.10.0",
 ]
 
 [project.optional-dependencies]
@@ -91,3 +92,4 @@ xfvcom-make-met-nc = "xfvcom.cli.make_met_nc:main"
 xfvcom-make-groundwater-nc = "xfvcom.cli.make_groundwater_nc:main"
 xfvcom-dye-ts = "xfvcom.cli.dye_timeseries:main"
 xfvcom-check-met = "xfvcom.cli.check_met_nc:main"
+xfvcom-calc-gwo-corr = "xfvcom.cli.calc_gwo_correlation:main"
