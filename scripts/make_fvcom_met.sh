@@ -1,31 +1,34 @@
 #!/bin/bash
 # Generate FVCOM meteorological forcing from GWO-AMD data
 #
-# Usage: Edit the variables below, then run:
+# Usage: Edit the default values below, then run:
 #   ./make_fvcom_met.sh
+#
+# Or override with environment variables:
+#   START=2021 END=2022 ./make_fvcom_met.sh
 
 set -e
 
 # ============================================================
-# Edit these variables as needed
+# Default values (edit as needed or override with env variables)
 # ============================================================
 # Grid and time
-GRID=grid.dat
-START=2020
-END=
-UTM_ZONE=54
-OUTPUT=met_forcing.nc
+GRID=${GRID:-grid.dat}
+START=${START:-2020}
+END=${END:-}
+UTM_ZONE=${UTM_ZONE:-54}
+OUTPUT=${OUTPUT:-met_forcing.nc}
 
 # GWO-AMD options
-GWO_DIR=/path/to/GWO/Hourly
-STATION_MAP="slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba"
-WIND_FACTOR=1.8
-MAX_GAP_HOURS=6
+GWO_DIR=${GWO_DIR:-/path/to/GWO/Hourly}
+STATION_MAP=${STATION_MAP:-"slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba"}
+WIND_FACTOR=${WIND_FACTOR:-1.8}
+MAX_GAP_HOURS=${MAX_GAP_HOURS:-6}
 
 # Gap filling options
-FILL_GAPS=true
-FALLBACK_STATIONS="Chiba:Tokyo,Yokohama,Tateyama"
-SOLAR_MODEL=empirical
+FILL_GAPS=${FILL_GAPS:-true}
+FALLBACK_STATIONS=${FALLBACK_STATIONS:-"Chiba:Tokyo,Yokohama,Tateyama"}
+SOLAR_MODEL=${SOLAR_MODEL:-empirical}
 # ============================================================
 
 echo "========================================"
