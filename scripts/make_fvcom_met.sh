@@ -1,42 +1,39 @@
 #!/bin/bash
 # Generate FVCOM meteorological forcing from GWO-AMD data
 #
-# Usage: ./make_fvcom_met.sh [YEAR]
-# Example: ./make_fvcom_met.sh 2020
-#
-# Edit default values below or override with environment variables.
+# Usage: Edit the variables below, then run:
+#   ./make_fvcom_met.sh
 
 set -e
 
 # ============================================================
-# Default values (edit as needed or override with env variables)
+# Edit these variables as needed
 # ============================================================
-YEAR="${1:-2020}"
-GRID="${GRID:-${HOME}/Github/TB-FVCOM/goto2023/input/TokyoBay18_grd.dat}"
-UTM_ZONE="${UTM_ZONE:-54}"
-OUTPUT_DIR="${OUTPUT_DIR:-${HOME}/Github/TB-FVCOM/goto2023/input/${YEAR}}"
-OUTPUT="${OUTPUT_DIR}/tb18_wnd.nc"
+# Grid and time
+GRID=grid.dat
+START=2020
+END=
+UTM_ZONE=54
+OUTPUT=met_forcing.nc
 
 # GWO-AMD options
-GWO_DIR="${GWO_DIR:-${HOME}/../share/Data/met/JMA_DataBase/GWO/Hourly}"
-STATION_MAP="${STATION_MAP:-slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba}"
-WIND_FACTOR="${WIND_FACTOR:-1.8}"
-MAX_GAP_HOURS="${MAX_GAP_HOURS:-6}"
+GWO_DIR=/path/to/GWO/Hourly
+STATION_MAP="slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba"
+WIND_FACTOR=1.8
+MAX_GAP_HOURS=6
 
 # Gap filling options
-FILL_GAPS="${FILL_GAPS:-true}"
-FALLBACK_STATIONS="${FALLBACK_STATIONS:-Chiba:Tokyo,Yokohama,Tateyama}"
-SOLAR_MODEL="${SOLAR_MODEL:-empirical}"
+FILL_GAPS=true
+FALLBACK_STATIONS="Chiba:Tokyo,Yokohama,Tateyama"
+SOLAR_MODEL=empirical
 # ============================================================
-
-# Create output directory if needed
-mkdir -p "${OUTPUT_DIR}"
 
 echo "========================================"
 echo "Generating FVCOM meteorological forcing"
 echo "========================================"
-echo "  Year:             ${YEAR}"
 echo "  Grid:             ${GRID}"
+echo "  Start:            ${START}"
+echo "  End:              ${END:-auto}"
 echo "  UTM zone:         ${UTM_ZONE}"
 echo "  Output:           ${OUTPUT}"
 echo "  GWO dir:          ${GWO_DIR}"
@@ -60,9 +57,13 @@ if [[ ! -f "${GRID}" ]]; then
 fi
 
 # Run the generator
-xfvcom-make-met-nc "${GRID}" --start "${YEAR}" --utm-zone "${UTM_ZONE}" \
-    --gwo-dir "${GWO_DIR}" --station-map "${STATION_MAP}" \
-    --wind-factor "${WIND_FACTOR}" --max-gap-hours "${MAX_GAP_HOURS}" \
+xfvcom-make-met-nc "${GRID}" \
+    --start "${START}" ${END:+--end "${END}"} \
+    --utm-zone "${UTM_ZONE}" \
+    --gwo-dir "${GWO_DIR}" \
+    --station-map "${STATION_MAP}" \
+    --wind-factor "${WIND_FACTOR}" \
+    --max-gap-hours "${MAX_GAP_HOURS}" \
     $($FILL_GAPS && echo "--fill-gaps") \
     --fallback-stations "${FALLBACK_STATIONS}" \
     --solar-model "${SOLAR_MODEL}" \
