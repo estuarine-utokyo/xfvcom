@@ -24,17 +24,24 @@ Example bash script (edit variables as needed):
   #!/bin/bash
   GRID=grid.dat
   YEAR=2020
+  UTM_ZONE=54
+  OUTPUT=met_forcing.nc
+  # GWO-AMD options
   GWO_DIR=/path/to/GWO/Hourly
   STATION_MAP="slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba"
   WIND_FACTOR=1.8
-  UTM_ZONE=54
-  OUTPUT=met_forcing.nc
+  MAX_GAP_HOURS=6
+  # Gap filling options
+  FILL_GAPS=true
+  FALLBACK_STATIONS="Chiba:Tokyo,Yokohama,Tateyama"
+  SOLAR_MODEL=empirical
 
-  xfvcom-make-met-nc "$GRID" --start "$YEAR" \\
-      --gwo-dir "$GWO_DIR" \\
-      --station-map "$STATION_MAP" \\
-      --wind-factor "$WIND_FACTOR" \\
-      --utm-zone "$UTM_ZONE" \\
+  xfvcom-make-met-nc "$GRID" --start "$YEAR" --utm-zone "$UTM_ZONE" \\
+      --gwo-dir "$GWO_DIR" --station-map "$STATION_MAP" \\
+      --wind-factor "$WIND_FACTOR" --max-gap-hours "$MAX_GAP_HOURS" \\
+      $($FILL_GAPS && echo "--fill-gaps") \\
+      --fallback-stations "$FALLBACK_STATIONS" \\
+      --solar-model "$SOLAR_MODEL" \\
       -o "$OUTPUT"
 """,
     )
