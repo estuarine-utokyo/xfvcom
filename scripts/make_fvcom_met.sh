@@ -1,27 +1,10 @@
 #!/bin/bash
-# Generate FVCOM meteorological forcing from GWO-AMD data
-#
-# Usage: Edit the default values below, then run:
-#   ./make_fvcom_met.sh
-#
-# Or override with environment variables:
-#   START=2021 END=2022 ./make_fvcom_met.sh
-
-set -e
-
-# Save environment variable overrides
-_env_GRID="$GRID"
-_env_START="$START"
-_env_END="$END"
-_env_UTM_ZONE="$UTM_ZONE"
-_env_OUTPUT="$OUTPUT"
-_env_GWO_DIR="$GWO_DIR"
-_env_STATION_MAP="$STATION_MAP"
-_env_WIND_FACTOR="$WIND_FACTOR"
-_env_MAX_GAP_HOURS="$MAX_GAP_HOURS"
-_env_FILL_GAPS="$FILL_GAPS"
-_env_FALLBACK_STATIONS="$FALLBACK_STATIONS"
-_env_SOLAR_MODEL="$SOLAR_MODEL"
+# Save environment variables before defaults overwrite them
+_E_GRID="$GRID" _E_START="$START" _E_END="$END" _E_UTM_ZONE="$UTM_ZONE"
+_E_OUTPUT="$OUTPUT" _E_GWO_DIR="$GWO_DIR" _E_STATION_MAP="$STATION_MAP"
+_E_WIND_FACTOR="$WIND_FACTOR" _E_MAX_GAP_HOURS="$MAX_GAP_HOURS"
+_E_FILL_GAPS="$FILL_GAPS" _E_FALLBACK_STATIONS="$FALLBACK_STATIONS"
+_E_SOLAR_MODEL="$SOLAR_MODEL"
 
 # ============================================================
 # Default values (edit as needed)
@@ -44,20 +27,24 @@ FILL_GAPS=true
 FALLBACK_STATIONS="Chiba:Tokyo,Yokohama,Tateyama"
 SOLAR_MODEL=empirical
 # ============================================================
+# End of user configuration
+# ============================================================
+
+set -e
 
 # Apply environment variable overrides
-[ -n "$_env_GRID" ] && GRID="$_env_GRID"
-[ -n "$_env_START" ] && START="$_env_START"
-[ -n "$_env_END" ] && END="$_env_END"
-[ -n "$_env_UTM_ZONE" ] && UTM_ZONE="$_env_UTM_ZONE"
-[ -n "$_env_OUTPUT" ] && OUTPUT="$_env_OUTPUT"
-[ -n "$_env_GWO_DIR" ] && GWO_DIR="$_env_GWO_DIR"
-[ -n "$_env_STATION_MAP" ] && STATION_MAP="$_env_STATION_MAP"
-[ -n "$_env_WIND_FACTOR" ] && WIND_FACTOR="$_env_WIND_FACTOR"
-[ -n "$_env_MAX_GAP_HOURS" ] && MAX_GAP_HOURS="$_env_MAX_GAP_HOURS"
-[ -n "$_env_FILL_GAPS" ] && FILL_GAPS="$_env_FILL_GAPS"
-[ -n "$_env_FALLBACK_STATIONS" ] && FALLBACK_STATIONS="$_env_FALLBACK_STATIONS"
-[ -n "$_env_SOLAR_MODEL" ] && SOLAR_MODEL="$_env_SOLAR_MODEL"
+[ -n "$_E_GRID" ] && GRID="$_E_GRID"
+[ -n "$_E_START" ] && START="$_E_START"
+[ -n "$_E_END" ] && END="$_E_END"
+[ -n "$_E_UTM_ZONE" ] && UTM_ZONE="$_E_UTM_ZONE"
+[ -n "$_E_OUTPUT" ] && OUTPUT="$_E_OUTPUT"
+[ -n "$_E_GWO_DIR" ] && GWO_DIR="$_E_GWO_DIR"
+[ -n "$_E_STATION_MAP" ] && STATION_MAP="$_E_STATION_MAP"
+[ -n "$_E_WIND_FACTOR" ] && WIND_FACTOR="$_E_WIND_FACTOR"
+[ -n "$_E_MAX_GAP_HOURS" ] && MAX_GAP_HOURS="$_E_MAX_GAP_HOURS"
+[ -n "$_E_FILL_GAPS" ] && FILL_GAPS="$_E_FILL_GAPS"
+[ -n "$_E_FALLBACK_STATIONS" ] && FALLBACK_STATIONS="$_E_FALLBACK_STATIONS"
+[ -n "$_E_SOLAR_MODEL" ] && SOLAR_MODEL="$_E_SOLAR_MODEL"
 
 echo "========================================"
 echo "Generating FVCOM meteorological forcing"
