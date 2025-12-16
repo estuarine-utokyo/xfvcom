@@ -45,3 +45,18 @@ __all__.append("GroundwaterNetCDFGenerator")
 __all__.append("FvcomInputLoader")
 __all__.append("NamelistParser")
 __all__.append("parse_member_namelist")
+
+# ---------------------------------------------------------------------
+# GWO-AMD meteorological data reader
+# ---------------------------------------------------------------------
+from .gwo_reader import (  # noqa: F401
+    GWOForcingSource,
+    GWOReader,
+    parse_period,
+    parse_station_map,
+)
+
+__all__.append("GWOReader")
+__all__.append("GWOForcingSource")
+__all__.append("parse_station_map")
+__all__.append("parse_period")

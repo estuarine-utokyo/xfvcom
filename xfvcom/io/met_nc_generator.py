@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Generate a constant-value meteorological forcing NetCDF-4 for FVCOM."""
+"""Generate meteorological forcing NetCDF-4 for FVCOM.
+
+Supports multiple data sources:
+- Constant values
+- CSV/TSV time series
+- GWO-AMD meteorological data
+"""
 
 from __future__ import annotations
 
@@ -34,6 +40,22 @@ class _ScalarConstantSource(BaseForcingSource):
         return np.full(times.size, self._val, dtype=float)
 
 
+class _GWOSourceAdapter(BaseForcingSource):
+    """Adapter to use GWOForcingSource with MetNetCDFGenerator."""
+
+    def __init__(self, gwo_source: object, var: str) -> None:
+        # Type annotation uses object to avoid import cycle; actual type is GWOForcingSource
+        self._gwo = gwo_source
+        self._var = var
+
+    def get_series(self, var_name: str, times: pd.DatetimeIndex) -> NDArray[np.float64]:  # type: ignore[override]
+        if var_name != self._var:
+            raise KeyError(
+                f"Unsupported variable {var_name!r} (expected {self._var!r})"
+            )
+        return self._gwo.get_series(var_name, times)  # type: ignore[attr-defined]
+
+
 def _parse_ts_spec(tokens: Iterable[str], variables: Iterable[str]) -> dict[str, str]:
     """Return mapping ``{var: path}`` from CLI --ts tokens."""
 
@@ -65,8 +87,12 @@ def _choose_source(
 
 class MetNetCDFGenerator(BaseGenerator):
     """
-    Build a meteorological forcing file whose dynamic fields are spatially
-    uniform and temporally constant.
+    Build a meteorological forcing file for FVCOM.
+
+    Supports multiple data sources:
+    - Constant values (default)
+    - CSV/TSV time series (via --ts)
+    - GWO-AMD meteorological data (via --gwo-dir)
 
     Parameters
     ----------
@@ -79,6 +105,16 @@ class MetNetCDFGenerator(BaseGenerator):
         Time step in seconds.
     consts : dict[str, float]
         Constant values to write (see `_DEFAULTS` for keys).
+    gwo_dir : Path, optional
+        Base directory for GWO hourly data. If provided, enables GWO mode.
+    station_map : dict[str, str], optional
+        Mapping of variable names to station names for GWO data.
+        Use "*" as a key for default station.
+        Example: {"slht": "Tokyo", "kous": "Tokyo", "*": "Chiba"}
+    wind_factor : float, optional
+        Wind speed multiplier for GWO data (default: 1.8)
+    max_gap_hours : int, optional
+        Maximum hours to interpolate for missing GWO data (default: 6)
     """
 
     _DEFAULTS = dict(
@@ -105,16 +141,36 @@ class MetNetCDFGenerator(BaseGenerator):
         start_tz: str = "UTC",
         ts_specs: list[str] | None = None,
         data_tz: str = "Asia/Tokyo",
+        gwo_dir: Path | str | None = None,
+        station_map: dict[str, str] | None = None,
+        wind_factor: float = 1.8,
+        max_gap_hours: int = 6,
         **consts: float,
     ) -> None:
         t0 = pd.Timestamp(start)
         t1 = pd.Timestamp(end)
-        if t0.tzinfo is None:
-            t0 = t0.tz_localize(start_tz)
-        if t1.tzinfo is None:
-            t1 = t1.tz_localize(start_tz)
-        self.start = t0.tz_convert("UTC")
-        self.end = t1.tz_convert("UTC")
+
+        # Store whether we're in GWO mode (affects timezone handling)
+        self._gwo_mode = gwo_dir is not None
+
+        if self._gwo_mode:
+            # GWO mode: use naive timestamps (JST values labeled as UTC)
+            # This matches the FVCOM convention used in reference files
+            if t0.tzinfo is not None:
+                t0 = t0.tz_localize(None)
+            if t1.tzinfo is not None:
+                t1 = t1.tz_localize(None)
+            self.start = t0
+            self.end = t1
+        else:
+            # Legacy mode: convert to UTC
+            if t0.tzinfo is None:
+                t0 = t0.tz_localize(start_tz)
+            if t1.tzinfo is None:
+                t1 = t1.tz_localize(start_tz)
+            self.start = t0.tz_convert("UTC")
+            self.end = t1.tz_convert("UTC")
+
         source = Path(grid_nc)
 
         # 2) 親クラスへは Path 型で渡す
@@ -128,31 +184,66 @@ class MetNetCDFGenerator(BaseGenerator):
         self.consts = {**self._DEFAULTS, **consts}
         self._data_tz = data_tz
 
-        self._ts_map = _parse_ts_spec(ts_specs or [], self._DEFAULTS)
+        # Initialize sources
         self._sources: dict[str, BaseForcingSource] = {}
-        for var in self._DEFAULTS:
-            self._sources[var] = _choose_source(
-                var,
-                self._ts_map,
-                self.consts[var],
-                data_tz=self._data_tz,
+
+        if gwo_dir is not None:
+            # GWO mode: use GWOForcingSource for all variables
+            from .gwo_reader import GWOForcingSource
+
+            if station_map is None:
+                station_map = {"*": "Chiba"}  # Default to Chiba for all variables
+
+            gwo_source = GWOForcingSource(
+                gwo_dir,
+                station_map,
+                wind_factor=wind_factor,
+                max_gap_hours=max_gap_hours,
+                input_tz=data_tz,
             )
 
-        # Build timeline in UTC (mirrors `load()` behaviour)
-        self.timeline = pd.date_range(
-            self.start,
-            self.end,
-            freq=f"{self.dt}s",
-            inclusive="both",
-            tz="UTC",
-        )
+            for var in self._DEFAULTS:
+                self._sources[var] = _GWOSourceAdapter(gwo_source, var)
+        else:
+            # Legacy mode: use time series or constants
+            self._ts_map = _parse_ts_spec(ts_specs or [], self._DEFAULTS)
+            for var in self._DEFAULTS:
+                self._sources[var] = _choose_source(
+                    var,
+                    self._ts_map,
+                    self.consts[var],
+                    data_tz=self._data_tz,
+                )
+
+        # Build timeline
+        if self._gwo_mode:
+            # GWO mode: naive timeline (JST values labeled as UTC)
+            self.timeline = pd.date_range(
+                self.start,
+                self.end,
+                freq=f"{self.dt}s",
+                inclusive="both",
+            )
+        else:
+            # Legacy mode: UTC timeline
+            self.timeline = pd.date_range(
+                self.start,
+                self.end,
+                freq=f"{self.dt}s",
+                inclusive="both",
+                tz="UTC",
+            )
 
     # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
     @staticmethod
     def _to_mjd(t: pd.DatetimeIndex) -> NDArray[np.float32]:
-        origin = pd.Timestamp("1858-11-17T00:00:00Z")
+        # Use naive origin for naive timestamps, UTC origin for tz-aware
+        if t.tz is None:
+            origin = pd.Timestamp("1858-11-17T00:00:00")
+        else:
+            origin = pd.Timestamp("1858-11-17T00:00:00Z")
         delta = t - origin
         seconds = np.asarray(delta.total_seconds(), dtype=np.float64)
         return (seconds / 86400.0).astype("f4")
@@ -297,10 +388,13 @@ class MetNetCDFGenerator(BaseGenerator):
             v_nv_out = ds_out.createVariable(
                 "nv", "i4", ("three", "nele"), fill_value=False
             )
+            # FvcomGrid uses 0-based indexing internally, FVCOM expects 1-based
+            # Add 1 if the minimum value is 0 (indicating 0-based indexing)
+            nv_offset = 1 if nv_in.min() == 0 else 0
             if nv_in.shape == (3, nele):
-                v_nv_out[:, :] = nv_in
+                v_nv_out[:, :] = nv_in + nv_offset
             elif nv_in.shape == (nele, 3):
-                v_nv_out[:, :] = nv_in.T
+                v_nv_out[:, :] = nv_in.T + nv_offset
             else:
                 raise ValueError(f"Unexpected nv shape: {nv_in.shape}")
             v_nv_out.long_name = "nodes surrounding element"

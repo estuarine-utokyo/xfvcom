@@ -46,9 +46,13 @@ xfvcom-check-met met_forcing.nc --uniform          # Check spatial uniformity
 xfvcom-make-river-nml river_data.csv --output rivers.nml
 xfvcom-make-river-nc rivers.nml --start 2025-01-01T00:00Z --end 2025-12-31T23:00Z
 
-# Meteorological forcing
+# Meteorological forcing (constant/CSV)
 xfvcom-make-met-nc grid.nc --start 2025-01-01T00:00Z --end 2025-01-07T00:00Z \
-  --ts wind.csv:uwind,vwind --air-temperature 20.0
+  --ts wind.csv:uwind,vwind --air-temperature 20.0 --utm-zone 54
+
+# Meteorological forcing (GWO-AMD)
+xfvcom-make-met-nc grid.dat --start 2020 --gwo-dir /path/to/GWO/Hourly \
+  --station-map "slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba" --wind-factor 1.8 --utm-zone 54
 
 # Groundwater forcing
 xfvcom-make-groundwater-nc grid.nc --start 2025-01-01T00:00Z --end 2025-12-31T23:00Z \
@@ -134,6 +138,8 @@ create_anim_2d_plot(plotter, "temperature", siglay=0, fps=10, output_format="gif
 | `FvcomPlotConfig` | `xfvcom.plot` | Plot styling configuration |
 | `FvcomPlotOptions` | `xfvcom` | Per-plot options |
 | `MetValidator` | `xfvcom.validation` | Forcing file validation |
+| `GWOReader` | `xfvcom.io` | GWO-AMD meteorological data reader |
+| `GWOForcingSource` | `xfvcom.io` | GWO data source for forcing generation |
 
 ### Key Functions
 

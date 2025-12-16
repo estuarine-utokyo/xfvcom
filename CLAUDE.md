@@ -116,6 +116,15 @@ make html
   - Base class: `BaseForceGenerator`
   - **Important**: Use netCDF4 directly (not xarray) for FVCOM compatibility
 
+- **GWO-AMD Reader** (`io/gwo_reader.py`): JMA meteorological data
+  - `GWOReader`: Read GWO hourly CSV files (33-column format)
+  - `GWOForcingSource`: Data source adapter for MetNetCDFGenerator
+  - Station mapping: Route variables to different observation stations
+  - RMK code handling: Automatic masking and interpolation
+  - Unit conversions: GWO raw values → FVCOM units
+  - Wind conversion: Direction + speed → u,v components
+  - Long-wave estimation: Brutsaert formula from T, RH, cloud
+
 #### 2. **Analysis** (xfvcom/analysis.py)
 - **FvcomAnalyzer**: Physics calculations
   - KDTree nearest neighbor search
@@ -225,6 +234,8 @@ Grid File → FvcomInputLoader → Area Calculations
                              → Mesh Connectivity
 
 CSV/Constants → Force Generators → FVCOM Input Files (.nc, .nml)
+
+GWO CSV Files → GWOReader → GWOForcingSource → MetNetCDFGenerator → met.nc
 ```
 
 ### Key Dependencies
@@ -530,6 +541,13 @@ docs/
 - **Default output**: UTC
 - **Configurable**: Via `data_tz` parameter in generators
 - **FVCOM convention**: Uses UTC for time variables
+
+**GWO-AMD Mode (Special Case)**:
+- **No timezone conversion**: JST values stored directly
+- **Labels as UTC**: NetCDF attributes say "UTC" but values are JST
+- **Rationale**: Tokyo Bay FVCOM convention for compatibility with existing workflows
+- **Example**: Time `2020-01-01 09:00` in NetCDF = 9:00 AM JST (not UTC)
+- **Note**: This differs from CSV mode which converts from `data_tz` to UTC
 
 ### Index Conventions
 - **FVCOM**: 1-based indexing

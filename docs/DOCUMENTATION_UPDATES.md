@@ -1,3 +1,49 @@
+# Documentation Updates
+
+## December 2024 - GWO-AMD Meteorological Forcing
+
+### Summary
+
+Added documentation for the new GWO-AMD (JMA Ground Weather Observation) meteorological data reader and FVCOM forcing generator.
+
+### Changes Made
+
+#### New Features Documented
+
+1. **GWO-AMD Reader** (`xfvcom/io/gwo_reader.py`)
+   - `GWOReader`: Read JMA GWO hourly CSV files (33-column format, no header)
+   - `GWOForcingSource`: Data source adapter for MetNetCDFGenerator
+   - Station mapping: Route variables to different observation stations
+   - RMK code handling: Automatic masking and interpolation for missing data
+   - Unit conversions: GWO raw values → FVCOM units
+   - Wind conversion: Direction (16-point compass) + speed → u,v components
+   - Long-wave radiation estimation: Brutsaert formula from T, RH, cloud
+
+2. **Meteorological Forcing CLI** (`xfvcom-make-met-nc`)
+   - New `--gwo-dir` option to enable GWO-AMD mode
+   - `--station-map` for variable-to-station routing
+   - `--wind-factor` for wind speed multiplier (default 1.8 for Tokyo Bay)
+   - `--max-gap-hours` for interpolation gap limit
+
+3. **Shell Script** (`scripts/make_fvcom_met.sh`)
+   - Convenience wrapper for generating meteorological forcing
+   - Configurable via environment variables
+
+#### Timezone Handling (Important)
+
+Documented the FVCOM timezone convention for Tokyo Bay simulations:
+- GWO-AMD mode stores JST values labeled as "UTC" (no timezone conversion)
+- This differs from CSV mode which converts from `data_tz` to UTC
+- Rationale: Compatibility with existing FVCOM workflows
+
+#### Files Updated
+
+- `docs/forcing_generator.md` - Added GWO-AMD section with CLI examples, variable conversions, and timezone notes
+- `README.md` - Added GWO-AMD CLI example and new API classes (`GWOReader`, `GWOForcingSource`)
+- `CLAUDE.md` - Added GWO-AMD reader to architecture section, updated data flow diagram, expanded timezone handling notes
+
+---
+
 # Documentation Updates - October 2024
 
 ## Summary
