@@ -41,11 +41,11 @@ xfvcom-make-met-nc "$GRID" --start "$START" --utm-zone "$UTM_ZONE" \
 
 ### Time Specification
 
-| START format | Period |
-|--------------|--------|
-| `2020` | 2020-01-01T00:00:00 → 2021-01-01T00:00:00 (full year) |
-| `2020-01-01` | 2020-01-01T00:00:00 → 2020-01-02T00:00:00 (full day) |
-| `2020-01-01T00:00:00` | Requires `--end` to specify end time |
+| START format | Period | --end |
+|--------------|--------|-------|
+| `2020` | 2020-01-01T00:00 → 2021-01-01T00:00 (full year) | ignored |
+| `2020-01-01` | 2020-01-01T00:00 → 2020-01-02T00:00 (full day) | ignored |
+| `2020-01-01T00:00:00` | START → END | required |
 
 ### Options
 
