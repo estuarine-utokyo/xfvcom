@@ -150,6 +150,16 @@ Examples:
         action="store_true",
         help="Exit with error if any gaps remain unfilled",
     )
+    gap_group.add_argument(
+        "--recompute-correlations",
+        action="store_true",
+        help="Force recompute correlations even if cache exists",
+    )
+    gap_group.add_argument(
+        "--no-correlation-cache",
+        action="store_true",
+        help="Disable auto-caching (use raw fallback data without conversion)",
+    )
 
     # Constant parameters (any omitted key falls back to default)
     const_group = p.add_argument_group("Constant values (fallback when not using GWO)")
@@ -189,12 +199,39 @@ Examples:
 
         fallback_stations = parse_fallback_stations(args.fallback_stations)
 
-    # Load correlations if provided
+    # Load correlations
     correlations = None
     if args.correlation_file:
+        # Explicit file specified - use it directly
         from xfvcom.io.gwo_correlations import StationCorrelations
 
         correlations = StationCorrelations.from_yaml(args.correlation_file)
+    elif (
+        args.fill_gaps
+        and args.fallback_stations
+        and not args.no_correlation_cache
+        and args.gwo_dir
+    ):
+        # Auto-cache mode: use cache or compute correlations
+        from xfvcom.io.gwo_correlations import get_cached_correlations
+
+        # Extract all stations from fallback specification
+        all_stations: set[str] = set()
+        for primary, fallbacks in fallback_stations.items():
+            all_stations.add(primary)
+            all_stations.update(fallbacks)
+
+        # Also add stations from station_map
+        if station_map:
+            for station in station_map.values():
+                if station != "*":
+                    all_stations.add(station)
+
+        correlations = get_cached_correlations(
+            gwo_dir=args.gwo_dir,
+            stations=sorted(all_stations),
+            force_recompute=args.recompute_correlations,
+        )
 
     # Build constant values dict (only non-None values)
     const_vals = {

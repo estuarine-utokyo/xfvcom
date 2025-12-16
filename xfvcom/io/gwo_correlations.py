@@ -396,3 +396,155 @@ def get_station_coordinates(station: str) -> dict[str, float]:
             f"Known stations: {', '.join(STATION_COORDS.keys())}"
         )
     return STATION_COORDS[station].copy()
+
+
+def get_cache_path() -> Path:
+    """
+    Get the default cache path for correlations.
+
+    Returns
+    -------
+    Path
+        Path to the correlation cache file
+    """
+    import importlib.resources
+
+    try:
+        # Python 3.9+
+        data_dir = importlib.resources.files("xfvcom.data")
+        return Path(str(data_dir)) / "gwo_correlations_cache.yaml"
+    except (TypeError, AttributeError):
+        # Fallback for older Python
+        import xfvcom
+
+        pkg_dir = Path(xfvcom.__file__).parent
+        return pkg_dir / "data" / "gwo_correlations_cache.yaml"
+
+
+def get_cached_correlations(
+    gwo_dir: Path,
+    stations: list[str],
+    years: list[int] | None = None,
+    force_recompute: bool = False,
+) -> StationCorrelations:
+    """
+    Get correlations from cache or compute if needed.
+
+    Parameters
+    ----------
+    gwo_dir : Path
+        GWO data directory (used for computing if cache miss)
+    stations : list[str]
+        List of stations to include
+    years : list[int] | None
+        Years to use for computation (default: 2015-2020)
+    force_recompute : bool
+        Force recomputation even if cache exists
+
+    Returns
+    -------
+    StationCorrelations
+        Cached or newly computed correlations
+    """
+    from .gwo_reader import GWOReader
+
+    cache_path = get_cache_path()
+
+    if years is None:
+        years = [2015, 2016, 2017, 2018, 2019, 2020]
+
+    # Check if cache exists and is valid
+    if not force_recompute and cache_path.exists():
+        try:
+            cached = StationCorrelations.from_yaml(cache_path)
+
+            # Validate cache has required station pairs
+            required_pairs: set[str] = set()
+            for s1 in stations:
+                for s2 in stations:
+                    if s1 != s2:
+                        required_pairs.add(f"{s1}_{s2}")
+
+            cached_pairs = set(cached.correlations.keys())
+
+            if required_pairs.issubset(cached_pairs):
+                print(f"[INFO] Using cached correlations from: {cache_path}")
+                return cached
+            else:
+                missing = required_pairs - cached_pairs
+                print(f"[INFO] Cache missing pairs: {missing}. Recomputing...")
+        except Exception as e:
+            print(f"[WARNING] Failed to load cache: {e}. Recomputing...")
+
+    # Compute correlations
+    print(f"[INFO] Computing correlations for stations: {', '.join(stations)}")
+    print("[INFO] This may take a few minutes...")
+
+    reader = GWOReader(gwo_dir)
+
+    # Generate all station pairs (both directions)
+    station_pairs: list[tuple[str, str]] = []
+    for s1 in stations:
+        for s2 in stations:
+            if s1 != s2:
+                station_pairs.append((s1, s2))
+
+    correlations = StationCorrelations.compute(
+        gwo_reader=reader,
+        station_pairs=station_pairs,
+        years=years,
+        variables=["kion", "rhum", "shpa", "sped", "clod"],
+    )
+
+    # Try to add solar model parameters
+    try:
+        from .solar_estimation import SolarEstimator
+
+        solar_station = "Tokyo" if "Tokyo" in stations else stations[0]
+        params = SolarEstimator.build_empirical_model(
+            gwo_reader=reader,
+            station=solar_station,
+            years=years,
+        )
+        correlations.data["solar_model"] = {
+            "station": solar_station,
+            "a": params.a,
+            "b": params.b,
+            "r2": params.r2,
+            "rmse": params.rmse,
+            "n_samples": params.n_samples,
+        }
+        print(
+            f"[INFO] Solar model calibrated: "
+            f"a={params.a:.4f}, b={params.b:.4f}, R²={params.r2:.4f}"
+        )
+    except ImportError:
+        print("[WARNING] pvlib not installed, skipping solar model calibration")
+    except Exception as e:
+        print(f"[WARNING] Solar model calibration failed: {e}")
+
+    # Save to cache
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        correlations.to_yaml(cache_path)
+        print(f"[INFO] Correlations cached to: {cache_path}")
+    except Exception as e:
+        print(f"[WARNING] Failed to save cache: {e}")
+
+    return correlations
+
+
+def clear_correlation_cache() -> bool:
+    """
+    Clear the correlation cache.
+
+    Returns
+    -------
+    bool
+        True if cache was deleted, False if it didn't exist
+    """
+    cache_path = get_cache_path()
+    if cache_path.exists():
+        cache_path.unlink()
+        return True
+    return False

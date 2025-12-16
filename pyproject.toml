@@ -66,6 +66,9 @@ dev = [
 where = ["."]
 include = ["xfvcom*"]
 
+[tool.setuptools.package-data]
+xfvcom = ["data/*.yaml", "data/*.yml"]
+
 [tool.black]
 line-length = 88
 target-version = ["py312"]

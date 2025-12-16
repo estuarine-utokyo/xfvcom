@@ -68,13 +68,16 @@ Examples:
     p.add_argument(
         "--gwo-dir",
         type=Path,
-        required=True,
         help="Base directory for GWO hourly data",
+    )
+    p.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="Clear the correlation cache and exit",
     )
     p.add_argument(
         "--stations",
         type=str,
-        required=True,
         help="Comma-separated list of stations (e.g., 'Tokyo,Chiba,Yokohama')",
     )
     p.add_argument(
@@ -114,11 +117,29 @@ Examples:
         "-o",
         "--output",
         type=Path,
-        required=True,
         help="Output YAML file path",
     )
 
     args = p.parse_args()
+
+    # Handle --clear-cache
+    if args.clear_cache:
+        from xfvcom.io.gwo_correlations import clear_correlation_cache, get_cache_path
+
+        cache_path = get_cache_path()
+        if clear_correlation_cache():
+            print(f"[OK] Cleared cache: {cache_path}")
+        else:
+            print(f"[INFO] No cache file found at: {cache_path}")
+        return 0
+
+    # Validate required arguments for normal operation
+    if not args.gwo_dir:
+        p.error("--gwo-dir is required when not using --clear-cache")
+    if not args.stations:
+        p.error("--stations is required when not using --clear-cache")
+    if not args.output:
+        p.error("-o/--output is required when not using --clear-cache")
 
     # Parse arguments
     stations = [s.strip() for s in args.stations.split(",")]
