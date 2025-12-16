@@ -676,7 +676,10 @@ def parse_period(
         - Date only ("2020-06-15"): 2020-06-15T00:00 to 2020-06-16T00:00
         - Full datetime: Exact as specified
     end_str : str, optional
-        End datetime (required for full datetime specification)
+        End specification (same format as start_str):
+        - Year only: end_year+1-01-01T00:00
+        - Date only: end_date+1 day T00:00
+        - Full datetime: Exact as specified
 
     Returns
     -------
@@ -687,10 +690,16 @@ def parse_period(
 
     if len(start_str) == 4:  # Year only
         start = datetime(int(start_str), 1, 1, 0, 0)
-        end = datetime(int(start_str) + 1, 1, 1, 0, 0)
+        if end_str and len(end_str) == 4:
+            end = datetime(int(end_str) + 1, 1, 1, 0, 0)
+        else:
+            end = datetime(int(start_str) + 1, 1, 1, 0, 0)
     elif len(start_str) == 10:  # Date only (YYYY-MM-DD)
         start = datetime.strptime(start_str, "%Y-%m-%d")
-        end = start + timedelta(days=1)
+        if end_str and len(end_str) == 10:
+            end = datetime.strptime(end_str, "%Y-%m-%d") + timedelta(days=1)
+        else:
+            end = start + timedelta(days=1)
     else:  # Full datetime
         start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
         if end_str:
