@@ -9,27 +9,55 @@
 
 set -e
 
+# Save environment variable overrides
+_env_GRID="$GRID"
+_env_START="$START"
+_env_END="$END"
+_env_UTM_ZONE="$UTM_ZONE"
+_env_OUTPUT="$OUTPUT"
+_env_GWO_DIR="$GWO_DIR"
+_env_STATION_MAP="$STATION_MAP"
+_env_WIND_FACTOR="$WIND_FACTOR"
+_env_MAX_GAP_HOURS="$MAX_GAP_HOURS"
+_env_FILL_GAPS="$FILL_GAPS"
+_env_FALLBACK_STATIONS="$FALLBACK_STATIONS"
+_env_SOLAR_MODEL="$SOLAR_MODEL"
+
 # ============================================================
-# Default values (edit as needed or override with env variables)
+# Default values (edit as needed)
 # ============================================================
 # Grid and time
-GRID=${GRID:-grid.dat}
-START=${START:-2020}
-END=${END:-}
-UTM_ZONE=${UTM_ZONE:-54}
-OUTPUT=${OUTPUT:-met_forcing.nc}
+GRID=grid.dat
+START=2020
+END=
+UTM_ZONE=54
+OUTPUT=met_forcing.nc
 
 # GWO-AMD options
-GWO_DIR=${GWO_DIR:-/path/to/GWO/Hourly}
-STATION_MAP=${STATION_MAP:-"slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba"}
-WIND_FACTOR=${WIND_FACTOR:-1.8}
-MAX_GAP_HOURS=${MAX_GAP_HOURS:-6}
+GWO_DIR=/path/to/GWO/Hourly
+STATION_MAP="slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba"
+WIND_FACTOR=1.8
+MAX_GAP_HOURS=6
 
 # Gap filling options
-FILL_GAPS=${FILL_GAPS:-true}
-FALLBACK_STATIONS=${FALLBACK_STATIONS:-"Chiba:Tokyo,Yokohama,Tateyama"}
-SOLAR_MODEL=${SOLAR_MODEL:-empirical}
+FILL_GAPS=true
+FALLBACK_STATIONS="Chiba:Tokyo,Yokohama,Tateyama"
+SOLAR_MODEL=empirical
 # ============================================================
+
+# Apply environment variable overrides
+[ -n "$_env_GRID" ] && GRID="$_env_GRID"
+[ -n "$_env_START" ] && START="$_env_START"
+[ -n "$_env_END" ] && END="$_env_END"
+[ -n "$_env_UTM_ZONE" ] && UTM_ZONE="$_env_UTM_ZONE"
+[ -n "$_env_OUTPUT" ] && OUTPUT="$_env_OUTPUT"
+[ -n "$_env_GWO_DIR" ] && GWO_DIR="$_env_GWO_DIR"
+[ -n "$_env_STATION_MAP" ] && STATION_MAP="$_env_STATION_MAP"
+[ -n "$_env_WIND_FACTOR" ] && WIND_FACTOR="$_env_WIND_FACTOR"
+[ -n "$_env_MAX_GAP_HOURS" ] && MAX_GAP_HOURS="$_env_MAX_GAP_HOURS"
+[ -n "$_env_FILL_GAPS" ] && FILL_GAPS="$_env_FILL_GAPS"
+[ -n "$_env_FALLBACK_STATIONS" ] && FALLBACK_STATIONS="$_env_FALLBACK_STATIONS"
+[ -n "$_env_SOLAR_MODEL" ] && SOLAR_MODEL="$_env_SOLAR_MODEL"
 
 echo "========================================"
 echo "Generating FVCOM meteorological forcing"
