@@ -2,26 +2,7 @@
 """
 Generate FVCOM meteorological forcing NetCDF files.
 
-Supports multiple data sources:
-- Constant values (default)
-- CSV/TSV time series
-- GWO-AMD meteorological data (with comprehensive gap filling)
-
-Examples
---------
-# Using constant values (default)
-xfvcom-make-met-nc grid.dat --start 2020-01-01 --end 2020-12-31 --utm-zone 54
-
-# Using GWO-AMD data
-xfvcom-make-met-nc grid.dat --start 2020-01-01 --end 2021-01-01 \\
-    --gwo-dir /path/to/GWO/Hourly \\
-    --station-map "slht:Tokyo,kous:Tokyo,*:Chiba" \\
-    --wind-factor 1.8 --utm-zone 54 -o output.nc
-
-# With gap filling enabled
-xfvcom-make-met-nc grid.dat --start 2020 --gwo-dir /path/to/GWO/Hourly \\
-    --fill-gaps --fallback-stations "Chiba:Tokyo,Yokohama,Tateyama" \\
-    --solar-model empirical --utm-zone 54 -o output.nc
+Supports: constant values (default), CSV/TSV time series, GWO-AMD data with gap filling.
 """
 from __future__ import annotations
 
@@ -39,21 +20,15 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Generate with constant values
-  xfvcom-make-met-nc grid.dat --start 2020-01-01 --end 2020-12-31 --utm-zone 54
+  # Constant values only
+  xfvcom-make-met-nc grid.dat --start 2020 --utm-zone 54
 
-  # Generate from GWO-AMD data for year 2020
-  xfvcom-make-met-nc grid.dat --start 2020 --gwo-dir /path/to/GWO/Hourly \\
-      --station-map "slht:Tokyo,kous:Tokyo,*:Chiba" --utm-zone 54
-
-  # With comprehensive gap filling
-  xfvcom-make-met-nc grid.dat --start 2020 --gwo-dir /path/to/GWO/Hourly \\
+  # GWO-AMD with gap filling (typical usage)
+  xfvcom-make-met-nc grid.dat --start 2020 --utm-zone 54 \\
+      --gwo-dir /path/to/GWO/Hourly \\
+      --station-map "slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba" \\
       --fill-gaps --fallback-stations "Chiba:Tokyo,Yokohama,Tateyama" \\
-      --solar-model empirical --utm-zone 54
-
-  # Short-wave and precipitation from Tokyo, others from Chiba
-  xfvcom-make-met-nc grid.dat --start 2020 --gwo-dir /path/to/GWO/Hourly \\
-      --station-map "slht:Tokyo,kous:Tokyo,*:Chiba" --wind-factor 1.8 --utm-zone 54
+      --solar-model empirical --wind-factor 1.8 -o met_2020.nc
 """,
     )
     p.add_argument("grid", type=Path, help="FVCOM grid file (.dat or .nc)")

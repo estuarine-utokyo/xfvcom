@@ -1,25 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Calculate correlations between GWO weather stations.
-
-This CLI tool computes correlation parameters between weather stations
-for use in gap filling. It can also build and compare solar radiation
-estimation models.
-
-Examples
---------
-# Compute correlations between stations
-xfvcom-calc-gwo-corr --gwo-dir /path/to/GWO/Hourly \\
-    --stations Tokyo,Chiba,Yokohama,Tateyama \\
-    --years 2015-2020 \\
-    -o gwo_correlations.yaml
-
-# Include solar model calibration
-xfvcom-calc-gwo-corr --gwo-dir /path/to/GWO/Hourly \\
-    --stations Tokyo \\
-    --years 2015-2020 \\
-    --include-solar-model \\
-    -o gwo_correlations.yaml
+Calculate correlations between GWO weather stations for gap filling.
 """
 from __future__ import annotations
 
@@ -43,25 +24,13 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Compute correlations between stations
+  # Compute correlations with solar model (typical usage)
   xfvcom-calc-gwo-corr --gwo-dir /path/to/GWO/Hourly \\
-      --stations Tokyo,Chiba,Yokohama,Tateyama \\
-      --years 2015-2020 \\
-      -o gwo_correlations.yaml
+      --stations Tokyo,Chiba,Yokohama,Tateyama --years 2015-2020 \\
+      --include-solar-model -o gwo_correlations.yaml
 
-  # Include solar model calibration
-  xfvcom-calc-gwo-corr --gwo-dir /path/to/GWO/Hourly \\
-      --stations Tokyo \\
-      --years 2015-2020 \\
-      --include-solar-model \\
-      -o gwo_correlations.yaml
-
-  # Compare solar models
-  xfvcom-calc-gwo-corr --gwo-dir /path/to/GWO/Hourly \\
-      --compare-solar-models \\
-      --train-years 2015-2019 \\
-      --test-year 2020 \\
-      --stations Tokyo
+  # Clear cached correlations
+  xfvcom-calc-gwo-corr --clear-cache
 """,
     )
 
