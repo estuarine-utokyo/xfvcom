@@ -699,7 +699,9 @@ def parse_period(
         if end_str and len(end_str) == 10:
             end = datetime.strptime(end_str, "%Y-%m-%d") + timedelta(days=1)
         else:
-            raise ValueError("End date required for date-only start (e.g., --end 2020-01-07)")
+            raise ValueError(
+                "End date required for date-only start (e.g., --end 2020-01-07)"
+            )
     else:  # Full datetime
         start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
         if end_str:

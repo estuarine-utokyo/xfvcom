@@ -55,8 +55,9 @@ Note: END is optional only for year format. For year/date formats, END is inclus
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--start` | Start time (see above) | required |
-| `--end` | End time (required only for datetime format) | auto |
-| `--utm-zone` | UTM zone number | required |
+| `--end` | End time (see above) | - |
+| `--utm-zone` | UTM zone number (e.g., 54 for Tokyo Bay) | required |
+| `--southern` | Southern hemisphere UTM | northern |
 | `--gwo-dir` | GWO hourly data directory | - |
 | `--station-map` | Variable-to-station mapping | `slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba` |
 | `--wind-factor` | Wind speed multiplier | 1.8 |
