@@ -17,7 +17,8 @@
 ```bash
 #!/bin/bash
 GRID=grid.dat
-YEAR=2020
+START=2020                # year, date (2020-01-01), or datetime (2020-01-01T00:00:00)
+END=                      # optional: auto-inferred for year/date
 UTM_ZONE=54
 OUTPUT=met_forcing.nc
 # GWO-AMD options
@@ -30,7 +31,8 @@ FILL_GAPS=true
 FALLBACK_STATIONS="Chiba:Tokyo,Yokohama,Tateyama"
 SOLAR_MODEL=empirical
 
-xfvcom-make-met-nc "$GRID" --start "$YEAR" --utm-zone "$UTM_ZONE" \
+xfvcom-make-met-nc "$GRID" --start "$START" ${END:+--end "$END"} \
+    --utm-zone "$UTM_ZONE" \
     --gwo-dir "$GWO_DIR" --station-map "$STATION_MAP" \
     --wind-factor "$WIND_FACTOR" --max-gap-hours "$MAX_GAP_HOURS" \
     $($FILL_GAPS && echo "--fill-gaps") \
@@ -38,6 +40,22 @@ xfvcom-make-met-nc "$GRID" --start "$YEAR" --utm-zone "$UTM_ZONE" \
     --solar-model "$SOLAR_MODEL" \
     -o "$OUTPUT"
 ```
+
+### Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--start` | Start time: year (2020), date (2020-01-01), or ISO datetime | required |
+| `--end` | End time (optional for year/date-only start) | auto |
+| `--utm-zone` | UTM zone number | required |
+| `--gwo-dir` | GWO hourly data directory | - |
+| `--station-map` | Variable-to-station mapping | `slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba` |
+| `--wind-factor` | Wind speed multiplier | 1.8 |
+| `--max-gap-hours` | Max hours to interpolate | 6 |
+| `--fill-gaps` | Enable 4-step gap filling | false |
+| `--fallback-stations` | Fallback chain (e.g., "Chiba:Tokyo,Yokohama") | - |
+| `--solar-model` | Solar estimation: empirical, pvlib-kasten, pvlib-larson | empirical |
+| `--strict` | Fail if gaps remain | false |
 
 ### Station Mapping
 
