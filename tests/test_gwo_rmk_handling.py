@@ -25,7 +25,7 @@ from xfvcom.io.gwo_reader import (
 def make_test_df(var: str, values: list[float], rmk_codes: list[int]) -> pd.DataFrame:
     """Create a minimal test DataFrame with GWO columns."""
     n = len(values)
-    data = {col: [0] * n for col in GWO_COLUMNS}
+    data: dict[str, list] = {col: [0.0] * n for col in GWO_COLUMNS}  # type: ignore[type-arg]
 
     # Set time columns
     data["YYYY"] = [2020] * n
