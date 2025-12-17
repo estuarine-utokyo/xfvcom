@@ -227,6 +227,15 @@ class GWOReader:
         -------
         pd.DataFrame
             DataFrame with datetime index (UTC) and GWO columns
+
+        Notes
+        -----
+        Traditional GWO CSV files use hours 1-24, where hour 24 of Dec 31
+        becomes 00:00 of Jan 1 of the next year. This means 00:00 on Jan 1
+        is stored in the previous year's file. This method automatically
+        loads the previous year's data if the start timestamp is missing.
+        Newer GWO tools may use hours 0-23, in which case 00:00 on Jan 1
+        would be in the same year's file. Both cases are handled correctly.
         """
         start_year = start.year
         end_year = end.year
@@ -258,6 +267,30 @@ class GWOReader:
         # Slice to requested range
         start_ts = pd.Timestamp(start)
         end_ts = pd.Timestamp(end)
+
+        # Strip timezone info if present for comparison
+        start_ts_naive = (
+            start_ts.tz_localize(None) if start_ts.tzinfo is not None else start_ts
+        )
+
+        # Check if start timestamp is missing from loaded data
+        # This can happen when start is 00:00 on Jan 1 and GWO uses hours 1-24
+        # (00:00 on Jan 1 is hour 24 of Dec 31 in previous year's file)
+        if start_ts_naive not in df.index and start_year > 1:
+            try:
+                df_prev = self.load_station_year(station, start_year - 1)
+                # Only need the last few hours from previous year
+                # Filter to avoid loading too much unnecessary data
+                df_prev = df_prev[
+                    df_prev.index >= start_ts_naive - pd.Timedelta(hours=1)
+                ]
+                if len(df_prev) > 0:
+                    df = pd.concat([df_prev, df])
+                    df = df.sort_index()
+                    df = df[~df.index.duplicated(keep="first")]
+            except FileNotFoundError:
+                # Previous year's file not available, continue without it
+                pass
 
         # Strip timezone info if present (keep the clock time, just make naive)
         if start_ts.tzinfo is not None:
