@@ -10,14 +10,14 @@ _E_SOLAR_MODEL="$SOLAR_MODEL"
 # Default values (edit as needed)
 # ============================================================
 # Grid and time
-GRID=grid.dat
+GRID=~/Github/TB-FVCOM/goto2023/input/TokyoBay18_grd.dat
 START=2020
 END=
 UTM_ZONE=54
 OUTPUT=met_forcing.nc
 
 # GWO-AMD options
-GWO_DIR=/path/to/GWO/Hourly
+GWO_DIR=${DATA_DIR}/met/JMA_DataBase/GWO/Hourly
 STATION_MAP="slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba"
 WIND_FACTOR=1.8
 MAX_GAP_HOURS=6
