@@ -67,7 +67,11 @@ xfvcom-make-met-nc grid.dat --start 2020 --gwo-dir /path/to/GWO/Hourly \
 xfvcom-calc-gwo-corr --gwo-dir /path/to/GWO/Hourly \
   --stations Tokyo,Chiba,Yokohama,Tateyama --years 2015-2020 \
   --include-solar-model -o gwo_correlations.yaml
+```
 
+**Note on GWO cloud cover data**: Cloud cover (`clod`) in GWO-AMD has 3-hourly observation intervals. Values at non-observed times are interpolated and marked with RMK=2 (no observation). The meteorological forcing generator now correctly includes these interpolated values as valid data, improving temporal resolution from 3-hourly to hourly.
+
+```bash
 # Groundwater forcing
 xfvcom-make-groundwater-nc grid.nc --start 2025-01-01T00:00Z --end 2025-12-31T23:00Z \
   --flux 0.001 --temperature 15.0 --salinity 0.0
