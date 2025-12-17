@@ -289,6 +289,12 @@ class GapFiller:
         """Fill gaps for a single variable using all applicable steps."""
         rmk_col = f"{var}RMK"
 
+        # Handle non-numeric strings like "静穏" (calm) which means zero wind
+        # Replace "静穏" with 0 before converting to numeric
+        if df[var].dtype == object:
+            df[var] = df[var].replace("静穏", 0)
+        df[var] = pd.to_numeric(df[var], errors="coerce")
+
         # Apply RMK masking using variable-specific rules
         rule_type = VAR_RMK_TYPE.get(var, "default")
         rules = RMK_RULES[rule_type]
@@ -389,7 +395,10 @@ class GapFiller:
 
                 if len(prev_slice) > 0:
                     # Merge and interpolate
-                    combined = pd.concat([prev_slice[[var]], df[[var]]])
+                    # Handle "静穏" (calm) as 0, then convert to numeric
+                    prev_var = prev_slice[var].replace("静穏", 0)
+                    prev_var = pd.to_numeric(prev_var, errors="coerce")
+                    combined = pd.concat([prev_var.to_frame(var), df[[var]]])
                     combined = combined.sort_index()
                     combined = combined[~combined.index.duplicated(keep="first")]
                     combined[var] = combined[var].interpolate(
@@ -426,7 +435,10 @@ class GapFiller:
 
                 if len(next_slice) > 0:
                     # Merge and interpolate
-                    combined = pd.concat([df[[var]], next_slice[[var]]])
+                    # Handle "静穏" (calm) as 0, then convert to numeric
+                    next_var = next_slice[var].replace("静穏", 0)
+                    next_var = pd.to_numeric(next_var, errors="coerce")
+                    combined = pd.concat([df[[var]], next_var.to_frame(var)])
                     combined = combined.sort_index()
                     combined = combined[~combined.index.duplicated(keep="first")]
                     combined[var] = combined[var].interpolate(
@@ -471,7 +483,9 @@ class GapFiller:
 
                 # Get RMK-filtered values from fallback using variable-specific rules
                 rmk_col = f"{var}RMK"
-                fallback_values = fallback_df[var].copy().astype(float)
+                # Handle "静穏" (calm) as 0, then convert to numeric
+                fallback_values = fallback_df[var].replace("静穏", 0)
+                fallback_values = pd.to_numeric(fallback_values, errors="coerce").copy()
                 if rmk_col in fallback_df.columns:
                     rule_type = VAR_RMK_TYPE.get(var, "default")
                     rules = RMK_RULES[rule_type]
