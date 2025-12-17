@@ -46,6 +46,89 @@ set -e
 [ -n "$_E_FALLBACK_STATIONS" ] && FALLBACK_STATIONS="$_E_FALLBACK_STATIONS"
 [ -n "$_E_SOLAR_MODEL" ] && SOLAR_MODEL="$_E_SOLAR_MODEL"
 
+# Parse command line arguments (override defaults and env vars)
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --start)
+            START="$2"
+            shift 2
+            ;;
+        --end)
+            END="$2"
+            shift 2
+            ;;
+        --grid)
+            GRID="$2"
+            shift 2
+            ;;
+        --output|-o)
+            OUTPUT="$2"
+            shift 2
+            ;;
+        --utm-zone)
+            UTM_ZONE="$2"
+            shift 2
+            ;;
+        --gwo-dir)
+            GWO_DIR="$2"
+            shift 2
+            ;;
+        --station-map)
+            STATION_MAP="$2"
+            shift 2
+            ;;
+        --wind-factor)
+            WIND_FACTOR="$2"
+            shift 2
+            ;;
+        --max-gap-hours)
+            MAX_GAP_HOURS="$2"
+            shift 2
+            ;;
+        --fill-gaps)
+            FILL_GAPS=true
+            shift
+            ;;
+        --no-fill-gaps)
+            FILL_GAPS=false
+            shift
+            ;;
+        --fallback-stations)
+            FALLBACK_STATIONS="$2"
+            shift 2
+            ;;
+        --solar-model)
+            SOLAR_MODEL="$2"
+            shift 2
+            ;;
+        --help|-h)
+            echo "Usage: $0 [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --start YEAR        Start year or datetime (default: 2020)"
+            echo "  --end YEAR          End year or datetime (default: auto)"
+            echo "  --grid FILE         Grid file path"
+            echo "  --output, -o FILE   Output file (default: met_forcing.nc)"
+            echo "  --utm-zone ZONE     UTM zone (default: 54)"
+            echo "  --gwo-dir DIR       GWO data directory"
+            echo "  --station-map MAP   Station mapping"
+            echo "  --wind-factor F     Wind factor (default: 1.8)"
+            echo "  --max-gap-hours N   Max gap hours (default: 6)"
+            echo "  --fill-gaps         Enable gap filling (default)"
+            echo "  --no-fill-gaps      Disable gap filling"
+            echo "  --fallback-stations Fallback station list"
+            echo "  --solar-model MODEL Solar model (default: empirical)"
+            echo "  --help, -h          Show this help"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
 echo "========================================"
 echo "Generating FVCOM meteorological forcing"
 echo "========================================"

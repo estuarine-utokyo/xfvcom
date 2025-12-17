@@ -14,99 +14,78 @@
 
 ## Meteorological Forcing (GWO-AMD)
 
+### Quick Start with Command Line Arguments
+
+The `make_fvcom_met.sh` script supports command line arguments for easy customization:
+
+```bash
+# Generate forcing for year 2019
+./make_fvcom_met.sh --start 2019
+
+# Generate forcing for year 2020 with custom output file
+./make_fvcom_met.sh --start 2020 --output tb20_met.nc
+
+# Generate forcing for a specific date range
+./make_fvcom_met.sh --start 2020-06-01 --end 2020-08-31 --output summer2020.nc
+
+# Use a different grid file
+./make_fvcom_met.sh --start 2019 --grid /path/to/custom_grid.dat
+
+# Disable gap filling
+./make_fvcom_met.sh --start 2020 --no-fill-gaps
+
+# Show all available options
+./make_fvcom_met.sh --help
+```
+
+### Command Line Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--start YEAR` | Start year or datetime | 2020 |
+| `--end YEAR` | End year or datetime | auto |
+| `--grid FILE` | Grid file path | (see script) |
+| `--output, -o FILE` | Output file | met_forcing.nc |
+| `--utm-zone ZONE` | UTM zone | 54 |
+| `--gwo-dir DIR` | GWO data directory | (see script) |
+| `--station-map MAP` | Station mapping | slht:Tokyo,... |
+| `--wind-factor F` | Wind factor | 1.8 |
+| `--max-gap-hours N` | Max gap hours | 6 |
+| `--fill-gaps` | Enable gap filling | (default) |
+| `--no-fill-gaps` | Disable gap filling | - |
+| `--fallback-stations` | Fallback stations | Chiba:Tokyo,... |
+| `--solar-model MODEL` | Solar model | empirical |
+| `--help, -h` | Show help | - |
+
+### Configuration Priority
+
+Settings can be specified in three ways (highest to lowest priority):
+
+1. **Command line arguments**: `./make_fvcom_met.sh --start 2019`
+2. **Environment variables**: `START=2019 ./make_fvcom_met.sh`
+3. **Default values in script**: Edit the script directly
+
+### Full Script Reference
+
+The script `scripts/make_fvcom_met.sh` provides a complete template:
+
 ```bash
 #!/bin/bash
-# Save environment variables before defaults overwrite them
-_E_GRID="$GRID" _E_START="$START" _E_END="$END" _E_UTM_ZONE="$UTM_ZONE"
-_E_OUTPUT="$OUTPUT" _E_GWO_DIR="$GWO_DIR" _E_STATION_MAP="$STATION_MAP"
-_E_WIND_FACTOR="$WIND_FACTOR" _E_MAX_GAP_HOURS="$MAX_GAP_HOURS"
-_E_FILL_GAPS="$FILL_GAPS" _E_FALLBACK_STATIONS="$FALLBACK_STATIONS"
-_E_SOLAR_MODEL="$SOLAR_MODEL"
-
-# ============================================================
-# Default values (edit as needed)
-# ============================================================
-# Grid and time
-GRID=grid.dat
+# Default values can be edited directly in the script
+GRID=~/Github/TB-FVCOM/goto2023/input/TokyoBay18_grd.dat
 START=2020
 END=
 UTM_ZONE=54
 OUTPUT=met_forcing.nc
-
-# GWO-AMD options
-GWO_DIR=/path/to/GWO/Hourly
+GWO_DIR=${DATA_DIR}/met/JMA_DataBase/GWO/Hourly
 STATION_MAP="slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba"
 WIND_FACTOR=1.8
 MAX_GAP_HOURS=6
-
-# Gap filling options
 FILL_GAPS=true
 FALLBACK_STATIONS="Chiba:Tokyo,Yokohama,Tateyama"
 SOLAR_MODEL=empirical
-# ============================================================
-# End of user configuration
-# ============================================================
 
-set -e
-
-# Apply environment variable overrides
-[ -n "$_E_GRID" ] && GRID="$_E_GRID"
-[ -n "$_E_START" ] && START="$_E_START"
-[ -n "$_E_END" ] && END="$_E_END"
-[ -n "$_E_UTM_ZONE" ] && UTM_ZONE="$_E_UTM_ZONE"
-[ -n "$_E_OUTPUT" ] && OUTPUT="$_E_OUTPUT"
-[ -n "$_E_GWO_DIR" ] && GWO_DIR="$_E_GWO_DIR"
-[ -n "$_E_STATION_MAP" ] && STATION_MAP="$_E_STATION_MAP"
-[ -n "$_E_WIND_FACTOR" ] && WIND_FACTOR="$_E_WIND_FACTOR"
-[ -n "$_E_MAX_GAP_HOURS" ] && MAX_GAP_HOURS="$_E_MAX_GAP_HOURS"
-[ -n "$_E_FILL_GAPS" ] && FILL_GAPS="$_E_FILL_GAPS"
-[ -n "$_E_FALLBACK_STATIONS" ] && FALLBACK_STATIONS="$_E_FALLBACK_STATIONS"
-[ -n "$_E_SOLAR_MODEL" ] && SOLAR_MODEL="$_E_SOLAR_MODEL"
-
-echo "========================================"
-echo "Generating FVCOM meteorological forcing"
-echo "========================================"
-echo "  Grid:             ${GRID}"
-echo "  Start:            ${START}"
-echo "  End:              ${END:-auto}"
-echo "  UTM zone:         ${UTM_ZONE}"
-echo "  Output:           ${OUTPUT}"
-echo "  GWO dir:          ${GWO_DIR}"
-echo "  Station map:      ${STATION_MAP}"
-echo "  Wind factor:      ${WIND_FACTOR}"
-echo "  Max gap hours:    ${MAX_GAP_HOURS}"
-echo "  Fill gaps:        ${FILL_GAPS}"
-echo "  Fallback stations:${FALLBACK_STATIONS}"
-echo "  Solar model:      ${SOLAR_MODEL}"
-echo "========================================"
-
-# Verify input files exist
-if [[ ! -d "${GWO_DIR}" ]]; then
-    echo "ERROR: GWO data directory not found: ${GWO_DIR}"
-    exit 1
-fi
-
-if [[ ! -f "${GRID}" ]]; then
-    echo "ERROR: Grid file not found: ${GRID}"
-    exit 1
-fi
-
-# Run the generator
-xfvcom-make-met-nc "${GRID}" \
-    --start "${START}" ${END:+--end "${END}"} \
-    --utm-zone "${UTM_ZONE}" \
-    --gwo-dir "${GWO_DIR}" \
-    --station-map "${STATION_MAP}" \
-    --wind-factor "${WIND_FACTOR}" \
-    --max-gap-hours "${MAX_GAP_HOURS}" \
-    $($FILL_GAPS && echo "--fill-gaps") \
-    --fallback-stations "${FALLBACK_STATIONS}" \
-    --solar-model "${SOLAR_MODEL}" \
-    -o "${OUTPUT}"
-
-echo "========================================"
-echo "Done: ${OUTPUT}"
-echo "========================================"
+# ... (argument parsing and execution)
 ```
 
 ### Time Specification
