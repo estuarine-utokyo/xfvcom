@@ -67,11 +67,70 @@ GWO_COLUMNS = [
     "kousRMK",
 ]
 
-# RMK values indicating missing data
-# For most variables: 0, 1, 2 are missing
-# For slht (solar radiation): only 0, 1 are missing (2 is nighttime = valid 0)
+# =============================================================================
+# RMK (Remark) Code Handling Rules
+# =============================================================================
+# GWO-AMD RMK codes indicate data quality:
+#   0 - Observation value not created → NaN
+#   1 - Missing observation → NaN
+#   2 - Not observed (e.g., nighttime for solar) → depends on variable
+#   6 - No phenomenon (e.g., no precipitation) → 0.0
+#   8 - Normal observation value → use raw value
+#
+# Reference: https://github.com/jsasaki-utokyo/GWO-AMD
+# =============================================================================
+
+# Variable-specific RMK handling rules
+# Each rule defines:
+#   - "missing": RMK codes that indicate truly missing data → NaN
+#   - "zero": RMK codes that indicate valid zero values → 0.0
+RMK_RULES: dict[str, dict[str, set[int]]] = {
+    # Default: most variables (temperature, humidity, pressure, wind)
+    # RMK 0,1,2 are all missing
+    "default": {
+        "missing": {0, 1, 2},
+        "zero": set(),
+    },
+    # Solar radiation and sunshine duration
+    # RMK 2 (nighttime/not observed) is valid 0, not missing
+    "solar": {
+        "missing": {0, 1},
+        "zero": {2},
+    },
+    # Precipitation
+    # RMK 2 (not observed) and RMK 6 (no phenomenon) mean "no rain" = 0
+    "precip": {
+        "missing": {0, 1},
+        "zero": {2, 6},
+    },
+    # Cloud cover (3-hourly observation)
+    # RMK 2 should be interpolated, so treat as missing
+    "cloud": {
+        "missing": {0, 1, 2},
+        "zero": set(),
+    },
+}
+
+# Mapping from variable names to RMK rule types
+VAR_RMK_TYPE: dict[str, str] = {
+    "kion": "default",  # Air temperature
+    "rhum": "default",  # Relative humidity
+    "shpa": "default",  # Sea-level pressure
+    "lhpa": "default",  # Station pressure
+    "muki": "default",  # Wind direction
+    "sped": "default",  # Wind speed
+    "stem": "default",  # Dew point temperature
+    "humd": "default",  # Vapor pressure
+    "tnki": "default",  # Weather code
+    "slht": "solar",  # Solar radiation
+    "lght": "solar",  # Sunshine duration
+    "kous": "precip",  # Precipitation
+    "clod": "cloud",  # Cloud cover
+}
+
+# Legacy constants for backward compatibility (deprecated)
 MISSING_RMK_DEFAULT = {0, 1, 2}
-MISSING_RMK_SOLAR = {0, 1}  # For slht and lght
+MISSING_RMK_SOLAR = {0, 1}
 
 
 class GWOReader:
@@ -211,32 +270,59 @@ class GWOReader:
         return df
 
     def apply_rmk_mask(
-        self, df: pd.DataFrame, var: str, *, is_solar: bool = False
+        self, df: pd.DataFrame, var: str, *, is_solar: bool | None = None
     ) -> pd.Series:
         """
-        Apply RMK code masking - set values to NaN where RMK indicates missing.
+        Apply RMK code masking based on variable-specific rules.
+
+        RMK codes are processed as follows:
+        - "missing" RMK codes → NaN (truly missing data)
+        - "zero" RMK codes → 0.0 (valid zero measurement)
+        - Other RMK codes → use raw value
 
         Parameters
         ----------
         df : pd.DataFrame
             DataFrame with GWO columns
         var : str
-            Variable name (e.g., "kion", "shpa", "slht")
-        is_solar : bool
-            If True, use MISSING_RMK_SOLAR (for slht, lght)
+            Variable name (e.g., "kion", "shpa", "slht", "kous")
+        is_solar : bool | None
+            Deprecated. RMK rules are now determined automatically by variable name.
+            This parameter is ignored but kept for backward compatibility.
 
         Returns
         -------
         pd.Series
-            Series with masked values (NaN where missing)
+            Series with masked values (NaN for missing, 0.0 for zero RMK codes)
         """
+        if is_solar is not None:
+            import warnings
+
+            warnings.warn(
+                "is_solar parameter is deprecated. "
+                "RMK rules are now determined automatically by variable name.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         rmk_col = f"{var}RMK"
         values = df[var].copy().astype(float)
 
-        if rmk_col in df.columns:
-            missing_rmk = MISSING_RMK_SOLAR if is_solar else MISSING_RMK_DEFAULT
-            mask = df[rmk_col].isin(missing_rmk)
-            values[mask] = np.nan
+        if rmk_col not in df.columns:
+            return values
+
+        # Get RMK rules for this variable
+        rule_type = VAR_RMK_TYPE.get(var, "default")
+        rules = RMK_RULES[rule_type]
+
+        # Apply zero RMK codes first (set to 0.0)
+        if rules["zero"]:
+            zero_mask = df[rmk_col].isin(rules["zero"])
+            values[zero_mask] = 0.0
+
+        # Apply missing RMK codes (set to NaN)
+        missing_mask = df[rmk_col].isin(rules["missing"])
+        values[missing_mask] = np.nan
 
         return values
 
@@ -328,7 +414,7 @@ class GWOReader:
 
         # Short-wave radiation: 0.01 MJ/m²/h -> W/m²
         # 0.01 MJ/m²/h = 0.01 * 1e6 J / 3600 s = 2.7778 W/m²
-        slht = self.apply_rmk_mask(df, "slht", is_solar=True)
+        slht = self.apply_rmk_mask(df, "slht")
         slht_wm2: pd.Series = slht * 0.01 * 1e6 / 3600.0  # type: ignore[assignment]
         # DO NOT use fillna(0.0) - let gap filler handle daytime gaps
         # Only apply interpolation if fill_gaps is True

@@ -25,6 +25,7 @@ from .gwo_correlations import (
     StationCorrelations,
     get_station_coordinates,
 )
+from .gwo_reader import RMK_RULES, VAR_RMK_TYPE
 
 if TYPE_CHECKING:
     from .gwo_reader import GWOReader
@@ -288,14 +289,19 @@ class GapFiller:
         """Fill gaps for a single variable using all applicable steps."""
         rmk_col = f"{var}RMK"
 
-        # Apply RMK masking first
-        if var in ("slht", "lght"):
-            missing_rmk = {0, 1}
-        else:
-            missing_rmk = {0, 1, 2}
+        # Apply RMK masking using variable-specific rules
+        rule_type = VAR_RMK_TYPE.get(var, "default")
+        rules = RMK_RULES[rule_type]
 
-        is_missing = df[rmk_col].isin(missing_rmk)
-        df.loc[is_missing, var] = np.nan
+        # First, set "zero" RMK codes to 0.0 (e.g., RMK 6 = no precipitation)
+        if rules["zero"] and rmk_col in df.columns:
+            zero_mask = df[rmk_col].isin(rules["zero"])
+            df.loc[zero_mask, var] = 0.0
+
+        # Then, set "missing" RMK codes to NaN
+        if rmk_col in df.columns:
+            is_missing = df[rmk_col].isin(rules["missing"])
+            df.loc[is_missing, var] = np.nan
 
         # Track which rows were originally missing (for updating RMK later)
         originally_missing = df[var].isna().copy()
@@ -463,18 +469,19 @@ class GapFiller:
                 if var not in fallback_df.columns:
                     continue
 
-                # Get RMK-filtered values from fallback
+                # Get RMK-filtered values from fallback using variable-specific rules
                 rmk_col = f"{var}RMK"
+                fallback_values = fallback_df[var].copy().astype(float)
                 if rmk_col in fallback_df.columns:
-                    if var in ("slht", "lght"):
-                        missing_rmk = {0, 1}
-                    else:
-                        missing_rmk = {0, 1, 2}
-                    fallback_mask = fallback_df[rmk_col].isin(missing_rmk)
-                    fallback_values = fallback_df[var].copy()
-                    fallback_values[fallback_mask] = np.nan
-                else:
-                    fallback_values = fallback_df[var].copy()
+                    rule_type = VAR_RMK_TYPE.get(var, "default")
+                    rules = RMK_RULES[rule_type]
+                    # Apply zero RMK codes (e.g., RMK 6 = no precipitation = 0)
+                    if rules["zero"]:
+                        zero_mask = fallback_df[rmk_col].isin(rules["zero"])
+                        fallback_values[zero_mask] = 0.0
+                    # Apply missing RMK codes
+                    missing_mask = fallback_df[rmk_col].isin(rules["missing"])
+                    fallback_values[missing_mask] = np.nan
 
                 # Align indices
                 fallback_values = fallback_values.reindex(df.index)
