@@ -297,6 +297,9 @@ class GapFiller:
         is_missing = df[rmk_col].isin(missing_rmk)
         df.loc[is_missing, var] = np.nan
 
+        # Track which rows were originally missing (for updating RMK later)
+        originally_missing = df[var].isna().copy()
+
         result = GapFillResult(
             variable=var,
             station=station,
@@ -344,6 +347,13 @@ class GapFiller:
             result.annual_mean_filled = before - int(df[var].isna().values.sum())
 
         result.remaining = int(df[var].isna().values.sum())
+
+        # Update RMK codes for filled values to mark as valid (8 = normal value)
+        # This prevents convert_units from masking these values again
+        if rmk_col in df.columns:
+            filled_mask = originally_missing & ~df[var].isna()
+            df.loc[filled_mask, rmk_col] = 8
+
         return result
 
     def _fill_boundary(

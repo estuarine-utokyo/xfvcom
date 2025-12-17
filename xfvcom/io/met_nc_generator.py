@@ -579,7 +579,9 @@ class MetNetCDFGenerator(BaseGenerator):
         """
         Run comprehensive gap filling on GWO data.
 
-        This method applies the 4-step gap filling process:
+        This method applies the 4-step gap filling process per variable,
+        respecting the station_map to load data from the correct station
+        for each variable:
         1. Temporal interpolation
         2. Boundary interpolation
         3. Fallback station interpolation
@@ -593,18 +595,29 @@ class MetNetCDFGenerator(BaseGenerator):
         if not self._gwo_mode or self._gwo_dir is None:
             return None
 
-        from .gwo_gap_filler import GapFiller
-        from .gwo_reader import GWOReader
+        from .gwo_gap_filler import FILLABLE_VARIABLES, GapFiller
+        from .gwo_reader import GWOForcingSource, GWOReader
 
         reader = GWOReader(self._gwo_dir)
 
-        # Get the primary station (default station)
-        station = self._station_map.get("*", "Chiba") if self._station_map else "Chiba"
+        # Get the default station
+        default_station = (
+            self._station_map.get("*", "Chiba") if self._station_map else "Chiba"
+        )
 
-        # Load raw data
         start_dt = self.start.to_pydatetime()
         end_dt = self.end.to_pydatetime()
-        df = reader.load_range(station, start_dt, end_dt)
+
+        # Build a mapping of station -> list of variables from that station
+        station_to_vars: dict[str, list[str]] = {}
+        for var in FILLABLE_VARIABLES:
+            if self._station_map and var in self._station_map:
+                station = self._station_map[var]
+            else:
+                station = default_station
+            if station not in station_to_vars:
+                station_to_vars[station] = []
+            station_to_vars[station].append(var)
 
         # Create gap filler
         filler = GapFiller(
@@ -616,18 +629,40 @@ class MetNetCDFGenerator(BaseGenerator):
             extend_boundary=self._extend_boundary,
         )
 
-        # Run gap filling
-        filled_df, results = filler.fill_all(df, station, start_dt, end_dt)
+        all_results: list["GapFillResult"] = []
+        filled_data_by_station: dict[str, pd.DataFrame] = {}
 
-        # Update the GWO source with filled data
-        # Note: The actual update mechanism depends on the GWOForcingSource implementation
-        # For now, we just return the results for reporting
+        # Process each station
+        for station, vars_from_station in station_to_vars.items():
+            # Load raw data for this station
+            df = reader.load_range(station, start_dt, end_dt)
 
-        return results
+            # Run gap filling for each variable from this station
+            for var in vars_from_station:
+                if var not in df.columns:
+                    continue
+
+                result = filler._fill_variable(df, var, station, start_dt, end_dt)
+                all_results.append(result)
+
+            # Store the filled data for this station
+            filled_data_by_station[station] = df
+
+        # Pass the filled data to the GWO source
+        if self._gwo_source is not None:
+            gwo_source = self._gwo_source
+            if isinstance(gwo_source, GWOForcingSource):
+                for station, filled_df in filled_data_by_station.items():
+                    gwo_source.set_prefilled_data(station, filled_df)
+
+        return all_results
 
     def analyze_missing_values(self) -> list["MissingValueInfo"] | None:
         """
         Analyze missing values in GWO data without filling.
+
+        This method respects the station_map to analyze data from the correct
+        station for each variable.
 
         Returns
         -------
@@ -637,18 +672,29 @@ class MetNetCDFGenerator(BaseGenerator):
         if not self._gwo_mode or self._gwo_dir is None:
             return None
 
-        from .gwo_gap_filler import GapFiller
+        from .gwo_gap_filler import FILLABLE_VARIABLES, GapFiller, MissingValueInfo
         from .gwo_reader import GWOReader
 
         reader = GWOReader(self._gwo_dir)
 
-        # Get the primary station (default station)
-        station = self._station_map.get("*", "Chiba") if self._station_map else "Chiba"
+        # Get the default station
+        default_station = (
+            self._station_map.get("*", "Chiba") if self._station_map else "Chiba"
+        )
 
-        # Load raw data
         start_dt = self.start.to_pydatetime()
         end_dt = self.end.to_pydatetime()
-        df = reader.load_range(station, start_dt, end_dt)
+
+        # Build a mapping of station -> list of variables from that station
+        station_to_vars: dict[str, list[str]] = {}
+        for var in FILLABLE_VARIABLES:
+            if self._station_map and var in self._station_map:
+                station = self._station_map[var]
+            else:
+                station = default_station
+            if station not in station_to_vars:
+                station_to_vars[station] = []
+            station_to_vars[station].append(var)
 
         # Create gap filler (just for analysis)
         filler = GapFiller(
@@ -656,5 +702,53 @@ class MetNetCDFGenerator(BaseGenerator):
             max_gap_hours=self._max_gap_hours,
         )
 
-        # Analyze missing values
-        return filler.analyze_missing(df, station)
+        all_results: list["MissingValueInfo"] = []
+
+        # Analyze each station
+        for station, vars_from_station in station_to_vars.items():
+            # Load raw data for this station
+            df = reader.load_range(station, start_dt, end_dt)
+
+            # Analyze missing values for each variable from this station
+            for var in vars_from_station:
+                if var not in df.columns:
+                    continue
+
+                rmk_col = f"{var}RMK"
+                if rmk_col not in df.columns:
+                    continue
+
+                # Count missing (RMK 0, 1, 2 except for solar where 2 is valid)
+                if var in ("slht", "lght"):
+                    missing_rmk = {0, 1}
+                else:
+                    missing_rmk = {0, 1, 2}
+
+                is_missing = df[rmk_col].isin(missing_rmk)
+                missing_count = int(is_missing.sum().item())  # type: ignore[union-attr]
+                total_count = len(df)
+
+                # Find gaps
+                gap_details = filler._find_gaps(is_missing)
+
+                max_gap = max((g.duration_hours for g in gap_details), default=0)
+                first_gap = gap_details[0].start if gap_details else None
+
+                all_results.append(
+                    MissingValueInfo(
+                        variable=var,
+                        station=station,
+                        missing=missing_count,
+                        total=total_count,
+                        rate=(
+                            100.0 * missing_count / total_count
+                            if total_count > 0
+                            else 0
+                        ),
+                        max_gap_hours=max_gap,
+                        first_gap_start=first_gap,
+                        gap_details=gap_details,
+                    )
+                )
+
+        return all_results

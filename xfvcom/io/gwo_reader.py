@@ -505,6 +505,34 @@ class GWOForcingSource:
         self._cache: dict[str, pd.DataFrame] = {}
         self._converted: dict[str, dict[str, pd.Series]] = {}
         self._wind_cache: dict[str, tuple[NDArray, NDArray]] = {}
+        self._prefilled: dict[str, pd.DataFrame] = {}  # Pre-filled data by station
+
+    def set_prefilled_data(self, station: str, df: pd.DataFrame) -> None:
+        """
+        Set pre-filled data for a station.
+
+        This allows gap-filled data to be injected instead of loading fresh
+        data from files. The pre-filled data should contain raw GWO columns
+        (kion, rhum, etc.) with gaps already filled.
+
+        Parameters
+        ----------
+        station : str
+            Station name
+        df : pd.DataFrame
+            Pre-filled DataFrame with raw GWO columns
+        """
+        self._prefilled[station] = df
+        # Clear any cached data for this station to force reload from prefilled
+        keys_to_remove = [k for k in self._cache if k.startswith(f"{station}_")]
+        for key in keys_to_remove:
+            del self._cache[key]
+        keys_to_remove = [k for k in self._converted if k.startswith(f"{station}_")]
+        for key in keys_to_remove:
+            del self._converted[key]
+        keys_to_remove = [k for k in self._wind_cache if k.startswith(f"{station}_")]
+        for key in keys_to_remove:
+            del self._wind_cache[key]
 
     def _get_station(self, var: str) -> str:
         """Get station for a variable."""
@@ -517,12 +545,25 @@ class GWOForcingSource:
     def _load_station_data(
         self, station: str, start: datetime, end: datetime
     ) -> pd.DataFrame:
-        """Load and cache station data."""
+        """Load and cache station data, using pre-filled data if available."""
         cache_key = f"{station}_{start}_{end}"
         if cache_key not in self._cache:
-            self._cache[cache_key] = self.reader.load_range(
-                station, start, end, input_tz=self.input_tz
-            )
+            if station in self._prefilled:
+                # Use pre-filled data (already gap-filled)
+                df = self._prefilled[station]
+                # Slice to requested range
+                start_ts = pd.Timestamp(start)
+                end_ts = pd.Timestamp(end)
+                if start_ts.tzinfo is not None:
+                    start_ts = start_ts.tz_localize(None)
+                if end_ts.tzinfo is not None:
+                    end_ts = end_ts.tz_localize(None)
+                self._cache[cache_key] = df.loc[start_ts:end_ts]
+            else:
+                # Load fresh from files
+                self._cache[cache_key] = self.reader.load_range(
+                    station, start, end, input_tz=self.input_tz
+                )
         return self._cache[cache_key]
 
     def _get_converted(
