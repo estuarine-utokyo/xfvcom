@@ -304,10 +304,32 @@ class GapFiller:
             zero_mask = df[rmk_col].isin(rules["zero"])
             df.loc[zero_mask, var] = 0.0
 
-        # Then, set "missing" RMK codes to NaN
+        # Apply missing RMK codes
+        # RMK=0 (not created) and RMK=1 (missing) are always truly missing → NaN
+        # RMK=2 (not observed) handling depends on variable:
+        #   - For cloud cover (clod): may have interpolated values from jma-obsdl
+        #     - RMK=2 with blank value → NaN (truly not observed)
+        #     - RMK=2 with actual value → keep value (interpolated data)
+        #   - For other variables: RMK=2 always → NaN
         if rmk_col in df.columns:
-            is_missing = df[rmk_col].isin(rules["missing"])
-            df.loc[is_missing, var] = np.nan
+            always_missing_rmk = {0, 1}
+            always_missing_codes = always_missing_rmk & rules["missing"]
+            if always_missing_codes:
+                always_missing_mask = df[rmk_col].isin(always_missing_codes)
+                df.loc[always_missing_mask, var] = np.nan
+
+            # Handle RMK=2 based on variable type
+            if 2 in rules["missing"]:
+                rmk2_mask = df[rmk_col] == 2
+                if var == "clod":
+                    # For cloud cover, only mask as NaN if value is also missing
+                    # This preserves interpolated values from jma-obsdl
+                    value_missing_mask = df[var].isna()
+                    conditional_missing_mask = rmk2_mask & value_missing_mask
+                    df.loc[conditional_missing_mask, var] = np.nan
+                else:
+                    # For other variables, RMK=2 always means missing
+                    df.loc[rmk2_mask, var] = np.nan
 
         # Track which rows were originally missing (for updating RMK later)
         originally_missing = df[var].isna().copy()

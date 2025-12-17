@@ -309,9 +309,14 @@ class GWOReader:
         Apply RMK code masking based on variable-specific rules.
 
         RMK codes are processed as follows:
-        - "missing" RMK codes → NaN (truly missing data)
+        - "missing" RMK codes with blank/NaN value → NaN (truly missing data)
+        - "missing" RMK codes with actual value → keep value (e.g., interpolated data)
         - "zero" RMK codes → 0.0 (valid zero measurement)
         - Other RMK codes → use raw value
+
+        This allows interpolated values (e.g., cloud cover from jma-obsdl with RMK=2)
+        to be preserved when a value exists, while still treating truly missing data
+        (RMK indicates missing AND value is blank) as NaN.
 
         Parameters
         ----------
@@ -353,9 +358,33 @@ class GWOReader:
             zero_mask = df[rmk_col].isin(rules["zero"])
             values[zero_mask] = 0.0
 
-        # Apply missing RMK codes (set to NaN)
-        missing_mask = df[rmk_col].isin(rules["missing"])
-        values[missing_mask] = np.nan
+        # Apply missing RMK codes
+        # RMK=0 (not created) and RMK=1 (missing) are always truly missing → NaN
+        # RMK=2 (not observed) handling depends on variable:
+        #   - For cloud cover (clod): may have interpolated values from jma-obsdl
+        #     - RMK=2 with blank value → NaN (truly not observed)
+        #     - RMK=2 with actual value → keep value (interpolated data)
+        #   - For other variables: RMK=2 always → NaN
+        always_missing_rmk = {0, 1}
+
+        # Always mask RMK=0 and RMK=1 as NaN (if they are in the rules)
+        always_missing_codes = always_missing_rmk & rules["missing"]
+        if always_missing_codes:
+            always_missing_mask = df[rmk_col].isin(always_missing_codes)
+            values[always_missing_mask] = np.nan
+
+        # Handle RMK=2 based on variable type
+        if 2 in rules["missing"]:
+            rmk2_mask = df[rmk_col] == 2
+            if var == "clod":
+                # For cloud cover, only mask as NaN if value is also missing
+                # This preserves interpolated values from jma-obsdl
+                value_missing_mask = values.isna()
+                conditional_missing_mask = rmk2_mask & value_missing_mask
+                values[conditional_missing_mask] = np.nan
+            else:
+                # For other variables, RMK=2 always means missing
+                values[rmk2_mask] = np.nan
 
         return values
 
