@@ -52,6 +52,91 @@ DEFAULT_SOURCE_NAMES = [
     "CMorigasaki",
 ]
 
+# Member ID (output directory number) to grouped source name mapping
+# for TB-FVCOM goto2023 dye runs (cases 1-18, excluding 0=baseline)
+# Each member represents one source or a group of multi-node sources
+MEMBER_SOURCE_NAMES: dict[int, str] = {
+    1: "Arakawa",      # 4 nodes: East, Center, West, South
+    2: "Sumida",       # 3 nodes: First, Second, Third
+    3: "Edo",          # 3 nodes: One, Two, Three
+    4: "Tama",         # 3 nodes: Ichi, Ni, San
+    5: "Tsurumi",      # 2 nodes: A, B
+    6: "Mama",         # 1 node
+    7: "Ebi",          # 1 node
+    8: "Yoro",         # 1 node
+    9: "Obitsu",       # 1 node
+    10: "Koito",       # 1 node
+    11: "Murata",      # 1 node
+    12: "Hanami",      # 1 node
+    13: "Shibaura",    # 1 node (sewer)
+    14: "Sunamachi",   # 1 node (sewer)
+    15: "Ariake",      # 1 node (sewer)
+    16: "Kasai",       # 1 node (sewer)
+    17: "Morigasaki",  # 3 nodes: A, B, C (sewer)
+    18: "OBC",         # Open boundary condition
+}
+
+# Full names with type suffix (alternative mapping)
+MEMBER_SOURCE_NAMES_FULL: dict[int, str] = {
+    1: "Arakawa R.",
+    2: "Sumida R.",
+    3: "Edo R.",
+    4: "Tama R.",
+    5: "Tsurumi R.",
+    6: "Mama R.",
+    7: "Ebi R.",
+    8: "Yoro R.",
+    9: "Obitsu R.",
+    10: "Koito R.",
+    11: "Murata R.",
+    12: "Hanami R.",
+    13: "Shibaura S.",
+    14: "Sunamachi S.",
+    15: "Ariake S.",
+    16: "Kasai S.",
+    17: "Morigasaki S.",
+    18: "OBC",
+}
+
+# Source type classification
+MEMBER_SOURCE_TYPES: dict[int, str] = {
+    1: "River", 2: "River", 3: "River", 4: "River", 5: "River",
+    6: "River", 7: "River", 8: "River", 9: "River", 10: "River",
+    11: "River", 12: "River",
+    13: "Sewer", 14: "Sewer", 15: "Sewer", 16: "Sewer", 17: "Sewer",
+    18: "OBC",
+}
+
+
+def get_source_name(member_id: int, style: str = "short") -> str:
+    """Get source name for a member ID.
+
+    Parameters
+    ----------
+    member_id : int
+        Member ID (1-18 for individual sources, 0 for baseline)
+    style : str
+        Name style: "short" (default), "full" (with type suffix)
+
+    Returns
+    -------
+    str
+        Source name
+
+    Examples
+    --------
+    >>> get_source_name(1)
+    'Arakawa'
+    >>> get_source_name(13, style="full")
+    'Shibaura S.'
+    """
+    if member_id == 0:
+        return "All Sources" if style == "short" else "All Sources (Baseline)"
+
+    if style == "full":
+        return MEMBER_SOURCE_NAMES_FULL.get(member_id, f"Source {member_id}")
+    return MEMBER_SOURCE_NAMES.get(member_id, f"Source {member_id}")
+
 
 def extract_member_node_mapping(
     nml_dir: str | Path,

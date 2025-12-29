@@ -16,6 +16,18 @@ from .config import FvcomPlotConfig
 from .core import FvcomPlotter  # ← 追加すると便利
 from .dye_timeseries import plot_dye_timeseries_stacked
 from .markers import make_node_marker_post
+from .source_contribution import (
+    create_source_contribution_plot,
+    load_dye_timeseries_multi_source,
+    plot_source_contribution_stack,
+)
+from .source_map import (
+    SOURCE_NODES,
+    SOURCE_TYPES,
+    get_source_coordinates,
+    load_grid_coordinates,
+    plot_source_map,
+)
 from .timeseries import (
     apply_smart_time_ticks,
     plot_ensemble_statistics,
@@ -58,6 +70,16 @@ __all__: list[str] = [
     "plot_dye_timeseries_stacked",
     "get_member_color",
     "get_member_colors",
+    # Source contribution plots
+    "create_source_contribution_plot",
+    "load_dye_timeseries_multi_source",
+    "plot_source_contribution_stack",
+    # Source map plots
+    "SOURCE_NODES",
+    "SOURCE_TYPES",
+    "get_source_coordinates",
+    "load_grid_coordinates",
+    "plot_source_map",
     # Variable metadata
     "VariableMeta",
     "get_variable_meta",

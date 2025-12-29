@@ -8,16 +8,24 @@ from __future__ import annotations
 
 from .member_info import (
     DEFAULT_SOURCE_NAMES,
+    MEMBER_SOURCE_NAMES,
+    MEMBER_SOURCE_NAMES_FULL,
+    MEMBER_SOURCE_TYPES,
     export_member_mapping,
     extract_member_node_mapping,
     get_member_summary,
     get_node_coordinates,
+    get_source_name,
 )
 
 __all__ = [
     "DEFAULT_SOURCE_NAMES",
+    "MEMBER_SOURCE_NAMES",
+    "MEMBER_SOURCE_NAMES_FULL",
+    "MEMBER_SOURCE_TYPES",
     "extract_member_node_mapping",
     "get_member_summary",
     "export_member_mapping",
     "get_node_coordinates",
+    "get_source_name",
 ]
