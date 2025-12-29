@@ -3050,6 +3050,7 @@ class FvcomPlotter(PlotHelperMixin):
         # 5) save -----------------------------------------------------------
         if save_path is not None:
             ax.figure.savefig(save_path, dpi=opts.dpi or 150, bbox_inches="tight")  # type: ignore[union-attr]
+            plt.close(ax.figure)  # Close figure to prevent memory accumulation
 
 
 # ------------------------------------------------------------------
