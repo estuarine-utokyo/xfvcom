@@ -28,6 +28,11 @@ from .source_map import (
     load_grid_coordinates,
     plot_source_map,
 )
+from .dye_contour import (
+    create_dye_contour_maps,
+    load_dye_time_avg,
+    plot_dye_contour,
+)
 from .timeseries import (
     apply_smart_time_ticks,
     plot_ensemble_statistics,
@@ -80,6 +85,10 @@ __all__: list[str] = [
     "get_source_coordinates",
     "load_grid_coordinates",
     "plot_source_map",
+    # Dye contour maps
+    "create_dye_contour_maps",
+    "load_dye_time_avg",
+    "plot_dye_contour",
     # Variable metadata
     "VariableMeta",
     "get_variable_meta",
