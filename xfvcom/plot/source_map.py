@@ -241,6 +241,8 @@ def get_source_coordinates(
     return source_coords
 
 
+
+
 def plot_source_map(
     nc_file: str | Path,
     target_nodes: list[int] | None = None,
@@ -271,6 +273,8 @@ def plot_source_map(
     marker_size_target: float = 200,
     dpi: int = 300,
     label_offset: tuple[float, float] = (0.005, 0.005),
+    label_configs: dict[str, tuple[float, float, bool]] | None = None,
+    target_label_offset: tuple[float, float] = (0.025, -0.025),
 ) -> dict:
     """Create map plot showing source nodes and target nodes.
 
@@ -333,7 +337,14 @@ def plot_source_map(
     dpi : int
         Output resolution
     label_offset : tuple
-        (lon_offset, lat_offset) for text labels
+        Default (lon_offset, lat_offset) for text labels when no custom config
+    label_configs : dict, optional
+        Custom label configurations for each source. Keys are source names,
+        values are tuples of (lon_offset, lat_offset, use_leader_line).
+        If None, uses default label_offset for all sources.
+        Example: {"Arakawa": (0.01, 0.02, True), "Sumida": (-0.02, 0.01, False)}
+    target_label_offset : tuple
+        (lon_offset, lat_offset) for target node labels (default: (0.025, -0.025))
 
     Returns
     -------
@@ -480,16 +491,42 @@ def plot_source_map(
         linewidths=0.5,
     )
 
-    # Add river labels
+    # Add river labels with custom offsets and optional leader lines
+    # Use label_configs if provided, otherwise fall back to default label_offset
+    _label_configs = label_configs if label_configs is not None else {}
     for lon, lat, name in zip(river_lons, river_lats, river_names):
-        ax.annotate(
-            name,
-            (lon + label_offset[0], lat + label_offset[1]),
-            fontsize=fontsize_source,
-            color=river_color,
-            fontweight="bold",
-            zorder=11,
-        )
+        config = _label_configs.get(name, (label_offset[0], label_offset[1], False))
+        offset_lon, offset_lat, use_leader = config
+
+        if use_leader:
+            # Use annotate with arrow for leader line
+            ax.annotate(
+                name,
+                xy=(lon, lat),  # marker position
+                xytext=(lon + offset_lon, lat + offset_lat),  # label position
+                fontsize=fontsize_source,
+                color=river_color,
+                fontweight="bold",
+                zorder=11,
+                arrowprops=dict(
+                    arrowstyle="-",
+                    color=river_color,
+                    alpha=0.6,
+                    linewidth=0.8,
+                    shrinkA=5,  # gap from label
+                    shrinkB=3,  # gap from marker
+                ),
+            )
+        else:
+            # Simple text without leader line
+            ax.annotate(
+                name,
+                (lon + offset_lon, lat + offset_lat),
+                fontsize=fontsize_source,
+                color=river_color,
+                fontweight="bold",
+                zorder=11,
+            )
 
     # Plot sewer sources
     sewer_lons = []
@@ -513,16 +550,40 @@ def plot_source_map(
         linewidths=0.5,
     )
 
-    # Add sewer labels
+    # Add sewer labels with custom offsets and optional leader lines
     for lon, lat, name in zip(sewer_lons, sewer_lats, sewer_names):
-        ax.annotate(
-            name,
-            (lon + label_offset[0], lat + label_offset[1]),
-            fontsize=fontsize_source,
-            color=sewer_color,
-            fontweight="bold",
-            zorder=11,
-        )
+        config = _label_configs.get(name, (label_offset[0], label_offset[1], False))
+        offset_lon, offset_lat, use_leader = config
+
+        if use_leader:
+            # Use annotate with arrow for leader line
+            ax.annotate(
+                name,
+                xy=(lon, lat),  # marker position
+                xytext=(lon + offset_lon, lat + offset_lat),  # label position
+                fontsize=fontsize_source,
+                color=sewer_color,
+                fontweight="bold",
+                zorder=11,
+                arrowprops=dict(
+                    arrowstyle="-",
+                    color=sewer_color,
+                    alpha=0.6,
+                    linewidth=0.8,
+                    shrinkA=5,  # gap from label
+                    shrinkB=3,  # gap from marker
+                ),
+            )
+        else:
+            # Simple text without leader line
+            ax.annotate(
+                name,
+                (lon + offset_lon, lat + offset_lat),
+                fontsize=fontsize_source,
+                color=sewer_color,
+                fontweight="bold",
+                zorder=11,
+            )
 
     # Plot target nodes if provided
     target_coords_list = []
@@ -545,17 +606,27 @@ def plot_source_map(
             linewidths=1,
         )
 
-        # Add target labels
+        # Add target labels with leader lines to avoid overlap
         for i, (lon, lat, node) in enumerate(
             zip(target_lons, target_lats, target_nodes)
         ):
+            # Use leader line for target labels
             ax.annotate(
                 f"Node {node}",
-                (lon + label_offset[0], lat - label_offset[1]),
+                xy=(lon, lat),  # marker position
+                xytext=(lon + target_label_offset[0], lat + target_label_offset[1]),
                 fontsize=fontsize_target,
                 color=target_color,
                 fontweight="bold",
                 zorder=13,
+                arrowprops=dict(
+                    arrowstyle="-",
+                    color=target_color,
+                    alpha=0.6,
+                    linewidth=0.8,
+                    shrinkA=5,  # gap from label
+                    shrinkB=8,  # gap from marker (larger for star marker)
+                ),
             )
 
         print(f"Target nodes: {target_nodes}", file=sys.stdout)
