@@ -113,10 +113,15 @@ else:
         )
 
 
+# Import interpolation functions directly (no lazy loading needed)
+from .interpolation import elems2nodes, nodes2elems
+
 __all__ = [
     "FvcomGrid",
     "get_grid",
     "read_grid",
     "calculate_node_area",
     "calculate_element_area",
+    "elems2nodes",
+    "nodes2elems",
 ]
