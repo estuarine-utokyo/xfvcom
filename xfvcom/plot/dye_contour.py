@@ -83,9 +83,7 @@ def load_dye_time_avg(
     files = sorted([f for f in member_dir.glob(pattern) if "restart" not in f.name])
 
     if not files:
-        raise FileNotFoundError(
-            f"No files found for member {member} in {member_dir}"
-        )
+        raise FileNotFoundError(f"No files found for member {member} in {member_dir}")
 
     # Open and concatenate files
     if len(files) == 1:

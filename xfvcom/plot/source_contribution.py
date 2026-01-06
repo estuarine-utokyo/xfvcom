@@ -70,9 +70,7 @@ def load_dye_timeseries_multi_source(
 
         # Find NetCDF files (exclude restart files)
         pattern = f"{basename}_{year}_{member}_*.nc"
-        files = sorted(
-            [f for f in member_dir.glob(pattern) if "restart" not in f.name]
-        )
+        files = sorted([f for f in member_dir.glob(pattern) if "restart" not in f.name])
 
         if not files:
             print(
@@ -132,7 +130,11 @@ def load_dye_timeseries_multi_source(
     df = pd.DataFrame(all_series)
 
     # Sort columns by member ID order
-    ordered_cols = [get_source_name(m, style="short") for m in members if get_source_name(m, style="short") in df.columns]
+    ordered_cols = [
+        get_source_name(m, style="short")
+        for m in members
+        if get_source_name(m, style="short") in df.columns
+    ]
     df = df[ordered_cols]
 
     return df
@@ -216,7 +218,9 @@ def plot_source_contribution_stack(
         df = df[(df.index >= start_ts) & (df.index <= end_ts)]
         print(f"Time window: {start} to {end}", file=sys.stdout)
 
-    print(f"Data shape: {df.shape[0]} timesteps x {df.shape[1]} sources", file=sys.stdout)
+    print(
+        f"Data shape: {df.shape[0]} timesteps x {df.shape[1]} sources", file=sys.stdout
+    )
     print(f"Time range: {df.index.min()} to {df.index.max()}", file=sys.stdout)
     print(f"Sources: {list(df.columns)}", file=sys.stdout)
 
@@ -237,6 +241,7 @@ def plot_source_contribution_stack(
 
     # Get colors from colormap
     from matplotlib import colormaps
+
     cmap = colormaps[colormap]
     n_sources = len(df.columns)
     colors = [cmap(i % cmap.N) for i in range(n_sources)]

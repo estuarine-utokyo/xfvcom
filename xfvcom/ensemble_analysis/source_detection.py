@@ -43,14 +43,34 @@ import pandas as pd
 # Prefixes used for subsource naming (to be stripped for grouping)
 SUBSOURCE_PREFIXES = [
     # Directional prefixes
-    "East", "Center", "West", "South", "North",
+    "East",
+    "Center",
+    "West",
+    "South",
+    "North",
     # Ordinal prefixes (English)
-    "First", "Second", "Third", "Fourth", "Fifth",
-    "One", "Two", "Three", "Four", "Five",
+    "First",
+    "Second",
+    "Third",
+    "Fourth",
+    "Fifth",
+    "One",
+    "Two",
+    "Three",
+    "Four",
+    "Five",
     # Ordinal prefixes (Japanese romanization)
-    "Ichi", "Ni", "San", "Yon", "Go",
+    "Ichi",
+    "Ni",
+    "San",
+    "Yon",
+    "Go",
     # Letter prefixes
-    "A", "B", "C", "D", "E",
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
 ]
 
 
@@ -85,7 +105,7 @@ def extract_group_name(subsource_names: list[str]) -> str:
         for prefix in SUBSOURCE_PREFIXES:
             if name.startswith(prefix) and len(name) > len(prefix):
                 # Check if remainder starts with uppercase (actual name)
-                remainder = name[len(prefix):]
+                remainder = name[len(prefix) :]
                 if remainder and remainder[0].isupper():
                     return remainder
         return name
@@ -100,7 +120,7 @@ def extract_group_name(subsource_names: list[str]) -> str:
         stripped = name
         for prefix in SUBSOURCE_PREFIXES:
             if name.startswith(prefix) and len(name) > len(prefix):
-                remainder = name[len(prefix):]
+                remainder = name[len(prefix) :]
                 if remainder and remainder[0].isupper():
                     stripped = remainder
                     break
@@ -289,7 +309,9 @@ class SourceDetector:
             result["river_info_file"] = match.group(1)
 
         # Extract OBC_NODE_LIST_FILE
-        match = re.search(r"OBC_NODE_LIST_FILE\s*=\s*['\"]([^'\"]+)['\"]", content, re.I)
+        match = re.search(
+            r"OBC_NODE_LIST_FILE\s*=\s*['\"]([^'\"]+)['\"]", content, re.I
+        )
         if match:
             result["obc_node_list_file"] = match.group(1)
 
@@ -322,6 +344,7 @@ class SourceDetector:
         # Use absolute import for compatibility with direct module loading
         import importlib.util
         from pathlib import Path
+
         module_path = Path(__file__).parent.parent / "io" / "river_nml.py"
         spec = importlib.util.spec_from_file_location("river_nml", str(module_path))
         river_nml_module = importlib.util.module_from_spec(spec)
@@ -438,7 +461,9 @@ class SourceDetector:
                             active_names.append(node_to_name[node])
 
                 # Check if all sources are active (baseline)
-                if len(active_nodes) == len(m_specify) and all(v > 0 for v in dye_values):
+                if len(active_nodes) == len(m_specify) and all(
+                    v > 0 for v in dye_values
+                ):
                     is_baseline = True
 
             # Determine source info
@@ -540,7 +565,8 @@ class SourceDetector:
     def get_non_baseline_members(self) -> list[int]:
         """Get list of non-baseline member IDs."""
         return [
-            m for m in self.available_members
+            m
+            for m in self.available_members
             if not self.member_sources.get(m, {}).get("is_baseline", False)
         ]
 
@@ -556,4 +582,6 @@ class SourceDetector:
             nodes_str = ", ".join(str(n) for n in info["nodes"][:5])
             if len(info["nodes"]) > 5:
                 nodes_str += f", ... ({len(info['nodes'])} total)"
-            print(f"  {member:2d}: {info['source_name']:15s} ({info['source_type']:8s}) nodes=[{nodes_str}]")
+            print(
+                f"  {member:2d}: {info['source_name']:15s} ({info['source_type']:8s}) nodes=[{nodes_str}]"
+            )

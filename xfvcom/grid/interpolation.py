@@ -140,9 +140,7 @@ def elems2nodes(
         node_data /= count[np.newaxis, np.newaxis, :]
 
     else:
-        raise ValueError(
-            f"elem_data must be 1D, 2D, or 3D, got {elem_data.ndim}D"
-        )
+        raise ValueError(f"elem_data must be 1D, 2D, or 3D, got {elem_data.ndim}D")
 
     return node_data
 
@@ -195,9 +193,7 @@ def nodes2elems(
     # Vectorized: average of three corner nodes
     if node_data.ndim == 1:
         elem_data = (
-            node_data[triangles[0]]
-            + node_data[triangles[1]]
-            + node_data[triangles[2]]
+            node_data[triangles[0]] + node_data[triangles[1]] + node_data[triangles[2]]
         ) / 3.0
     elif node_data.ndim == 2:
         elem_data = (
@@ -212,8 +208,6 @@ def nodes2elems(
             + node_data[..., triangles[2]]
         ) / 3.0
     else:
-        raise ValueError(
-            f"node_data must be 1D, 2D, or 3D, got {node_data.ndim}D"
-        )
+        raise ValueError(f"node_data must be 1D, 2D, or 3D, got {node_data.ndim}D")
 
     return elem_data

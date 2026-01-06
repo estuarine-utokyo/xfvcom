@@ -57,24 +57,24 @@ DEFAULT_SOURCE_NAMES = [
 # for TB-FVCOM goto2023 dye runs (cases 1-18, excluding 0=baseline)
 # Each member represents one source or a group of multi-node sources
 MEMBER_SOURCE_NAMES: dict[int, str] = {
-    1: "Arakawa",      # 4 nodes: East, Center, West, South
-    2: "Sumida",       # 3 nodes: First, Second, Third
-    3: "Edo",          # 3 nodes: One, Two, Three
-    4: "Tama",         # 3 nodes: Ichi, Ni, San
-    5: "Tsurumi",      # 2 nodes: A, B
-    6: "Mama",         # 1 node
-    7: "Ebi",          # 1 node
-    8: "Yoro",         # 1 node
-    9: "Obitsu",       # 1 node
-    10: "Koito",       # 1 node
-    11: "Murata",      # 1 node
-    12: "Hanami",      # 1 node
-    13: "Shibaura",    # 1 node (sewer)
-    14: "Sunamachi",   # 1 node (sewer)
-    15: "Ariake",      # 1 node (sewer)
-    16: "Kasai",       # 1 node (sewer)
+    1: "Arakawa",  # 4 nodes: East, Center, West, South
+    2: "Sumida",  # 3 nodes: First, Second, Third
+    3: "Edo",  # 3 nodes: One, Two, Three
+    4: "Tama",  # 3 nodes: Ichi, Ni, San
+    5: "Tsurumi",  # 2 nodes: A, B
+    6: "Mama",  # 1 node
+    7: "Ebi",  # 1 node
+    8: "Yoro",  # 1 node
+    9: "Obitsu",  # 1 node
+    10: "Koito",  # 1 node
+    11: "Murata",  # 1 node
+    12: "Hanami",  # 1 node
+    13: "Shibaura",  # 1 node (sewer)
+    14: "Sunamachi",  # 1 node (sewer)
+    15: "Ariake",  # 1 node (sewer)
+    16: "Kasai",  # 1 node (sewer)
     17: "Morigasaki",  # 3 nodes: A, B, C (sewer)
-    18: "OBC",         # Open boundary condition
+    18: "OBC",  # Open boundary condition
 }
 
 # Full names with type suffix (alternative mapping)
@@ -101,10 +101,23 @@ MEMBER_SOURCE_NAMES_FULL: dict[int, str] = {
 
 # Source type classification
 MEMBER_SOURCE_TYPES: dict[int, str] = {
-    1: "River", 2: "River", 3: "River", 4: "River", 5: "River",
-    6: "River", 7: "River", 8: "River", 9: "River", 10: "River",
-    11: "River", 12: "River",
-    13: "Sewer", 14: "Sewer", 15: "Sewer", 16: "Sewer", 17: "Sewer",
+    1: "River",
+    2: "River",
+    3: "River",
+    4: "River",
+    5: "River",
+    6: "River",
+    7: "River",
+    8: "River",
+    9: "River",
+    10: "River",
+    11: "River",
+    12: "River",
+    13: "Sewer",
+    14: "Sewer",
+    15: "Sewer",
+    16: "Sewer",
+    17: "Sewer",
     18: "OBC",
 }
 

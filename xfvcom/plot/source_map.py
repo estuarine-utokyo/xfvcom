@@ -241,8 +241,6 @@ def get_source_coordinates(
     return source_coords
 
 
-
-
 def plot_source_map(
     nc_file: str | Path,
     target_nodes: list[int] | None = None,
@@ -411,9 +409,7 @@ def plot_source_map(
 
             # Fill ocean (inside the mesh boundary) with ocean color
             for path in boundary_paths:
-                path_coords = [
-                    (coords["lon"][n], coords["lat"][n]) for n in path
-                ]
+                path_coords = [(coords["lon"][n], coords["lat"][n]) for n in path]
                 # Close the path
                 path_coords.append(path_coords[0])
                 ax.fill(
