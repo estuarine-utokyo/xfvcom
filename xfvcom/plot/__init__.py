@@ -14,6 +14,11 @@ from ._timeseries_utils import (
 # ------------------------------------------------------------------
 from .config import FvcomPlotConfig
 from .core import FvcomPlotter  # ← 追加すると便利
+from .dye_contour import (
+    create_dye_contour_maps,
+    load_dye_time_avg,
+    plot_dye_contour,
+)
 from .dye_timeseries import plot_dye_timeseries_stacked
 from .markers import make_node_marker_post
 from .source_contribution import (
@@ -27,11 +32,6 @@ from .source_map import (
     get_source_coordinates,
     load_grid_coordinates,
     plot_source_map,
-)
-from .dye_contour import (
-    create_dye_contour_maps,
-    load_dye_time_avg,
-    plot_dye_contour,
 )
 from .timeseries import (
     apply_smart_time_ticks,

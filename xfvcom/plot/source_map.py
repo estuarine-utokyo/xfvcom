@@ -368,8 +368,8 @@ def plot_source_map(
 
     # Extract and plot coastline with land fill
     if show_coastline:
-        from matplotlib.patches import Polygon as MplPolygon
         from matplotlib.collections import PatchCollection
+        from matplotlib.patches import Polygon as MplPolygon
 
         # Extract boundary edges
         boundary_edges = extract_boundary_edges(coords["nv"])
