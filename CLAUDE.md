@@ -28,6 +28,25 @@ mypy .
 pytest -m "not png"
 ```
 
+**Quick one-liner to run all checks:**
+```bash
+python -m black --check . && python -m isort --check-only . && python -m mypy .
+```
+
+**Quick one-liner to auto-fix formatting (then manually fix mypy):**
+```bash
+python -m black . && python -m isort . && python -m mypy .
+```
+
+### Common mypy fixes
+- Add type annotations to variables: `count: NDArray = np.zeros(...)`
+- Use `| None` for optional types: `self.input_dir: Path | None = None`
+- Use distinct variable names to avoid type redefinition within same scope
+- Add assertions for properties that build internal state: `assert self._data is not None`
+- Use `list()` copy to satisfy list invariance: `layers: list[int | None] = list(sigmas)`
+- Cast pandas values explicitly: `node_id = int(row["column"])`
+- Handle `None` from `importlib.util.spec_from_file_location()`: check `if spec is None`
+
 ### Development
 ```bash
 # Format code
