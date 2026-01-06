@@ -226,6 +226,7 @@ class SourceDetector:
         self.year = year
 
         # Try to find input directory
+        self.input_dir: Path | None = None
         if input_dir is not None:
             self.input_dir = Path(input_dir)
         else:
@@ -235,7 +236,6 @@ class SourceDetector:
                 self.nml_dir.parent / "input",
                 self.nml_dir / ".." / "input",
             ]
-            self.input_dir: Path | None = None
             for candidate in candidates:
                 if candidate.exists():
                     self.input_dir = candidate.resolve()
@@ -322,20 +322,26 @@ class SourceDetector:
         # Extract M_SPECIFY (node IDs)
         match = re.search(r"M_SPECIFY\s*=\s*([0-9,\s]+)", content, re.I)
         if match:
-            values = [int(v.strip()) for v in match.group(1).split(",") if v.strip()]
-            result["m_specify"] = values
+            int_values = [
+                int(v.strip()) for v in match.group(1).split(",") if v.strip()
+            ]
+            result["m_specify"] = int_values
 
         # Extract DYE_SOURCE_TERM
         match = re.search(r"DYE_SOURCE_TERM\s*=\s*([0-9.,\s]+)", content, re.I)
         if match:
-            values = [float(v.strip()) for v in match.group(1).split(",") if v.strip()]
-            result["dye_source_term"] = values
+            float_values = [
+                float(v.strip()) for v in match.group(1).split(",") if v.strip()
+            ]
+            result["dye_source_term"] = float_values
 
         # Extract DYE_SOURCE_TERM_OBC
         match = re.search(r"DYE_SOURCE_TERM_OBC\s*=\s*([0-9.,\s]+)", content, re.I)
         if match:
-            values = [float(v.strip()) for v in match.group(1).split(",") if v.strip()]
-            result["dye_source_term_obc"] = values
+            obc_values = [
+                float(v.strip()) for v in match.group(1).split(",") if v.strip()
+            ]
+            result["dye_source_term_obc"] = obc_values
 
         return result
 

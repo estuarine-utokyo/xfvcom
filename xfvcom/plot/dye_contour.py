@@ -454,7 +454,7 @@ def create_dye_contour_maps(
             if depth_average:
                 layers_to_plot = [None]
             elif sigmas is not None:
-                layers_to_plot = sigmas
+                layers_to_plot = list(sigmas)  # Copy to satisfy mypy invariance
             else:
                 layers_to_plot = [0]
 
