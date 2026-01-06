@@ -36,7 +36,8 @@ from typing import Any
 
 import pandas as pd
 
-from ..io.river_nml import parse_river_namelist
+# Lazy import to avoid slow package initialization
+# parse_river_namelist is imported inside _load_rivers_namelist()
 
 
 # Prefixes used for subsource naming (to be stripped for grouping)
@@ -316,6 +317,16 @@ class SourceDetector:
         """Load and parse rivers namelist file."""
         if self._rivers_df is not None:
             return self._rivers_df
+
+        # Lazy import to avoid slow package initialization
+        # Use absolute import for compatibility with direct module loading
+        import importlib.util
+        from pathlib import Path
+        module_path = Path(__file__).parent.parent / "io" / "river_nml.py"
+        spec = importlib.util.spec_from_file_location("river_nml", str(module_path))
+        river_nml_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(river_nml_module)
+        parse_river_namelist = river_nml_module.parse_river_namelist
 
         # Try to find the file
         candidates = [

@@ -14,7 +14,8 @@ import pandas as pd
 if TYPE_CHECKING:
     pass
 
-from ..io.nml_parser import parse_member_namelist
+# Lazy import to avoid slow package initialization
+# parse_member_namelist is imported inside extract_member_node_mapping()
 
 # Default source names for TB-FVCOM goto2023 dye runs
 # 22 rivers + 7 sewers = 29 sources
@@ -191,6 +192,9 @@ def extract_member_node_mapping(
 
     if source_names is None:
         source_names = DEFAULT_SOURCE_NAMES
+
+    # Lazy import to avoid slow package initialization
+    from ..io.nml_parser import parse_member_namelist
 
     records = []
 
