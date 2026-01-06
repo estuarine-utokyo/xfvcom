@@ -160,8 +160,8 @@ def order_boundary_nodes(
         adj[n2].append(n1)
 
     # Find all closed paths
-    paths = []
-    visited_edges = set()
+    paths: list[list[int]] = []
+    visited_edges: set[tuple[int, int]] = set()
 
     for start_edge in boundary_edges:
         if start_edge in visited_edges:
@@ -180,7 +180,7 @@ def order_boundary_nodes(
             neighbors = adj[current]
             next_node = None
             for n in neighbors:
-                edge = tuple(sorted([current, n]))
+                edge = (min(current, n), max(current, n))
                 if edge not in visited_edges or n == path[0]:
                     if n != prev:
                         next_node = n
@@ -191,7 +191,7 @@ def order_boundary_nodes(
                 break
 
             path.append(next_node)
-            edge = tuple(sorted([current, next_node]))
+            edge = (min(current, next_node), max(current, next_node))
             visited_edges.add(edge)
             visited_edges.add((edge[1], edge[0]))
             prev = current

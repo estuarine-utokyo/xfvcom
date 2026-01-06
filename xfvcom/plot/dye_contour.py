@@ -450,6 +450,7 @@ def create_dye_contour_maps(
             )
 
             # Determine layers to plot
+            layers_to_plot: list[int | None]
             if depth_average:
                 layers_to_plot = [None]
             elif sigmas is not None:

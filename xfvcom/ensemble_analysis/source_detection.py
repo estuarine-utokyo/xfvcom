@@ -235,7 +235,7 @@ class SourceDetector:
                 self.nml_dir.parent / "input",
                 self.nml_dir / ".." / "input",
             ]
-            self.input_dir = None
+            self.input_dir: Path | None = None
             for candidate in candidates:
                 if candidate.exists():
                     self.input_dir = candidate.resolve()
@@ -260,6 +260,8 @@ class SourceDetector:
         """Mapping of source name to list of node IDs."""
         if self._source_nodes is None:
             self._build_source_mapping()
+        # After _build_source_mapping(), _source_nodes is guaranteed to be a dict
+        assert self._source_nodes is not None
         return self._source_nodes
 
     @property
@@ -267,11 +269,13 @@ class SourceDetector:
         """Mapping of member ID to source info."""
         if self._member_sources is None:
             self._build_source_mapping()
+        # After _build_source_mapping(), _member_sources is guaranteed to be a dict
+        assert self._member_sources is not None
         return self._member_sources
 
     def _detect_available_members(self) -> list[int]:
         """Scan output directory for available member subdirectories."""
-        members = []
+        members: list[int] = []
         if not self.output_dir.exists():
             return members
 
@@ -347,6 +351,8 @@ class SourceDetector:
 
         module_path = Path(__file__).parent.parent / "io" / "river_nml.py"
         spec = importlib.util.spec_from_file_location("river_nml", str(module_path))
+        if spec is None or spec.loader is None:
+            return pd.DataFrame()
         river_nml_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(river_nml_module)
         parse_river_namelist = river_nml_module.parse_river_namelist
@@ -426,8 +432,8 @@ class SourceDetector:
         node_to_name: dict[int, str] = {}
         if not rivers_df.empty:
             for _, row in rivers_df.iterrows():
-                node_id = row["grid_location"]
-                name = row["name"]
+                node_id = int(row["grid_location"])
+                name = str(row["name"])
                 node_to_name[node_id] = name
 
         # Process each available member

@@ -101,7 +101,7 @@ def elems2nodes(
         )
 
     # Count how many elements share each node (vectorized)
-    count = np.zeros(n_nodes, dtype=np.int32)
+    count: NDArray = np.zeros(n_nodes, dtype=np.int32)
     np.add.at(count, triangles[0], 1)
     np.add.at(count, triangles[1], 1)
     np.add.at(count, triangles[2], 1)
