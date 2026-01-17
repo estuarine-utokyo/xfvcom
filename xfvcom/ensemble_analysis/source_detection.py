@@ -274,17 +274,35 @@ class SourceDetector:
         return self._member_sources
 
     def _detect_available_members(self) -> list[int]:
-        """Scan output directory for available member subdirectories."""
-        members: list[int] = []
-        if not self.output_dir.exists():
-            return members
+        """Scan output directory for available members.
 
-        for item in self.output_dir.iterdir():
-            if item.is_dir() and item.name.isdigit():
-                # Check if directory has NetCDF files
-                nc_files = list(item.glob("*.nc"))
-                if nc_files:
-                    members.append(int(item.name))
+        Supports two directory structures:
+        1. Flat structure: output/{case}/{basename}_{member}_0001.nc
+        2. Subdirectory structure: output/{year}/{member}/{basename}_{year}_{member}_0001.nc
+        """
+        members: set[int] = set()
+        if not self.output_dir.exists():
+            return []
+
+        # First, try flat directory structure (case-based)
+        # Pattern: {basename}_{member}_*.nc (excluding restart files)
+        flat_pattern = f"{self.basename}_*_*.nc"
+        for nc_file in self.output_dir.glob(flat_pattern):
+            if "restart" in nc_file.name:
+                continue
+            # Extract member from filename: tb_w18_r16_0_0001.nc -> 0
+            match = re.match(rf"{re.escape(self.basename)}_(\d+)_", nc_file.name)
+            if match:
+                members.add(int(match.group(1)))
+
+        # If no flat files found, try subdirectory structure (legacy)
+        if not members:
+            for item in self.output_dir.iterdir():
+                if item.is_dir() and item.name.isdigit():
+                    # Check if directory has NetCDF files
+                    nc_files = list(item.glob("*.nc"))
+                    if nc_files:
+                        members.add(int(item.name))
 
         return sorted(members)
 
@@ -297,8 +315,16 @@ class SourceDetector:
         - dye_source_term: list of dye source values
         - dye_source_term_obc: list of OBC dye values (if present)
         - m_specify: list of node IDs for dye sources
+
+        Supports two naming patterns:
+        1. Case-based: {basename}_{member}_run.nml (new)
+        2. Year-based: {basename}_{year}_{member}_run.nml (legacy)
         """
-        nml_file = self.nml_dir / f"{self.basename}_{self.year}_{member}_run.nml"
+        # Try case-based naming first (new structure)
+        nml_file = self.nml_dir / f"{self.basename}_{member}_run.nml"
+        if not nml_file.exists():
+            # Fall back to year-based naming (legacy)
+            nml_file = self.nml_dir / f"{self.basename}_{self.year}_{member}_run.nml"
         if not nml_file.exists():
             return {}
 
@@ -342,6 +368,21 @@ class SourceDetector:
                 float(v.strip()) for v in match.group(1).split(",") if v.strip()
             ]
             result["dye_source_term_obc"] = obc_values
+
+        # Extract OBC_DYE_ON (check if OBC dye is actually enabled)
+        match = re.search(r"OBC_DYE_ON\s*=\s*([TFtf])", content, re.I)
+        if match:
+            result["obc_dye_on"] = match.group(1).upper() == "T"
+
+        # Extract GROUNDWATER_DYE_ON
+        match = re.search(r"GROUNDWATER_DYE_ON\s*=\s*([TFtf])", content, re.I)
+        if match:
+            result["groundwater_dye_on"] = match.group(1).upper() == "T"
+
+        # Extract GROUNDWATER_ON (main groundwater switch)
+        match = re.search(r"GROUNDWATER_ON\s*=\s*([TFtf])", content, re.I)
+        if match:
+            result["groundwater_on"] = match.group(1).upper() == "T"
 
         return result
 
@@ -452,13 +493,21 @@ class SourceDetector:
             active_nodes = []
             active_names = []
             is_obc = False
+            is_groundwater = False
             is_baseline = False
 
-            # Check for OBC dye
-            if "dye_source_term_obc" in member_info:
-                obc_values = member_info["dye_source_term_obc"]
-                if any(v > 0 for v in obc_values):
-                    is_obc = True
+            # Check for OBC dye (must have OBC_DYE_ON = T)
+            if member_info.get("obc_dye_on", False):
+                if "dye_source_term_obc" in member_info:
+                    obc_values = member_info["dye_source_term_obc"]
+                    if any(v > 0 for v in obc_values):
+                        is_obc = True
+
+            # Check for groundwater dye (must have GROUNDWATER_ON = T and GROUNDWATER_DYE_ON = T)
+            if member_info.get("groundwater_on", False) and member_info.get(
+                "groundwater_dye_on", False
+            ):
+                is_groundwater = True
 
             # Check for river/sewer dye
             if "dye_source_term" in member_info and "m_specify" in member_info:
@@ -479,7 +528,12 @@ class SourceDetector:
                     is_baseline = True
 
             # Determine source info
-            if is_obc and not active_nodes:
+            if is_groundwater and not active_nodes and not is_obc:
+                # Pure groundwater member
+                source_name = "Groundwater"
+                source_type = "Groundwater"
+                nodes = []  # Groundwater doesn't have specific nodes
+            elif is_obc and not active_nodes:
                 # Pure OBC member
                 source_name = "OBC"
                 source_type = "OBC"
@@ -513,6 +567,7 @@ class SourceDetector:
                 "nodes": nodes,
                 "is_baseline": is_baseline,
                 "is_obc": is_obc,
+                "is_groundwater": is_groundwater,
             }
 
             # Add to source_nodes mapping (skip baseline)
@@ -539,6 +594,7 @@ class SourceDetector:
                 "nodes": [],
                 "is_baseline": False,
                 "is_obc": False,
+                "is_groundwater": False,
             }
         return self.member_sources[member]
 
