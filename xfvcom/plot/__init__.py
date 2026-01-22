@@ -22,8 +22,11 @@ from .dye_contour import (
 from .dye_timeseries import plot_dye_timeseries_stacked
 from .markers import make_node_marker_post
 from .source_contribution import (
+    compute_time_averaged_contribution,
+    create_source_contribution_bar_plot,
     create_source_contribution_plot,
     load_dye_timeseries_multi_source,
+    plot_source_contribution_bar,
     plot_source_contribution_stack,
 )
 from .source_map import (
@@ -76,8 +79,11 @@ __all__: list[str] = [
     "get_member_color",
     "get_member_colors",
     # Source contribution plots
+    "compute_time_averaged_contribution",
+    "create_source_contribution_bar_plot",
     "create_source_contribution_plot",
     "load_dye_timeseries_multi_source",
+    "plot_source_contribution_bar",
     "plot_source_contribution_stack",
     # Source map plots
     "SOURCE_NODES",
