@@ -33,12 +33,16 @@ def load_dye_timeseries_multi_source(
 ) -> pd.DataFrame:
     """Load dye time series from multiple member directories.
 
+    Supports two directory structures:
+    1. Flat: output_dir/{basename}_{member}_*.nc
+    2. Nested: output_dir/{year}/{member}/{basename}_{year}_{member}_*.nc
+
     Parameters
     ----------
     output_dir : str or Path
-        Base output directory (e.g., 'goto2023/dye_run/output')
+        Base output directory (e.g., 'goto2023/dye_run/output/case_name')
     year : int
-        Simulation year (e.g., 2021)
+        Simulation year (e.g., 2021) - used for nested structure
     basename : str
         Case basename (e.g., 'tb_w18_r16')
     members : list of int
@@ -65,16 +69,25 @@ def load_dye_timeseries_multi_source(
     all_series = {}
 
     for member in members:
-        # Construct path to member output directory
-        member_dir = output_dir / str(year) / str(member)
+        files = []
 
-        # Find NetCDF files (exclude restart files)
-        pattern = f"{basename}_{year}_{member}_*.nc"
-        files = sorted([f for f in member_dir.glob(pattern) if "restart" not in f.name])
+        # Try flat structure first: output_dir/{basename}_{member}_*.nc
+        pattern_flat = f"{basename}_{member}_*.nc"
+        files = sorted(
+            [f for f in output_dir.glob(pattern_flat) if "restart" not in f.name]
+        )
+
+        # If not found, try nested structure: output_dir/{year}/{member}/...
+        if not files:
+            member_dir = output_dir / str(year) / str(member)
+            pattern_nested = f"{basename}_{year}_{member}_*.nc"
+            files = sorted(
+                [f for f in member_dir.glob(pattern_nested) if "restart" not in f.name]
+            )
 
         if not files:
             print(
-                f"Warning: No files found for member {member} in {member_dir}",
+                f"Warning: No files found for member {member} in {output_dir}",
                 file=sys.stderr,
             )
             continue
