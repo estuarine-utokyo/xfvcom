@@ -384,7 +384,7 @@ def create_source_contribution_plot(
     """
     if members is None:
         # Default: all individual sources (exclude baseline 0)
-        members = list(range(1, 19))
+        members = list(range(1, 20))
 
     # Load data
     print(f"Loading data for {len(members)} members...", file=sys.stdout)
@@ -835,7 +835,7 @@ def create_source_contribution_bar_plot(
     """
     if members is None:
         # Default: all individual sources (exclude baseline 0)
-        members = list(range(1, 19))
+        members = list(range(1, 20))
 
     # Load data
     print(f"Loading data for {len(members)} members...", file=sys.stdout)
