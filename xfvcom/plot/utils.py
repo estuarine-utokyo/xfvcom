@@ -80,6 +80,7 @@ def create_anim_2d_plot(
     processes: int,
     var_name: str,
     *,
+    da: "xr.DataArray | None" = None,
     siglay: int | None = None,
     fps: int = 10,
     generate_gif: bool = True,
@@ -96,7 +97,9 @@ def create_anim_2d_plot(
     - plotter: FvcomPlotter instance used for plotting.
     - processes: Number of maximum processes.
     - var_name: Name of the variable to plot.
-    - siglay: Index of the vertical layer (optional).
+    - da: Pre-processed DataArray to use (optional). If provided, siglay is ignored
+          and this data is used directly. Useful for depth-averaged data.
+    - siglay: Index of the vertical layer (optional). Ignored if da is provided.
     - fps: Frames per second for the GIF animation.
     - generate_gif: If True, generate a GIF animation.
     - generate_mp4: If True, generate an MP4 animation.
@@ -109,7 +112,10 @@ def create_anim_2d_plot(
     - None
     """
 
-    if siglay is None:
+    # Use pre-processed DataArray if provided, otherwise load from dataset
+    if da is not None:
+        pass  # Use provided da directly
+    elif siglay is None:
         da = plotter.ds[var_name]
     else:
         da = plotter.ds[var_name].isel(siglay=siglay)
