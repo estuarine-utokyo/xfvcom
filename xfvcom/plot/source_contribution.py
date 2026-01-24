@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.dates import AutoDateLocator, ConciseDateFormatter, DateFormatter
 
-from ..ensemble_analysis import MEMBER_SOURCE_NAMES, get_source_name
+from ..ensemble_analysis import MEMBER_SOURCE_NAMES, SOURCE_COLORS, get_source_name
 
 if TYPE_CHECKING:
     pass
@@ -162,8 +162,8 @@ def plot_source_contribution_stack(
     figsize: tuple[float, float] = (14, 8),
     fontsize_title: float = 16,
     fontsize_label: float = 14,
-    fontsize_tick: float = 12,
-    fontsize_legend: float = 10,
+    fontsize_tick: float = 14,
+    fontsize_legend: float = 14,
     title: str | None = None,
     ylabel: str = "Dye Concentration",
     dpi: int = 300,
@@ -252,12 +252,18 @@ def plot_source_contribution_stack(
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Get colors from colormap
+    # Get colors for each source (use fixed SOURCE_COLORS for consistency)
     from matplotlib import colormaps
 
-    cmap = colormaps[colormap]
+    cmap = colormaps[colormap]  # Fallback colormap
     n_sources = len(df.columns)
-    colors = [cmap(i % cmap.N) for i in range(n_sources)]
+    colors = []
+    for i, col in enumerate(df.columns):
+        if col in SOURCE_COLORS:
+            colors.append(SOURCE_COLORS[col])
+        else:
+            # Fallback to colormap if source not in SOURCE_COLORS
+            colors.append(cmap(i % cmap.N))
 
     # Create stacked area plot
     # Reverse order so first source is on top (legend order matches visual)
@@ -472,10 +478,10 @@ def plot_source_contribution_bar(
     as_percentage: bool = False,
     figsize: tuple[float, float] | None = None,
     fontsize_title: float = 14,
-    fontsize_label: float = 12,
-    fontsize_tick: float = 10,
-    fontsize_value: float = 9,
-    fontsize_legend: float = 10,
+    fontsize_label: float = 14,
+    fontsize_tick: float = 14,
+    fontsize_value: float = 14,
+    fontsize_legend: float = 14,
     colormap: str = "tab20",
     title: str | None = None,
     xlabel: str | None = None,
@@ -672,7 +678,14 @@ def plot_source_contribution_bar(
         sources = data.index.tolist()
         values = data.values
         n_sources = len(sources)
-        colors = [cmap(i % cmap.N) for i in range(n_sources)]
+        # Use fixed SOURCE_COLORS for consistency across plots
+        colors = []
+        for i, src in enumerate(sources):
+            if src in SOURCE_COLORS:
+                colors.append(SOURCE_COLORS[src])
+            else:
+                # Fallback to colormap if source not in SOURCE_COLORS
+                colors.append(cmap(i % cmap.N))
 
         if orientation == "horizontal":
             y_pos = np.arange(n_sources)
@@ -730,16 +743,18 @@ def plot_source_contribution_bar(
         if xlabel is None:
             xlabel = "Percentage (%)" if as_percentage else "Dye Concentration"
         if ylabel is None:
-            ylabel = "Source"
+            ylabel = ""
         ax.set_xlabel(xlabel, fontsize=fontsize_label)
-        ax.set_ylabel(ylabel, fontsize=fontsize_label)
+        if ylabel:
+            ax.set_ylabel(ylabel, fontsize=fontsize_label)
         ax.set_xlim(left=0)
     else:
         if xlabel is None:
-            xlabel = "Source"
+            xlabel = ""
         if ylabel is None:
             ylabel = "Percentage (%)" if as_percentage else "Dye Concentration"
-        ax.set_xlabel(xlabel, fontsize=fontsize_label)
+        if xlabel:
+            ax.set_xlabel(xlabel, fontsize=fontsize_label)
         ax.set_ylabel(ylabel, fontsize=fontsize_label)
         ax.set_ylim(bottom=0)
 

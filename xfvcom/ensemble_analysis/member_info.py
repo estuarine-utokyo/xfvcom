@@ -54,7 +54,7 @@ DEFAULT_SOURCE_NAMES = [
 ]
 
 # Member ID (output directory number) to grouped source name mapping
-# for TB-FVCOM goto2023 dye runs (cases 1-18, excluding 0=baseline)
+# for TB-FVCOM goto2023 dye runs (cases 1-19, excluding 0=baseline)
 # Each member represents one source or a group of multi-node sources
 MEMBER_SOURCE_NAMES: dict[int, str] = {
     1: "Arakawa",  # 4 nodes: East, Center, West, South
@@ -74,7 +74,38 @@ MEMBER_SOURCE_NAMES: dict[int, str] = {
     15: "Ariake",  # 1 node (sewer)
     16: "Kasai",  # 1 node (sewer)
     17: "Morigasaki",  # 3 nodes: A, B, C (sewer)
-    18: "OBC",  # Open boundary condition
+    18: "OBC",  # Open boundary condition (OBC_DYE_ON=T)
+    19: "GW",  # Groundwater (GROUNDWATER_DYE_ON=T)
+}
+
+# Fixed colors for each source to ensure consistency across all plots
+# Rivers use warm/earth tones, sewers use cool tones, OBC/GW uses gray
+SOURCE_COLORS: dict[str, str] = {
+    # Rivers (warm/earth tones)
+    "Arakawa": "#1f77b4",  # blue
+    "Sumida": "#ff7f0e",  # orange
+    "Edo": "#2ca02c",  # green
+    "Tama": "#d62728",  # red
+    "Tsurumi": "#9467bd",  # purple
+    "Mama": "#8c564b",  # brown
+    "Ebi": "#e377c2",  # pink
+    "Yoro": "#7f7f7f",  # gray
+    "Obitsu": "#bcbd22",  # olive
+    "Koito": "#17becf",  # cyan
+    "Murata": "#aec7e8",  # light blue
+    "Hanami": "#ffbb78",  # light orange
+    # Sewers (distinct colors)
+    "Shibaura": "#98df8a",  # light green
+    "Sunamachi": "#ff9896",  # light red
+    "Ariake": "#c5b0d5",  # light purple
+    "Kasai": "#c49c94",  # light brown
+    "Morigasaki": "#f7b6d2",  # light pink
+    # Open boundary and groundwater
+    "OBC": "#c7c7c7",  # light gray
+    "GW": "#969696",  # medium gray (groundwater)
+    # Special
+    "Others": "#404040",  # dark gray
+    "All Sources": "#333333",  # very dark gray
 }
 
 # Full names with type suffix (alternative mapping)
@@ -97,6 +128,7 @@ MEMBER_SOURCE_NAMES_FULL: dict[int, str] = {
     16: "Kasai S.",
     17: "Morigasaki S.",
     18: "OBC",
+    19: "GW",
 }
 
 # Source type classification
@@ -119,6 +151,7 @@ MEMBER_SOURCE_TYPES: dict[int, str] = {
     16: "Sewer",
     17: "Sewer",
     18: "OBC",
+    19: "GW",
 }
 
 
