@@ -6,6 +6,11 @@ from .timeseries_utils import (
     interpolate_missing_values,
     resample_timeseries,
 )
+from .vertical import (
+    compute_depth_at_siglay,
+    compute_depth_range_average,
+    parse_depth_range,
+)
 
 __all__ = [
     # existing exports ...
@@ -17,4 +22,8 @@ __all__ = [
     "extend_timeseries_seasonal",
     "interpolate_missing_values",
     "resample_timeseries",
+    # vertical coordinate utilities
+    "compute_depth_at_siglay",
+    "compute_depth_range_average",
+    "parse_depth_range",
 ]
