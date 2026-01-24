@@ -169,6 +169,7 @@ def compute_depth_range_average(
                 "lon": ("node", ds["lon"].values),
                 "lat": ("node", ds["lat"].values),
             },
+            attrs=data.attrs,  # Preserve original attributes (long_name, units, etc.)
         )
     else:
         # No time dimension: (siglay, node)
@@ -187,6 +188,7 @@ def compute_depth_range_average(
                 "lon": ("node", ds["lon"].values),
                 "lat": ("node", ds["lat"].values),
             },
+            attrs=data.attrs,  # Preserve original attributes (long_name, units, etc.)
         )
 
     if verbose:
