@@ -127,9 +127,7 @@ def create_anim_2d_plot(
 
     suffix = "_frame"
     len_suffix = len(suffix)
-    # Convert subscripts $_x$ -> x
-    re.sub(r"\$_(\d+)\$", r"\1", da.long_name)
-    # base_name = f"{long_name}_{start_date}-{end_date}{suffix}"
+    # base_name uses var_name directly (long_name may not exist for processed DataArrays)
     base_name = f"{var_name}_{start_date}-{end_date}{suffix}"
 
     output_dir = Path(f"frames_{var_name}")
