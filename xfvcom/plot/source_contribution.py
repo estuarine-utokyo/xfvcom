@@ -16,7 +16,12 @@ import numpy as np
 import pandas as pd
 from matplotlib.dates import AutoDateLocator, ConciseDateFormatter, DateFormatter
 
-from ..ensemble_analysis import MEMBER_SOURCE_NAMES, SOURCE_COLORS, get_source_name
+from ..ensemble_analysis import (
+    MEMBER_SOURCE_NAMES,
+    SOURCE_COLORS,
+    get_source_colors_dict,
+    get_source_name,
+)
 
 if TYPE_CHECKING:
     pass
@@ -170,6 +175,7 @@ def plot_source_contribution_stack(
     colormap: str = "tab20",
     date_format: str | None = None,
     rotation: float = 0,
+    max_xticks: int | None = None,
 ) -> dict:
     """Create stacked area plot showing source contributions.
 
@@ -207,6 +213,9 @@ def plot_source_contribution_stack(
         Date format string for x-axis (e.g., '%Y-%m-%d'). If None, auto-format.
     rotation : float
         X-axis label rotation in degrees (default: 0, no slant)
+    max_xticks : int, optional
+        Maximum number of x-axis ticks. If None, uses automatic (default: ~10).
+        Use smaller values for narrower figures to prevent label overlap.
 
     Returns
     -------
@@ -252,17 +261,18 @@ def plot_source_contribution_stack(
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Get colors for each source (use fixed SOURCE_COLORS for consistency)
+    # Get colors for each source (use config or defaults for consistency)
     from matplotlib import colormaps
 
+    source_colors = get_source_colors_dict()  # Dynamic: uses config if loaded
     cmap = colormaps[colormap]  # Fallback colormap
     n_sources = len(df.columns)
     colors = []
     for i, col in enumerate(df.columns):
-        if col in SOURCE_COLORS:
-            colors.append(SOURCE_COLORS[col])
+        if col in source_colors:
+            colors.append(source_colors[col])
         else:
-            # Fallback to colormap if source not in SOURCE_COLORS
+            # Fallback to colormap if source not in config
             colors.append(cmap(i % cmap.N))
 
     # Create stacked area plot
@@ -279,12 +289,20 @@ def plot_source_contribution_stack(
     )
 
     # Format x-axis
+    # Determine max ticks (use provided value or default to 10)
+    _max_xticks = max_xticks if max_xticks is not None else 10
+    _min_xticks = min(3, _max_xticks)
+
     if date_format is not None:
-        # Use user-specified format
+        # Use user-specified format with controlled tick count
+        from matplotlib.dates import AutoDateLocator as ADL
+
+        locator = ADL(minticks=_min_xticks, maxticks=_max_xticks)
+        ax.xaxis.set_major_locator(locator)
         ax.xaxis.set_major_formatter(DateFormatter(date_format))
     else:
         # Auto-format based on time range
-        locator = AutoDateLocator(minticks=3, maxticks=10)
+        locator = AutoDateLocator(minticks=_min_xticks, maxticks=_max_xticks)
         formatter = ConciseDateFormatter(locator)
         ax.xaxis.set_major_locator(locator)
         ax.xaxis.set_major_formatter(formatter)
@@ -678,13 +696,14 @@ def plot_source_contribution_bar(
         sources = data.index.tolist()
         values = data.values
         n_sources = len(sources)
-        # Use fixed SOURCE_COLORS for consistency across plots
+        # Use config or defaults for consistency across plots
+        source_colors = get_source_colors_dict()
         colors = []
         for i, src in enumerate(sources):
-            if src in SOURCE_COLORS:
-                colors.append(SOURCE_COLORS[src])
+            if src in source_colors:
+                colors.append(source_colors[src])
             else:
-                # Fallback to colormap if source not in SOURCE_COLORS
+                # Fallback to colormap if source not in config
                 colors.append(cmap(i % cmap.N))
 
         if orientation == "horizontal":

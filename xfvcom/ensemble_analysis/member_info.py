@@ -2,6 +2,11 @@
 
 This module provides utilities to extract which nodes are active in each
 ensemble member by parsing FVCOM namelist files.
+
+Source configurations can be loaded from external YAML files via
+xfvcom.config.load_source_config(). When external config is loaded,
+functions in this module will use those values instead of the hardcoded
+defaults below.
 """
 
 from __future__ import annotations
@@ -17,9 +22,15 @@ if TYPE_CHECKING:
 # Lazy import to avoid slow package initialization
 # parse_member_namelist is imported inside extract_member_node_mapping()
 
+
+# =============================================================================
+# Default hardcoded values (for backward compatibility)
+# These are used when no external configuration is loaded.
+# =============================================================================
+
 # Default source names for TB-FVCOM goto2023 dye runs
 # 22 rivers + 7 sewers = 29 sources
-DEFAULT_SOURCE_NAMES = [
+_DEFAULT_SOURCE_NAMES = [
     # Rivers (22)
     "EastArakawa",
     "CenterArakawa",
@@ -56,7 +67,7 @@ DEFAULT_SOURCE_NAMES = [
 # Member ID (output directory number) to grouped source name mapping
 # for TB-FVCOM goto2023 dye runs (cases 1-19, excluding 0=baseline)
 # Each member represents one source or a group of multi-node sources
-MEMBER_SOURCE_NAMES: dict[int, str] = {
+_DEFAULT_MEMBER_SOURCE_NAMES: dict[int, str] = {
     1: "Arakawa",  # 4 nodes: East, Center, West, South
     2: "Sumida",  # 3 nodes: First, Second, Third
     3: "Edo",  # 3 nodes: One, Two, Three
@@ -80,7 +91,7 @@ MEMBER_SOURCE_NAMES: dict[int, str] = {
 
 # Fixed colors for each source to ensure consistency across all plots
 # Rivers use warm/earth tones, sewers use cool tones, OBC/GW uses gray
-SOURCE_COLORS: dict[str, str] = {
+_DEFAULT_SOURCE_COLORS: dict[str, str] = {
     # Rivers (warm/earth tones)
     "Arakawa": "#1f77b4",  # blue
     "Sumida": "#ff7f0e",  # orange
@@ -109,7 +120,7 @@ SOURCE_COLORS: dict[str, str] = {
 }
 
 # Full names with type suffix (alternative mapping)
-MEMBER_SOURCE_NAMES_FULL: dict[int, str] = {
+_DEFAULT_MEMBER_SOURCE_NAMES_FULL: dict[int, str] = {
     1: "Arakawa R.",
     2: "Sumida R.",
     3: "Edo R.",
@@ -132,7 +143,7 @@ MEMBER_SOURCE_NAMES_FULL: dict[int, str] = {
 }
 
 # Source type classification
-MEMBER_SOURCE_TYPES: dict[int, str] = {
+_DEFAULT_MEMBER_SOURCE_TYPES: dict[int, str] = {
     1: "River",
     2: "River",
     3: "River",
@@ -155,8 +166,209 @@ MEMBER_SOURCE_TYPES: dict[int, str] = {
 }
 
 
+# =============================================================================
+# Dynamic accessors (use external config if loaded, else defaults)
+# =============================================================================
+
+
+def _get_config_module():
+    """Lazily import config module to avoid circular imports."""
+    from xfvcom.config import source_config
+
+    return source_config
+
+
+def _get_source_names_from_config() -> list[str] | None:
+    """Get source names from external config if loaded."""
+    config_mod = _get_config_module()
+    if not config_mod.is_config_loaded():
+        return None
+    return config_mod.get_all_subsource_names()
+
+
+def _get_member_mapping_from_config() -> dict[int, str] | None:
+    """Get member-to-label mapping from external config if loaded."""
+    config_mod = _get_config_module()
+    if not config_mod.is_config_loaded():
+        return None
+    return config_mod.get_member_source_mapping()
+
+
+def _get_colors_from_config() -> dict[str, str] | None:
+    """Get source colors from external config if loaded."""
+    config_mod = _get_config_module()
+    if not config_mod.is_config_loaded():
+        return None
+    return config_mod.get_source_colors()
+
+
+def _get_member_types_from_config() -> dict[int, str] | None:
+    """Get member source types from external config if loaded."""
+    config_mod = _get_config_module()
+    if not config_mod.is_config_loaded():
+        return None
+
+    # Build from member config
+    members = config_mod.get_member_config()
+    if not members:
+        return None
+
+    config = config_mod.get_source_config()
+    sewer_names = set(config.get("sewers", {}).keys())
+
+    types = {}
+    for m in members:
+        member_id = m["id"]
+        sources = m.get("sources", [])
+
+        if sources == "all":
+            types[member_id] = "All"
+        elif m.get("obc_dye") and not sources:
+            types[member_id] = "OBC"
+        elif m.get("groundwater_dye") and not sources:
+            types[member_id] = "GW"
+        elif sources:
+            # Check if any source is a sewer
+            if any(s in sewer_names for s in sources):
+                types[member_id] = "Sewer"
+            else:
+                types[member_id] = "River"
+        else:
+            types[member_id] = "Unknown"
+
+    return types
+
+
+# =============================================================================
+# Public API (backward-compatible module-level variables)
+# =============================================================================
+
+# These are kept for backward compatibility but now delegate to dynamic functions
+# when external config is loaded.
+
+
+@property
+def DEFAULT_SOURCE_NAMES() -> list[str]:
+    """Get default source names (from config if loaded, else hardcoded)."""
+    names = _get_source_names_from_config()
+    return names if names else _DEFAULT_SOURCE_NAMES
+
+
+@property
+def MEMBER_SOURCE_NAMES() -> dict[int, str]:
+    """Get member-to-source mapping (from config if loaded, else hardcoded)."""
+    mapping = _get_member_mapping_from_config()
+    return mapping if mapping else _DEFAULT_MEMBER_SOURCE_NAMES
+
+
+@property
+def SOURCE_COLORS() -> dict[str, str]:
+    """Get source colors (from config if loaded, else hardcoded)."""
+    colors = _get_colors_from_config()
+    if colors:
+        # Merge with defaults to ensure special entries exist
+        merged = _DEFAULT_SOURCE_COLORS.copy()
+        merged.update(colors)
+        return merged
+    return _DEFAULT_SOURCE_COLORS
+
+
+@property
+def MEMBER_SOURCE_NAMES_FULL() -> dict[int, str]:
+    """Get member full names (from config if loaded, else hardcoded)."""
+    config_mod = _get_config_module()
+    if config_mod.is_config_loaded():
+        display = config_mod.get_display_config()
+        full_names = display.get("full_names", {})
+        if full_names:
+            # Build member -> full_name mapping
+            mapping = _get_member_mapping_from_config()
+            if mapping:
+                result = {}
+                for member_id, label in mapping.items():
+                    result[member_id] = full_names.get(label, label)
+                return result
+    return _DEFAULT_MEMBER_SOURCE_NAMES_FULL
+
+
+@property
+def MEMBER_SOURCE_TYPES() -> dict[int, str]:
+    """Get member source types (from config if loaded, else hardcoded)."""
+    types = _get_member_types_from_config()
+    return types if types else _DEFAULT_MEMBER_SOURCE_TYPES
+
+
+# For backward compatibility, expose as simple variables that are evaluated at access time
+# Note: These won't update dynamically after module import, but the functions below will.
+DEFAULT_SOURCE_NAMES = _DEFAULT_SOURCE_NAMES
+MEMBER_SOURCE_NAMES = _DEFAULT_MEMBER_SOURCE_NAMES
+SOURCE_COLORS = _DEFAULT_SOURCE_COLORS
+MEMBER_SOURCE_NAMES_FULL = _DEFAULT_MEMBER_SOURCE_NAMES_FULL
+MEMBER_SOURCE_TYPES = _DEFAULT_MEMBER_SOURCE_TYPES
+
+
+# =============================================================================
+# Public functions
+# =============================================================================
+
+
+def get_default_source_names() -> list[str]:
+    """Get source names (from external config if loaded, else defaults).
+
+    Returns
+    -------
+    list[str]
+        List of source names in order.
+    """
+    names = _get_source_names_from_config()
+    return names if names else _DEFAULT_SOURCE_NAMES
+
+
+def get_member_source_names() -> dict[int, str]:
+    """Get member-to-source name mapping (from config if loaded, else defaults).
+
+    Returns
+    -------
+    dict[int, str]
+        Mapping from member ID to source label.
+    """
+    mapping = _get_member_mapping_from_config()
+    return mapping if mapping else _DEFAULT_MEMBER_SOURCE_NAMES
+
+
+def get_source_colors_dict() -> dict[str, str]:
+    """Get source colors (from external config if loaded, else defaults).
+
+    Returns
+    -------
+    dict[str, str]
+        Mapping from source name to color hex string.
+    """
+    colors = _get_colors_from_config()
+    if colors:
+        merged = _DEFAULT_SOURCE_COLORS.copy()
+        merged.update(colors)
+        return merged
+    return _DEFAULT_SOURCE_COLORS
+
+
+def get_member_source_types() -> dict[int, str]:
+    """Get member source types (from config if loaded, else defaults).
+
+    Returns
+    -------
+    dict[int, str]
+        Mapping from member ID to source type ('River', 'Sewer', 'OBC', 'GW').
+    """
+    types = _get_member_types_from_config()
+    return types if types else _DEFAULT_MEMBER_SOURCE_TYPES
+
+
 def get_source_name(member_id: int, style: str = "short") -> str:
     """Get source name for a member ID.
+
+    This function checks for external configuration first. If loaded,
+    uses labels from the config. Otherwise falls back to hardcoded defaults.
 
     Parameters
     ----------
@@ -180,9 +392,59 @@ def get_source_name(member_id: int, style: str = "short") -> str:
     if member_id == 0:
         return "All Sources" if style == "short" else "All Sources (Baseline)"
 
+    # Try external config first
+    mapping = _get_member_mapping_from_config()
+    if mapping and member_id in mapping:
+        label = mapping[member_id]
+        if style == "full":
+            config_mod = _get_config_module()
+            display = config_mod.get_display_config()
+            full_names = display.get("full_names", {})
+            return full_names.get(label, label)
+        return label
+
+    # Fall back to hardcoded defaults
     if style == "full":
-        return MEMBER_SOURCE_NAMES_FULL.get(member_id, f"Source {member_id}")
-    return MEMBER_SOURCE_NAMES.get(member_id, f"Source {member_id}")
+        return _DEFAULT_MEMBER_SOURCE_NAMES_FULL.get(member_id, f"Source {member_id}")
+    return _DEFAULT_MEMBER_SOURCE_NAMES.get(member_id, f"Source {member_id}")
+
+
+def get_source_color(source_name: str) -> str:
+    """Get color for a source name.
+
+    Parameters
+    ----------
+    source_name : str
+        Source name (e.g., 'Arakawa', 'Shibaura')
+
+    Returns
+    -------
+    str
+        Color hex string (e.g., '#1f77b4')
+    """
+    colors = get_source_colors_dict()
+    return colors.get(source_name, "#404040")  # Default to dark gray
+
+
+def get_river_sewer_boundary() -> int:
+    """Get the index boundary between rivers and sewers.
+
+    Sources with index < boundary are rivers, >= boundary are sewers.
+
+    Returns
+    -------
+    int
+        Boundary index (default 22 for 22 rivers).
+    """
+    config_mod = _get_config_module()
+    if config_mod.is_config_loaded():
+        config = config_mod.get_source_config()
+        # Count river subsources
+        count = 0
+        for river_data in config.get("rivers", {}).values():
+            count += len(river_data.get("subsources", []))
+        return count
+    return 22  # Default: 22 rivers
 
 
 def extract_member_node_mapping(
@@ -208,7 +470,7 @@ def extract_member_node_mapping(
     members : list of int
         List of member IDs to process
     source_names : list of str, optional
-        Names of sources. If None, uses DEFAULT_SOURCE_NAMES.
+        Names of sources. If None, uses get_default_source_names().
 
     Returns
     -------
@@ -237,7 +499,10 @@ def extract_member_node_mapping(
     nml_dir = Path(nml_dir)
 
     if source_names is None:
-        source_names = DEFAULT_SOURCE_NAMES
+        source_names = get_default_source_names()
+
+    # Get river/sewer boundary
+    river_sewer_boundary = get_river_sewer_boundary()
 
     # Lazy import to avoid slow package initialization
     from ..io.nml_parser import parse_member_namelist
@@ -257,9 +522,9 @@ def extract_member_node_mapping(
 
         # Extract active sources
         for src in info["active_sources"]:
-            # Determine source type
+            # Determine source type using dynamic boundary
             source_idx = src["index"]
-            source_type = "River" if source_idx < 22 else "Sewer"
+            source_type = "River" if source_idx < river_sewer_boundary else "Sewer"
 
             records.append(
                 {
@@ -302,7 +567,7 @@ def get_member_summary(
     members : list of int
         List of member IDs to process
     source_names : list of str, optional
-        Names of sources. If None, uses DEFAULT_SOURCE_NAMES.
+        Names of sources. If None, uses get_default_source_names().
 
     Returns
     -------

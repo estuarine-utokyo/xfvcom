@@ -73,6 +73,29 @@ SUBSOURCE_PREFIXES = [
     "E",
 ]
 
+# Default sewer names (fallback when no external config is loaded)
+_DEFAULT_SEWER_NAMES = ["Shibaura", "Sunamachi", "Ariake", "Kasai", "Morigasaki"]
+
+
+def _get_sewer_names() -> list[str]:
+    """Get sewer names from external config if loaded, else defaults.
+
+    Returns
+    -------
+    list[str]
+        List of sewer source names.
+    """
+    try:
+        from xfvcom.config import source_config
+
+        if source_config.is_config_loaded():
+            names = source_config.get_sewer_names()
+            if names:
+                return names
+    except ImportError:
+        pass
+    return _DEFAULT_SEWER_NAMES
+
 
 def extract_group_name(subsource_names: list[str]) -> str:
     """Extract common group name from subsource names.
@@ -549,7 +572,7 @@ class SourceDetector:
                 # Simplify name (remove 'gawa' suffix)
                 source_name = simplify_source_name(source_name)
                 # Determine type based on source name patterns
-                sewer_names = ["Shibaura", "Sunamachi", "Ariake", "Kasai", "Morigasaki"]
+                sewer_names = _get_sewer_names()
                 if any(s.lower() in source_name.lower() for s in sewer_names):
                     source_type = "Sewer"
                 else:

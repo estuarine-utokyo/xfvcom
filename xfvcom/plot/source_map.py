@@ -2,6 +2,10 @@
 
 This module provides tools for creating map plots showing the locations
 of river/sewer source nodes and target analysis nodes in Tokyo Bay.
+
+Source configurations can be loaded from external YAML files via
+xfvcom.config.load_source_config(). When external config is loaded,
+this module will use those values instead of the hardcoded defaults.
 """
 
 from __future__ import annotations
@@ -19,9 +23,13 @@ if TYPE_CHECKING:
     pass
 
 
+# =============================================================================
+# Default hardcoded values (for backward compatibility)
+# =============================================================================
+
 # Source nodes mapping (1-based node IDs)
 # Rivers (22 nodes in 12 groups) + Sewers (7 nodes in 5 groups)
-SOURCE_NODES: dict[str, list[int]] = {
+_DEFAULT_SOURCE_NODES: dict[str, list[int]] = {
     # Rivers
     "Arakawa": [310, 241, 312, 448],
     "Sumida": [4, 2, 12],
@@ -44,7 +52,7 @@ SOURCE_NODES: dict[str, list[int]] = {
 }
 
 # Source types
-SOURCE_TYPES: dict[str, str] = {
+_DEFAULT_SOURCE_TYPES: dict[str, str] = {
     "Arakawa": "River",
     "Sumida": "River",
     "Edo": "River",
@@ -63,6 +71,72 @@ SOURCE_TYPES: dict[str, str] = {
     "Kasai": "Sewer",
     "Morigasaki": "Sewer",
 }
+
+
+# =============================================================================
+# Dynamic accessors
+# =============================================================================
+
+
+def _get_source_nodes_from_config() -> dict[str, list[int]] | None:
+    """Get source nodes from external config if loaded."""
+    try:
+        from xfvcom.config import source_config
+
+        if source_config.is_config_loaded():
+            return source_config.get_source_nodes()
+    except ImportError:
+        pass
+    return None
+
+
+def _get_source_types_from_config() -> dict[str, str] | None:
+    """Get source types from external config if loaded."""
+    try:
+        from xfvcom.config import source_config
+
+        if source_config.is_config_loaded():
+            config = source_config.get_source_config()
+            types = {}
+            for name in config.get("rivers", {}):
+                types[name] = "River"
+            for name in config.get("sewers", {}):
+                types[name] = "Sewer"
+            return types if types else None
+    except ImportError:
+        pass
+    return None
+
+
+def get_source_nodes() -> dict[str, list[int]]:
+    """Get source nodes mapping (from config if loaded, else defaults).
+
+    Returns
+    -------
+    dict[str, list[int]]
+        Mapping from source name to list of node IDs.
+    """
+    nodes = _get_source_nodes_from_config()
+    return nodes if nodes else _DEFAULT_SOURCE_NODES
+
+
+def get_source_types() -> dict[str, str]:
+    """Get source types mapping (from config if loaded, else defaults).
+
+    Returns
+    -------
+    dict[str, str]
+        Mapping from source name to type ('River' or 'Sewer').
+    """
+    types = _get_source_types_from_config()
+    return types if types else _DEFAULT_SOURCE_TYPES
+
+
+# For backward compatibility, expose as module-level variables
+# Note: These are evaluated at import time and won't update dynamically.
+# Use get_source_nodes() and get_source_types() for dynamic access.
+SOURCE_NODES = _DEFAULT_SOURCE_NODES
+SOURCE_TYPES = _DEFAULT_SOURCE_TYPES
 
 
 def load_grid_coordinates(nc_file: str | Path) -> dict:
@@ -214,7 +288,7 @@ def get_source_coordinates(
     coords : dict
         Grid coordinates from load_grid_coordinates()
     source_nodes : dict, optional
-        Source-to-node mapping. If None, uses default SOURCE_NODES.
+        Source-to-node mapping. If None, uses get_source_nodes().
 
     Returns
     -------
@@ -222,10 +296,13 @@ def get_source_coordinates(
         Dictionary mapping source name to {'lon', 'lat', 'nodes', 'type'}
     """
     if source_nodes is None:
-        source_nodes = SOURCE_NODES
+        source_nodes = get_source_nodes()
 
     lon = coords["lon"]
     lat = coords["lat"]
+
+    # Get source types (dynamic)
+    source_types = get_source_types()
 
     source_coords = {}
     for name, nodes in source_nodes.items():
@@ -235,7 +312,7 @@ def get_source_coordinates(
             "lon": np.mean([lon[i] for i in node_idx]),
             "lat": np.mean([lat[i] for i in node_idx]),
             "nodes": nodes,
-            "type": SOURCE_TYPES.get(name, "Unknown"),
+            "type": source_types.get(name, "Unknown"),
         }
 
     return source_coords
