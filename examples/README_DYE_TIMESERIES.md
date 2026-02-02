@@ -16,19 +16,16 @@ A robust tool for extracting and analyzing dye concentration time series from mu
 
 ## Installation
 
-The tool is part of the `xfvcom` package. Ensure you have installed xfvcom:
+The tool is part of the `xfvcom` package. Set up the environment using mamba (recommended):
 
 ```bash
 cd ~/Github/xfvcom
-pip install -e .
+bash setup.sh
+conda activate xfvcom
 ```
 
-**Required**: Install zarr for both NetCDF and Zarr export support:
-```bash
-pip install zarr
-```
-
-Note: Zarr is required for the dye time series tools. The package supports exporting to both `.nc` (NetCDF) and `.zarr` formats.
+The `xfvcom` environment includes zarr and all other dependencies.
+The package supports exporting to both `.nc` (NetCDF) and `.zarr` formats.
 
 ## Usage
 

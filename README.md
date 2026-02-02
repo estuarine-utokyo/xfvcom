@@ -10,16 +10,36 @@ A Python toolkit for [FVCOM](https://github.com/FVCOM-GitHub/FVCOM) ocean model 
 
 ## Installation
 
+### Recommended: mamba (Miniforge)
+
 Requires [Miniforge](https://github.com/conda-forge/miniforge) (mamba).
 
 ```bash
 git clone https://github.com/jsasaki-utokyo/xfvcom.git
 cd xfvcom
-./setup.sh
+bash setup.sh            # Creates "xfvcom" environment (Python 3.13)
 conda activate xfvcom
 ```
 
-**Note**: Installation uses `mamba` (via setup.sh) to avoid conflicts with Intel oneAPI Python on supercomputers. Activation works with both `conda activate` and `mamba activate`.
+For Intel MPI on supercomputers:
+
+```bash
+bash setup.sh --impi     # Switches MPI backend to Intel MPI
+```
+
+See `bash setup.sh --help` for all options.
+
+> **Note**: Use `mamba` (via `setup.sh`) to avoid conflicts with Intel oneAPI Python on supercomputers.
+> Activation works with both `conda activate` and `mamba activate`.
+
+### Alternative: pip (not recommended)
+
+```bash
+pip install -e .[dev,video]
+```
+
+pip does not install MPI, NetCDF CLI tools (nco, cdo), or other system-level packages included in `environment.yml`.
+Use pip only for packages unavailable on conda-forge.
 
 ---
 
@@ -177,15 +197,19 @@ create_anim_2d_plot(plotter, "temperature", siglay=0, fps=10, output_format="gif
 ## Development
 
 ```bash
+conda activate xfvcom
+
 # Code quality (CI equivalent)
-black --check . && isort --check-only . && mypy xfvcom && pytest -m "not png"
+black --check . && isort --check-only . && mypy . && pytest -m "not png"
 
-# Format code
-black . && isort .
+# Auto-fix formatting, then check types
+black . && isort . && mypy .
 
-# Run tests
+# Run all tests (including PNG regression)
 pytest
 ```
+
+See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for development guidelines.
 
 ---
 

@@ -106,7 +106,7 @@ fig, (ax1, ax2) = plot_ensemble_statistics(ds, var_name="dye", title="Stats")
 
 ### If imports fail
 ```bash
-conda activate fvcom
+conda activate xfvcom
 cd /home/pj24001722/ku40000343/Github/xfvcom
 pip install -e .
 ```
@@ -149,10 +149,10 @@ Run all notebook cells - should see:
 cd /home/pj24001722/ku40000343/Github/xfvcom/examples/notebooks
 
 # Activate environment
-conda activate fvcom
+conda activate xfvcom
 
 # Python version
-python --version  # 3.11 or 3.12
+python --version  # 3.13
 
 # Key packages
 pip list | grep -E 'xarray|pandas|matplotlib|numpy'

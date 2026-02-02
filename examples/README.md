@@ -435,7 +435,8 @@ cat output/member_mapping.csv
 
 **Issue**: Import errors when running scripts
 ```bash
-# Solution: Install xfvcom in editable mode
+# Solution: Activate environment and reinstall
+conda activate xfvcom
 cd /path/to/xfvcom
 pip install -e .
 ```

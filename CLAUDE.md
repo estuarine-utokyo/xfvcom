@@ -9,6 +9,9 @@ xfvcom is a Python package for preprocessing and postprocessing FVCOM (Finite Vo
 ## Environment Setup
 
 ```bash
+# First-time setup (creates "xfvcom" environment with Python 3.13)
+bash setup.sh              # or: bash setup.sh --impi  (for Intel MPI)
+
 # Activate existing environment
 conda activate xfvcom
 
@@ -16,7 +19,7 @@ conda activate xfvcom
 python -c "import xfvcom; print(xfvcom.__version__)"
 ```
 
-**Note**: Use `mamba` for installation to avoid conflicts with Intel oneAPI Python on supercomputers.
+**Note**: Use `mamba` (via `setup.sh` / `environment.yml`) for installation to avoid conflicts with Intel oneAPI Python on supercomputers. `pip install -e .[dev]` is supported but not recommended.
 
 ## Essential Commands
 

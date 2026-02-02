@@ -1,4 +1,8 @@
 # pyproject.toml  ── fully valid TOML 1.0
+#
+# NOTE: mamba (environment.yml) is the recommended installation method.
+#       pip is supported but not recommended — use only for packages
+#       unavailable on conda-forge.
 
 [build-system]
 requires = ["setuptools>=64", "wheel"]
@@ -9,7 +13,7 @@ name = "xfvcom"
 version = "0.2.0"
 description = "Visualisation utilities for FVCOM outputs"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 license = { text = "MIT" }
 
 authors = [
@@ -18,7 +22,7 @@ authors = [
 
 classifiers = [
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent"
 ]
@@ -30,7 +34,7 @@ dependencies = [
   "matplotlib>=3.9.0",
   "cartopy>=0.24.0",
   "pyproj>=3.6.0",
-  "scipy>=1.11.0",
+  "scipy>=1.14.0",
   "scikit-learn>=1.5.0",
   "imageio>=2.34.0",
   "moviepy>=1.0.3",
@@ -38,7 +42,7 @@ dependencies = [
   "tqdm>=4.66.0",
   "jinja2>=3.1.4",
   "PyYAML>=6.0.1",
-  "netCDF4>=1.6.5",
+  "netCDF4>=1.7.0",
   "h5netcdf>=1.2.0",
   "cftime>=1.6.4",
   "chardet>=5.2.0",
@@ -52,12 +56,11 @@ dev = [
   "pytest>=8.3.0",
   "mypy>=1.10.0",
   "black>=24.8.0",
-  "isort>=5.13.0",
+  "isort>=6.0.0",
   "types-tqdm>=4.66.0",
   "pandas-stubs>=2.2.0",
-  "matplotlib>=3.9.0",
-  "ruff>=0.5.0",
   "types-PyYAML>=6.0.12",
+  "ruff>=0.5.0",
   "ipykernel>=6.29.0",
   "jupyterlab>=4.2.0",
 ]
@@ -71,7 +74,7 @@ xfvcom = ["data/*.yaml", "data/*.yml"]
 
 [tool.black]
 line-length = 88
-target-version = ["py312"]
+target-version = ["py313"]
 
 [tool.isort]
 profile = "black"

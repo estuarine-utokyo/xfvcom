@@ -9,15 +9,15 @@
 - `environment.yml`, `setup.sh`: Reference builds for the Conda environment; refresh when dependencies move.
 
 ## Build, Test, and Development Commands
-- `./setup.sh`: Provision the standard Conda env and install the package editable.
-- `pip install -e .[dev]`: Alternate setup with developer extras (`pytest`, `mypy`, `ruff`, `black`, `isort`).
+- `bash setup.sh`: Provision the `xfvcom` Conda env (Python 3.13) and install the package editable. Use `--impi` for Intel MPI.
+- `pip install -e .[dev]`: Alternate setup with developer extras (not recommended; use mamba).
 - `pytest`: Execute the suite; append `-m "not png"` to skip image regressions.
-- `ruff check .`: Run lint rules mirrored in CI.
 - `black . && isort .`: Apply formatting (88-char lines) and canonical imports.
-- `mypy --config-file mypy.ini xfvcom`: Type-check against the shared Python 3.12 profile.
+- `mypy .`: Type-check against the shared Python 3.13 profile.
+- `ruff check .`: Run lint rules (informational only, not enforced in CI).
 
 ## Coding Style & Naming Conventions
-- Use Python 3.10+ idioms, four-space indentation, and `snake_case` for modules and functions.
+- Use Python 3.13+ idioms, four-space indentation, and `snake_case` for modules and functions.
 - Reserve `PascalCase` for classes and configuration objects.
 - Keep CLI entrypoints lowercase with hyphenation, e.g., `xfvcom-make-river-nc`.
 - Document complex routines with concise docstrings and reference related `docs/` pages.
@@ -37,4 +37,4 @@
 ## Environment & Security Tips
 - Prefer the managed Conda env; document deliberate deviations.
 - Never commit credentials or API keys; rely on ignored `.env` files.
-- Update `environment.yml` and `setup.sh` together after dependency changes.
+- Update `environment.yml`, `setup.sh`, and `pyproject.toml` together after dependency changes.

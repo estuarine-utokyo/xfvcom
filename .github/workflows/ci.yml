@@ -22,7 +22,7 @@ jobs:
       # 3) Set up Python
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       # 4) Install Python dependencies (runtime + dev + video extras)
       - name: Install Python deps

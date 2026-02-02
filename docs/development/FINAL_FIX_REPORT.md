@@ -275,8 +275,8 @@ from font(s) DejaVu Sans.
 # 1. Navigate to xfvcom directory
 cd /home/pj24001722/ku40000343/Github/xfvcom
 
-# 2. Activate fvcom environment (already active in this session)
-conda activate fvcom
+# 2. Activate xfvcom environment
+conda activate xfvcom
 
 # 3. Test installation
 python -c "from xfvcom.plot import plot_dye_timeseries_stacked; print('✓ Import OK')"

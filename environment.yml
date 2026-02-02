@@ -2,42 +2,71 @@ name: xfvcom
 channels:
   - conda-forge
 dependencies:
-  # Python runtime
+  # ── Python runtime ──────────────────────────────────────────────
   - python=3.13.*
 
-  # Core scientific packages
+  # ── xfvcom core dependencies ────────────────────────────────────
   - numpy
   - pandas
   - xarray
   - scipy
   - scikit-learn
-
-  # Visualization packages
   - matplotlib
   - cartopy
   - pyproj
+  - netcdf4
+  - cftime
+  - h5netcdf
   - imageio
   - imageio-ffmpeg
   - moviepy
-
-  # Interactive visualization (optional but recommended)
-  - hvplot
-  - bokeh
-  - holoviews
-
-  # NetCDF support
-  - netcdf4
-  - h5netcdf
-  - cftime
-
-  # Additional required packages
   - tqdm
   - jinja2
   - pyyaml
   - chardet
   - pvlib  # Solar radiation estimation for gap filling
 
-  # Development tools
+  # ── MPI parallel computing ──────────────────────────────────────
+  # Default backend is mpich. For Intel MPI on supercomputers:
+  #   mamba install "mpi=*=impi"
+  - mpi4py
+
+  # ── Parallel / big-data computing ───────────────────────────────
+  - dask
+  - distributed
+  - numba
+  - zarr
+
+  # ── Interactive visualization ───────────────────────────────────
+  - hvplot
+  - bokeh
+  - holoviews
+  - geoviews
+  - panel
+  - datashader
+  - colorcet
+  - plotly
+  - ipywidgets
+
+  # ── Geospatial ──────────────────────────────────────────────────
+  - geopandas-base
+  - shapely
+
+  # ── NetCDF / climate tools ──────────────────────────────────────
+  - nctoolkit  # Includes nco, cdo as dependencies
+  - metpy
+
+  # ── File I/O ────────────────────────────────────────────────────
+  - openpyxl
+  - xlsxwriter
+  - python-pptx
+  - lxml
+  - beautifulsoup4
+
+  # ── Optimization ────────────────────────────────────────────────
+  - optuna
+
+  # ── Development tools ───────────────────────────────────────────
   - pytest
   - mypy
   - black
@@ -46,12 +75,11 @@ dependencies:
   - ipykernel
   - jupyterlab
 
-  # Type stubs for mypy
+  # ── Type stubs for mypy ─────────────────────────────────────────
   - types-pyyaml
   - pandas-stubs
 
-  # Pip dependencies (install after conda)
+  # ── Pip dependencies ────────────────────────────────────────────
   - pip
   - pip:
-      # Install xfvcom package in editable mode
-      - -e .
+      - -e .  # Install xfvcom in editable mode
