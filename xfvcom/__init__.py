@@ -27,6 +27,8 @@ from .grid import (
 from .io import (  # noqa: F401
     FvcomDataLoader,
     FvcomInputLoader,
+    MposLoader,
+    MposStationConfig,
     decode_fvcom_time,
     encode_fvcom_time,
     extend_river_nc_file,
@@ -56,6 +58,7 @@ from .utils.helpers_utils import (
     evaluate_model_scores,
     generate_test_data,
 )
+from .utils.metrics import calc_bias, calc_rmse, pearson_r, willmott_d
 from .utils.timeseries_utils import (
     extend_timeseries_ffill,
     extend_timeseries_linear,
@@ -111,6 +114,14 @@ __all__: list[str] = [
     "extend_timeseries_seasonal",
     "interpolate_missing_values",
     "resample_timeseries",
+    # metrics
+    "willmott_d",
+    "calc_rmse",
+    "calc_bias",
+    "pearson_r",
+    # MPOS loader
+    "MposLoader",
+    "MposStationConfig",
     # misc
     "precedence",
     # grid

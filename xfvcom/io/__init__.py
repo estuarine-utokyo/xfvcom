@@ -97,3 +97,11 @@ try:
     __all__.append("estimate_solar_radiation")
 except ImportError:
     pass  # pvlib not installed
+
+# ---------------------------------------------------------------------
+# MPOS (Tokyo Bay observation network) data loader
+# ---------------------------------------------------------------------
+from .mpos import MposLoader, MposStationConfig  # noqa: F401
+
+__all__.append("MposLoader")
+__all__.append("MposStationConfig")
