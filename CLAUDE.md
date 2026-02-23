@@ -151,3 +151,10 @@ Registered in `pyproject.toml` under `[project.scripts]`:
 | Force file rejected by FVCOM | Ensure netCDF4 (not xarray) was used; check time format |
 | Cartopy text clipping | Use `make_node_marker_post(..., text_clip_buffer=-0.001)` |
 | Slow nearest neighbor search | Reuse `FvcomAnalyzer` instance (KDTree built once) |
+
+## Language
+
+- **Chat (conversation)**: Always respond in Japanese (日本語で応答すること)
+- **Documentation files** (README.md, etc.): English
+- **Code comments**: English
+- **Commit messages**: English

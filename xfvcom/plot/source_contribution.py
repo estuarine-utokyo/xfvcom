@@ -508,6 +508,7 @@ def plot_source_contribution_bar(
     dpi: int = 300,
     top_n: int | None = None,
     show_others: bool = True,
+    square: bool = True,
 ) -> dict:
     """Create bar chart showing source contributions.
 
@@ -554,6 +555,9 @@ def plot_source_contribution_bar(
         If provided, only show top N sources (by value)
     show_others : bool
         If top_n is set, whether to show "Others" category for remaining sources
+    square : bool
+        If True (default), constrain the axes data area to be square using
+        set_box_aspect(1.0). This makes panels tile well in grid layouts.
 
     Returns
     -------
@@ -616,12 +620,19 @@ def plot_source_contribution_bar(
         else:
             n_sources = len(data)
             if orientation == "horizontal":
-                figsize = (10, max(4, n_sources * 0.35))
+                h = max(4, n_sources * 0.35)
+                # When square, reduce width so axes data area is tall (15% narrower)
+                figsize = (h * 1.3 * 0.85, h) if square else (10, h)
             else:
-                figsize = (max(8, n_sources * 0.6), 6)
+                w = max(8, n_sources * 0.6)
+                figsize = (w, w * 1.3 / 0.85) if square else (w, 6)
 
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
+
+    # Constrain axes data area: 15% narrower than square
+    if square:
+        ax.set_box_aspect(1.0 / 0.85)
 
     # Get colors
     cmap = colormaps[colormap]
