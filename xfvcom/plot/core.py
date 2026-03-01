@@ -2684,30 +2684,41 @@ class FvcomPlotter(PlotHelperMixin):
                 )
 
         # ---------------------------------------------------
-        # 2. coastline segments  (nv where neighbour = -1)
+        # 2. coastline segments  (boundary edges minus OBC edges)
         # ---------------------------------------------------
         if coastlines:
             if not hasattr(self, "ds") or "nv_ccw" not in self.ds:
                 raise ValueError("'nv_ccw' missing; coastline drawing aborted.")
             nv = self.ds.nv_ccw.values
-            nbe = np.array(
-                [
-                    [nv[n, j], nv[n, (j + 2) % 3]]
-                    for n in range(len(triang.neighbors))
-                    for j in range(3)
-                    if triang.neighbors[n, j] == -1
+            # Edge opposite vertex j connects vertices (j+1)%3 and (j+2)%3
+            boundary_edges = [
+                (nv[n, (j + 1) % 3], nv[n, (j + 2) % 3])
+                for n in range(len(triang.neighbors))
+                for j in range(3)
+                if triang.neighbors[n, j] == -1
+            ]
+            # Exclude open-boundary edges (both nodes in OBC set)
+            if "node_bc" in self.ds:
+                obc_set = set(int(v) for v in self.ds.node_bc.values)
+                boundary_edges = [
+                    (n0, n1)
+                    for n0, n1 in boundary_edges
+                    if not (n0 in obc_set and n1 in obc_set)
                 ]
-            )
             x, y = self.ds["lon"].values, self.ds["lat"].values
-            for seg in nbe:
-                ax.plot(
-                    x[seg],
-                    y[seg],
-                    color=coast_color,
-                    linewidth=1.0,
-                    transform=transform,
-                    zorder=3,
-                )
+            from matplotlib.collections import LineCollection
+
+            coast_segs = [
+                [(x[n0], y[n0]), (x[n1], y[n1])] for n0, n1 in boundary_edges
+            ]
+            coast_lc = LineCollection(
+                coast_segs,
+                colors=coast_color,
+                linewidths=1.0,
+                transform=transform,
+                zorder=3,
+            )
+            ax.add_collection(coast_lc)
 
         # ---------------------------------------------------
         # 3. open-boundary lines  (node_bc == 1)
