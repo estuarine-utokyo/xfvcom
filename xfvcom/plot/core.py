@@ -2685,18 +2685,21 @@ class FvcomPlotter(PlotHelperMixin):
 
         # ---------------------------------------------------
         # 2. coastline segments  (boundary edges minus OBC edges)
+        #    Uses edge-counting: boundary edge appears in exactly
+        #    one triangle.  Avoids reliance on triang.neighbors
+        #    index convention.
         # ---------------------------------------------------
         if coastlines:
             if not hasattr(self, "ds") or "nv_ccw" not in self.ds:
                 raise ValueError("'nv_ccw' missing; coastline drawing aborted.")
             nv = self.ds.nv_ccw.values
-            # Edge opposite vertex j connects vertices (j+1)%3 and (j+2)%3
-            boundary_edges = [
-                (nv[n, (j + 1) % 3], nv[n, (j + 2) % 3])
-                for n in range(len(triang.neighbors))
-                for j in range(3)
-                if triang.neighbors[n, j] == -1
-            ]
+            edge_count: dict[tuple[int, int], int] = {}
+            for tri in nv:
+                for k in range(3):
+                    a, b = int(tri[k]), int(tri[(k + 1) % 3])
+                    edge = (min(a, b), max(a, b))
+                    edge_count[edge] = edge_count.get(edge, 0) + 1
+            boundary_edges = [e for e, c in edge_count.items() if c == 1]
             # Exclude open-boundary edges (both nodes in OBC set)
             if "node_bc" in self.ds:
                 obc_set = set(int(v) for v in self.ds.node_bc.values)
