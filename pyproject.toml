@@ -47,10 +47,11 @@ dependencies = [
   "cftime>=1.6.4",
   "chardet>=5.2.0",
   "pvlib>=0.10.0",
+  "geopandas>=1.0.0",
+  "shapely>=2.0.0",
 ]
 
 [project.optional-dependencies]
-video = ["moviepy>=1.0.3", "imageio-ffmpeg>=0.6.0"]
 interactive = ["hvplot>=0.10.0", "bokeh>=3.4.0", "holoviews>=1.19.0"]
 dev = [
   "pytest>=8.3.0",

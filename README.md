@@ -35,7 +35,7 @@ See `bash setup.sh --help` for all options.
 ### Alternative: pip (not recommended)
 
 ```bash
-pip install -e .[dev,video]
+pip install -e .[dev]
 ```
 
 pip does not install MPI, NetCDF CLI tools (nco, cdo), or other system-level packages included in `environment.yml`.
@@ -144,6 +144,15 @@ cv_area = grid_loader.calculate_node_area_median_dual([100, 200, 300], index_bas
 elem_areas = grid_loader.calculate_element_area([10, 11, 12], index_base=1)
 ```
 
+### Coast Masking
+
+```python
+from xfvcom.coastmask import load, CoastmaskConfig
+
+mask = load("tokyo_bay")  # Built-in preset
+mask.add_to_axes(ax)       # Add land mask to a Cartopy GeoAxes
+```
+
 ### Ensemble Analysis
 
 ```python
@@ -158,7 +167,7 @@ result = plot_dye_timeseries_stacked(ds, cfg=cfg, output="stacked.png")
 ```python
 from xfvcom.plot.utils import create_anim_2d_plot
 
-create_anim_2d_plot(plotter, "temperature", siglay=0, fps=10, output_format="gif")
+create_anim_2d_plot(plotter, processes=4, var_name="temperature", siglay=0, fps=10)
 ```
 
 ---
@@ -175,6 +184,8 @@ create_anim_2d_plot(plotter, "temperature", siglay=0, fps=10, output_format="gif
 | `FvcomPlotter` | `xfvcom.plot` | Visualization engine |
 | `FvcomPlotConfig` | `xfvcom.plot` | Plot styling configuration |
 | `FvcomPlotOptions` | `xfvcom` | Per-plot options |
+| `CoastMask` | `xfvcom.coastmask` | OSM-derived land masking for coastal plots |
+| `CoastmaskConfig` | `xfvcom.coastmask` | Coastmask configuration (paths, tolerances) |
 | `MetValidator` | `xfvcom.validation` | Forcing file validation |
 | `GWOReader` | `xfvcom.io` | GWO-AMD meteorological data reader |
 | `GWOForcingSource` | `xfvcom.io` | GWO data source for forcing generation |
@@ -189,6 +200,7 @@ create_anim_2d_plot(plotter, "temperature", siglay=0, fps=10, output_format="gif
 | `plot_ensemble_timeseries()` | `xfvcom.plot` | Ensemble line plots |
 | `plot_dye_timeseries_stacked()` | `xfvcom.plot` | Stacked area plots |
 | `create_anim_2d_plot()` | `xfvcom.plot.utils` | GIF/MP4 animations |
+| `load()` | `xfvcom.coastmask` | Load/create coastmask for a region |
 | `calculate_node_area()` | `xfvcom.grid` | Node area calculation |
 | `extend_timeseries_*()` | `xfvcom.utils.timeseries_utils` | Time series extension |
 

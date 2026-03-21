@@ -24,13 +24,11 @@ jobs:
         with:
           python-version: "3.13"
 
-      # 4) Install Python dependencies (runtime + dev + video extras)
+      # 4) Install Python dependencies (runtime + dev extras)
       - name: Install Python deps
         run: |
           python -m pip install -U pip
-          pip install -e .[dev,video]
-          # Work-around: occasionally moviepy is skipped in editable+extras
-          python -m pip install "moviepy>=1.0.3"
+          pip install -e .[dev]
 
       # 5) Code formatting (black)
       - name: Code formatting check
