@@ -208,10 +208,15 @@ def load(
 
     # Build cache key that reflects water-filtering options
     cache_name = name
+    parts: list[str] = []
     if not config.subtract_water:
-        cache_name += "_nowater"
-    elif config.min_water_area_deg2 > 0:
-        cache_name += f"_minarea{config.min_water_area_deg2:.0e}"
+        parts.append("nolake")
+    if not config.subtract_river:
+        parts.append("noriver")
+    if config.min_water_area_deg2 > 0:
+        parts.append(f"minarea{config.min_water_area_deg2:.0e}")
+    if parts:
+        cache_name += "_" + "_".join(parts)
 
     cache = CoastmaskCache(config.cache_dir, cache_name)
 
@@ -235,7 +240,10 @@ def load(
     # Load raw data
     raw_land_gdf = load_land_polygons(bbox, config)
 
-    if config.subtract_water and config.water_shp_path is not None:
+    need_water = (
+        config.subtract_water or config.subtract_river
+    ) and config.water_shp_path is not None
+    if need_water:
         water_gdf = load_water_polygons(bbox, config)
     else:
         water_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")

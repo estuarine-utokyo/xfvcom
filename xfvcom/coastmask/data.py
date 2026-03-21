@@ -55,8 +55,16 @@ def load_water_polygons(
     """Read Geofabrik inland water polygons within *bbox*.
 
     Filters to Polygon/MultiPolygon geometries only (the source file
-    may contain Points and LineStrings).  Optionally filters out small
-    water bodies below ``config.min_water_area_deg2``.
+    may contain Points and LineStrings).  Selects water body classes
+    based on ``config.subtract_water`` and ``config.subtract_river``:
+
+    - Rivers (``fclass == "riverbank"``): included when
+      ``subtract_river`` is True.
+    - Lakes/ponds (``fclass`` in ``water_fclasses``): included when
+      ``subtract_water`` is True.
+
+    Optionally filters out small water bodies below
+    ``config.min_water_area_deg2``.
 
     Parameters
     ----------
@@ -79,6 +87,18 @@ def load_water_polygons(
     # Keep only polygon geometries
     type_mask = gdf.geometry.type.isin(["Polygon", "MultiPolygon"])
     gdf = gdf.loc[type_mask].copy()
+
+    # Filter by fclass: rivers vs lakes/ponds
+    if "fclass" in gdf.columns:
+        keep_classes: list[str] = []
+        if config.subtract_river:
+            keep_classes.append("riverbank")
+        if config.subtract_water:
+            keep_classes.extend(config.water_fclasses)
+        if keep_classes:
+            gdf = gdf.loc[gdf["fclass"].isin(keep_classes)].copy()
+        else:
+            gdf = gdf.iloc[:0].copy()  # empty
 
     # Filter by minimum area
     if config.min_water_area_deg2 > 0 and len(gdf) > 0:

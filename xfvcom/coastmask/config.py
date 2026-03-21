@@ -67,10 +67,23 @@ class CoastmaskConfig:
     subtract_water : bool
         If False, skip water subtraction entirely (land = raw coastline
         polygons). Useful when inland water bodies are not relevant.
+        Note: even when False, rivers are still subtracted if
+        ``subtract_river`` is True (the default).
+    subtract_river : bool
+        If True (default), always subtract river polygons
+        (``fclass == "riverbank"`` in Geofabrik data) from land,
+        regardless of ``subtract_water``.
+    water_fclasses : tuple of str
+        Geofabrik ``fclass`` values treated as "lake/pond" water
+        (controlled by ``subtract_water``).  Default:
+        ``("water", "reservoir", "wetland", "dock")``.
+        Rivers (``"riverbank"``) are handled separately via
+        ``subtract_river``.
     min_water_area_deg2 : float
         Minimum water-body area in degrees-squared to subtract from
         land. Water polygons smaller than this are ignored (treated as
         land). Set to 0 to subtract all water bodies.
+        Applies to both rivers and lakes.
 
         Approximate area conversions at 35 deg N:
 
@@ -86,6 +99,8 @@ class CoastmaskConfig:
     bbox_margin: float = 0.05
     simplify_tolerance: float = 0.0
     subtract_water: bool = True
+    subtract_river: bool = True
+    water_fclasses: tuple[str, ...] = ("water", "reservoir", "wetland", "dock")
     min_water_area_deg2: float = 0.0
 
     def __post_init__(self) -> None:
