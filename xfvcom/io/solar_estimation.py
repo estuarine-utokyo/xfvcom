@@ -125,7 +125,7 @@ class SolarEstimator:
         is_night = solar_pos["elevation"] < 0
 
         # Align cloud cover to times
-        cloud = cloud_cover.reindex(times).fillna(method="ffill").fillna(method="bfill")
+        cloud = cloud_cover.reindex(times).ffill().bfill()
         cloud = cloud.clip(0, 1)
 
         # Apply cloud correction based on model
@@ -138,7 +138,7 @@ class SolarEstimator:
             cloud_factor = 1 - 0.75 * np.power(cloud.values, 3.4)
         elif self.model == "pvlib-larson":
             # Larson et al. (2016) simplified model
-            cloud_factor = 1 - 0.87 * cloud.values
+            cloud_factor = 1 - 0.87 * np.asarray(cloud.values)
         else:
             raise ValueError(f"Unknown solar model: {self.model}")
 

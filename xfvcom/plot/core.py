@@ -818,6 +818,8 @@ class FvcomPlotter(PlotHelperMixin):
             )
 
         # Create 2D grid for time and vertical coordinate
+        time_grid: np.ndarray
+        y_grid: np.ndarray
         time_grid, y_grid = np.meshgrid(time_vals, y_vals, indexing="xy")
         if depth:
             z = self.ds.z.isel(time=time_mask)[:, :, index].T.values

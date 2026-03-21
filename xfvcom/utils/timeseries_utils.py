@@ -279,7 +279,10 @@ def interpolate_missing_values(
         DataFrame with interpolated values
     """
     return df.interpolate(
-        method=method, limit=limit, limit_direction=limit_direction, axis=0
+        method=method,  # type: ignore[arg-type]
+        limit=limit,
+        limit_direction=limit_direction,  # type: ignore[arg-type]
+        axis=0,
     )
 
 
