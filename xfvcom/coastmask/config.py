@@ -64,6 +64,20 @@ class CoastmaskConfig:
     simplify_tolerance : float
         Simplify tolerance (degrees). 0 = no simplification.
         0.0001 ~ 10 m at mid-latitudes. Useful for faster rendering.
+    subtract_water : bool
+        If False, skip water subtraction entirely (land = raw coastline
+        polygons). Useful when inland water bodies are not relevant.
+    min_water_area_deg2 : float
+        Minimum water-body area in degrees-squared to subtract from
+        land. Water polygons smaller than this are ignored (treated as
+        land). Set to 0 to subtract all water bodies.
+
+        Approximate area conversions at 35 deg N:
+
+        - ``1e-7`` deg^2 ~ 1,000 m^2 (small pond)
+        - ``1e-6`` deg^2 ~ 10,000 m^2 (large pond)
+        - ``1e-5`` deg^2 ~ 100,000 m^2 (small lake)
+        - ``1e-4`` deg^2 ~ 1 km^2 (lake)
     """
 
     land_shp_path: Path | None = None
@@ -71,6 +85,8 @@ class CoastmaskConfig:
     cache_dir: Path = field(default_factory=lambda: DEFAULT_CACHE_DIR)
     bbox_margin: float = 0.05
     simplify_tolerance: float = 0.0
+    subtract_water: bool = True
+    min_water_area_deg2: float = 0.0
 
     def __post_init__(self) -> None:
         if self.land_shp_path is not None:

@@ -45,6 +45,17 @@ def empty_water() -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
 
+@pytest.fixture
+def mixed_water() -> gpd.GeoDataFrame:
+    """Water GeoDataFrame with one small and one large polygon."""
+    small_pond = box(1, 1, 1.01, 1.01)  # area ~1e-4 deg^2
+    large_lake = box(6, 6, 8, 8)  # area = 4 deg^2
+    return gpd.GeoDataFrame(
+        geometry=[small_pond, large_lake],
+        crs="EPSG:4326",
+    )
+
+
 # ------------------------------------------------------------------ #
 # Config tests
 # ------------------------------------------------------------------ #
@@ -67,6 +78,8 @@ class TestConfig:
         assert cfg.water_shp_path is None
         assert cfg.bbox_margin == 0.05
         assert cfg.simplify_tolerance == 0.0
+        assert cfg.subtract_water is True
+        assert cfg.min_water_area_deg2 == 0.0
         assert cfg.cache_dir == Path.home() / ".coastmask"
 
     def test_config_expands_user(self) -> None:
@@ -115,6 +128,40 @@ class TestComputeTrueLand:
             simple_land, empty_water, bbox, simplify_tolerance=0.5
         )
         assert len(result) > 0
+
+
+class TestWaterFiltering:
+    def test_min_area_filters_small_water(
+        self,
+        simple_land: gpd.GeoDataFrame,
+        mixed_water: gpd.GeoDataFrame,
+    ) -> None:
+        """With high threshold, only large lake is subtracted."""
+        bbox = (0.0, 0.0, 10.0, 10.0)
+        # large_lake area = 4 deg^2, small_pond area ~1e-4 deg^2
+        # Threshold 1.0 keeps only large_lake
+        result = compute_true_land(simple_land, mixed_water, bbox)
+        area_all_subtracted = result.geometry.area.sum()
+
+        # Now filter: keep only water >= 1.0 deg^2
+        big_only = mixed_water[mixed_water.geometry.area >= 1.0].copy()
+        result_big = compute_true_land(simple_land, big_only, bbox)
+        area_big_subtracted = result_big.geometry.area.sum()
+
+        # Subtracting only big lake should leave more land than subtracting both
+        assert area_big_subtracted > area_all_subtracted
+
+    def test_subtract_water_false(
+        self,
+        simple_land: gpd.GeoDataFrame,
+        mixed_water: gpd.GeoDataFrame,
+    ) -> None:
+        """subtract_water=False means no water subtracted at all."""
+        bbox = (0.0, 0.0, 10.0, 10.0)
+        empty = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+        result = compute_true_land(simple_land, empty, bbox)
+        total_area = result.geometry.area.sum()
+        assert abs(total_area - 100.0) < 0.01
 
 
 class TestExtractPolygons:

@@ -55,7 +55,8 @@ def load_water_polygons(
     """Read Geofabrik inland water polygons within *bbox*.
 
     Filters to Polygon/MultiPolygon geometries only (the source file
-    may contain Points and LineStrings).
+    may contain Points and LineStrings).  Optionally filters out small
+    water bodies below ``config.min_water_area_deg2``.
 
     Parameters
     ----------
@@ -76,8 +77,15 @@ def load_water_polygons(
     gdf: gpd.GeoDataFrame = gpd.read_file(config.water_shp_path, bbox=read_bbox)
 
     # Keep only polygon geometries
-    mask = gdf.geometry.type.isin(["Polygon", "MultiPolygon"])
-    return gdf.loc[mask].copy()
+    type_mask = gdf.geometry.type.isin(["Polygon", "MultiPolygon"])
+    gdf = gdf.loc[type_mask].copy()
+
+    # Filter by minimum area
+    if config.min_water_area_deg2 > 0 and len(gdf) > 0:
+        areas = gdf.geometry.area
+        gdf = gdf.loc[areas >= config.min_water_area_deg2].copy()
+
+    return gdf
 
 
 def _extract_polygons(geom: shapely.Geometry) -> list[shapely.Geometry]:
