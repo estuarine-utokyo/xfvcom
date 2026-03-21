@@ -6,14 +6,12 @@ including member-node mapping extraction and source identification.
 
 from __future__ import annotations
 
-from .member_info import (
-    # Legacy module-level variables (for backward compatibility)
+from .member_info import (  # Legacy module-level variables (for backward compatibility); Functions
     DEFAULT_SOURCE_NAMES,
     MEMBER_SOURCE_NAMES,
     MEMBER_SOURCE_NAMES_FULL,
     MEMBER_SOURCE_TYPES,
     SOURCE_COLORS,
-    # Functions
     export_member_mapping,
     extract_member_node_mapping,
     get_default_source_names,

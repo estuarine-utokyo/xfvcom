@@ -2,6 +2,7 @@
 """
 CLI: xfvcom-make-river-nml
 """
+
 from __future__ import annotations
 
 import argparse

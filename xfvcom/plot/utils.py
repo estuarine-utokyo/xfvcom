@@ -18,6 +18,8 @@ from ..utils.helpers import FrameGenerator, convert_gif_to_mp4, create_gif
 # import time
 # from pathlib import Path
 if TYPE_CHECKING:
+    import xarray as xr
+
     from ..plot.core import FvcomPlotter
 
 # compile once

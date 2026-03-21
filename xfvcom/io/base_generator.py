@@ -3,6 +3,7 @@
 """
 Common utilities for FVCOM input file generators.
 """
+
 from __future__ import annotations
 
 import importlib.resources

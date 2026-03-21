@@ -3,6 +3,7 @@
 Sphinx configuration for xfvcom.
 Only the minimal settings required for HTML output.
 """
+
 import pathlib
 import sys
 

@@ -246,7 +246,9 @@ def extend_timeseries_seasonal(
             # Preserve the original dtype when assigning
             if hasattr(result[col], "dtype"):
                 value = np.array(value).astype(result[col].dtype).item()
-            result.iloc[i, result.columns.get_loc(col)] = value
+            col_idx = result.columns.get_loc(col)
+            assert isinstance(col_idx, int)
+            result.iloc[i, col_idx] = value
 
     return result
 

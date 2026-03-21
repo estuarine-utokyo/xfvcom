@@ -267,7 +267,7 @@ def plot_source_contribution_stack(
     source_colors = get_source_colors_dict()  # Dynamic: uses config if loaded
     cmap = colormaps[colormap]  # Fallback colormap
     n_sources = len(df.columns)
-    colors = []
+    colors: list[str | tuple[float, float, float, float]] = []
     for i, col in enumerate(df.columns):
         if col in source_colors:
             colors.append(source_colors[col])
@@ -709,7 +709,7 @@ def plot_source_contribution_bar(
         n_sources = len(sources)
         # Use config or defaults for consistency across plots
         source_colors = get_source_colors_dict()
-        colors = []
+        colors: list[str | tuple[float, float, float, float]] = []
         for i, src in enumerate(sources):
             if src in source_colors:
                 colors.append(source_colors[src])

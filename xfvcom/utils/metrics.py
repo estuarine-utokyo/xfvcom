@@ -43,8 +43,8 @@ def willmott_d(
     o = obs[mask]
     m = mod[mask]
     mean_o = np.mean(o)
-    ss_res = np.sum((m - o) ** 2)
-    ss_denom = np.sum((np.abs(m - mean_o) + np.abs(o - mean_o)) ** 2)
+    ss_res: np.floating = np.sum((m - o) ** 2)
+    ss_denom: np.floating = np.sum((np.abs(m - mean_o) + np.abs(o - mean_o)) ** 2)
     if ss_denom == 0:
         return np.nan
     return float(1.0 - ss_res / ss_denom)

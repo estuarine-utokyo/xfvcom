@@ -252,64 +252,13 @@ def _get_member_types_from_config() -> dict[int, str] | None:
 # when external config is loaded.
 
 
-@property
-def DEFAULT_SOURCE_NAMES() -> list[str]:
-    """Get default source names (from config if loaded, else hardcoded)."""
-    names = _get_source_names_from_config()
-    return names if names else _DEFAULT_SOURCE_NAMES
-
-
-@property
-def MEMBER_SOURCE_NAMES() -> dict[int, str]:
-    """Get member-to-source mapping (from config if loaded, else hardcoded)."""
-    mapping = _get_member_mapping_from_config()
-    return mapping if mapping else _DEFAULT_MEMBER_SOURCE_NAMES
-
-
-@property
-def SOURCE_COLORS() -> dict[str, str]:
-    """Get source colors (from config if loaded, else hardcoded)."""
-    colors = _get_colors_from_config()
-    if colors:
-        # Merge with defaults to ensure special entries exist
-        merged = _DEFAULT_SOURCE_COLORS.copy()
-        merged.update(colors)
-        return merged
-    return _DEFAULT_SOURCE_COLORS
-
-
-@property
-def MEMBER_SOURCE_NAMES_FULL() -> dict[int, str]:
-    """Get member full names (from config if loaded, else hardcoded)."""
-    config_mod = _get_config_module()
-    if config_mod.is_config_loaded():
-        display = config_mod.get_display_config()
-        full_names = display.get("full_names", {})
-        if full_names:
-            # Build member -> full_name mapping
-            mapping = _get_member_mapping_from_config()
-            if mapping:
-                result = {}
-                for member_id, label in mapping.items():
-                    result[member_id] = full_names.get(label, label)
-                return result
-    return _DEFAULT_MEMBER_SOURCE_NAMES_FULL
-
-
-@property
-def MEMBER_SOURCE_TYPES() -> dict[int, str]:
-    """Get member source types (from config if loaded, else hardcoded)."""
-    types = _get_member_types_from_config()
-    return types if types else _DEFAULT_MEMBER_SOURCE_TYPES
-
-
-# For backward compatibility, expose as simple variables that are evaluated at access time
-# Note: These won't update dynamically after module import, but the functions below will.
-DEFAULT_SOURCE_NAMES = _DEFAULT_SOURCE_NAMES
-MEMBER_SOURCE_NAMES = _DEFAULT_MEMBER_SOURCE_NAMES
-SOURCE_COLORS = _DEFAULT_SOURCE_COLORS
-MEMBER_SOURCE_NAMES_FULL = _DEFAULT_MEMBER_SOURCE_NAMES_FULL
-MEMBER_SOURCE_TYPES = _DEFAULT_MEMBER_SOURCE_TYPES
+# For backward compatibility, expose as simple variables.
+# Use get_source_names() etc. for dynamic config-aware access.
+DEFAULT_SOURCE_NAMES: list[str] = _DEFAULT_SOURCE_NAMES
+MEMBER_SOURCE_NAMES: dict[int, str] = _DEFAULT_MEMBER_SOURCE_NAMES
+SOURCE_COLORS: dict[str, str] = _DEFAULT_SOURCE_COLORS
+MEMBER_SOURCE_NAMES_FULL: dict[int, str] = _DEFAULT_MEMBER_SOURCE_NAMES_FULL
+MEMBER_SOURCE_TYPES: dict[int, str] = _DEFAULT_MEMBER_SOURCE_TYPES
 
 
 # =============================================================================

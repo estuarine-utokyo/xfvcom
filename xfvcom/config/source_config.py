@@ -302,7 +302,10 @@ def get_member_source_mapping():
     'Arakawa'
     """
     members = get_member_config()
-    return {m["id"]: m.get("label", m.get("name", "Member{}".format(m["id"]))) for m in members}
+    return {
+        m["id"]: m.get("label", m.get("name", "Member{}".format(m["id"])))
+        for m in members
+    }
 
 
 def get_decay_variants():

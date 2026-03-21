@@ -294,7 +294,7 @@ class MposLoader:
         var_bottom: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Compute daily means requiring >= min_hourly valid values per day."""
-        dates = time_sel.astype("datetime64[D]")
+        dates: np.ndarray = time_sel.astype("datetime64[D]")
         unique_dates = np.unique(dates)
         daily_time = unique_dates.astype("datetime64[ns]")
         daily_surf = np.full(len(unique_dates), np.nan)

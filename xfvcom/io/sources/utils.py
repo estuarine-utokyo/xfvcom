@@ -189,7 +189,7 @@ def load_timeseries_table(
             df[col] = (
                 df[col]
                 .str.replace(r"\s*#.*$", "", regex=True)
-                .replace({"": pd.NA})  # empty string -> NA
+                .replace({"": pd.NA})  # type: ignore[dict-item]  # empty string -> NA
             )
             # Try to convert the entire column to numeric.
             # If conversion fails (mixed strings, etc.), keep the original.
