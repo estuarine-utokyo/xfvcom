@@ -1,4 +1,5 @@
 #!/bin/bash
+# Wrapper script for xfvcom-make-met-nc with configurable defaults.
 # Save environment variables before defaults overwrite them
 _E_GRID="$GRID" _E_START="$START" _E_END="$END" _E_UTM_ZONE="$UTM_ZONE"
 _E_OUTPUT="$OUTPUT" _E_GWO_DIR="$GWO_DIR" _E_STATION_MAP="$STATION_MAP"
