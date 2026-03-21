@@ -12,81 +12,80 @@
 
 ---
 
-## Meteorological Forcing (GWO-AMD)
+## Meteorological Forcing
 
-### Quick Start with Command Line Arguments
-
-The `make_fvcom_met.sh` script supports command line arguments for easy customization:
+### Direct CLI Usage
 
 ```bash
-# Generate forcing for year 2019
-./make_fvcom_met.sh --start 2019
+# Constant values
+xfvcom-make-met-nc grid.nc --start 2025-01-01T00:00Z --end 2025-01-07T00:00Z \
+  --ts wind.csv:uwind,vwind --air_temperature 20.0 --utm-zone 54
 
-# Generate forcing for year 2020 with custom output file
-./make_fvcom_met.sh --start 2020 --output tb20_met.nc
+# GWO-AMD source
+xfvcom-make-met-nc grid.dat --start 2020 --gwo-dir /path/to/GWO/Hourly \
+  --station-map "slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba" --wind-factor 1.8 --utm-zone 54
 
-# Generate forcing for a specific date range
-./make_fvcom_met.sh --start 2020-06-01 --end 2020-08-31 --output summer2020.nc
-
-# Use a different grid file
-./make_fvcom_met.sh --start 2019 --grid /path/to/custom_grid.dat
-
-# Disable gap filling
-./make_fvcom_met.sh --start 2020 --no-fill-gaps
-
-# Show all available options
-./make_fvcom_met.sh --help
+# GWO-AMD with gap filling
+xfvcom-make-met-nc grid.dat --start 2020 --gwo-dir /path/to/GWO/Hourly \
+  --station-map "*:Chiba" --fill-gaps --fallback-stations "Chiba:Tokyo,Yokohama" \
+  --correlation-file gwo_correlations.yaml --solar-model empirical --utm-zone 54
 ```
 
-### Command Line Options
+### Shell Script Wrapper
+
+The script `scripts/make_fvcom_met.sh` provides a convenient wrapper with configurable defaults:
+
+```bash
+./scripts/make_fvcom_met.sh --start 2019
+./scripts/make_fvcom_met.sh --start 2020 --output tb20_met.nc
+./scripts/make_fvcom_met.sh --start 2020-06-01 --end 2020-08-31
+./scripts/make_fvcom_met.sh --help
+```
+
+### CLI Options
+
+#### General
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--start YEAR` | Start year or datetime | 2020 |
-| `--end YEAR` | End year or datetime | auto |
-| `--grid FILE` | Grid file path | (see script) |
-| `--output, -o FILE` | Output file | met_forcing.nc |
-| `--utm-zone ZONE` | UTM zone | 54 |
-| `--gwo-dir DIR` | GWO data directory | (see script) |
-| `--station-map MAP` | Station mapping | slht:Tokyo,... |
-| `--wind-factor F` | Wind factor | 1.8 |
-| `--max-gap-hours N` | Max gap hours | 6 |
-| `--fill-gaps` | Enable gap filling | (default) |
-| `--no-fill-gaps` | Disable gap filling | - |
-| `--fallback-stations` | Fallback stations | Chiba:Tokyo,... |
-| `--solar-model MODEL` | Solar model | empirical |
-| `--help, -h` | Show help | - |
+| `grid` | FVCOM grid file (`.dat` or `.nc`) — positional | required |
+| `--start` | Start time: year (`2020`), date, or ISO datetime | required |
+| `--end` | End time (optional for year/date-only start) | - |
+| `--start-tz` | Timezone for naive start/end | `UTC` |
+| `--dt` | Time step in seconds | `3600` |
+| `--utm-zone` | UTM zone number (e.g., 54 for Tokyo Bay) | required |
+| `--southern` | Southern hemisphere UTM | - |
+| `-o`, `--output` | Output NetCDF file path | - |
 
-### Configuration Priority
+#### Time Series Source
 
-Settings can be specified in three ways (highest to lowest priority):
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--ts SPEC` | CSV/TSV time-series `path[:var1,var2,…]` (repeatable) | - |
+| `--data-tz` | Timezone of input data | `Asia/Tokyo` |
+| `--air_temperature`, etc. | Constant value for each met variable | (built-in defaults) |
 
-1. **Command line arguments**: `./make_fvcom_met.sh --start 2019`
-2. **Environment variables**: `START=2019 ./make_fvcom_met.sh`
-3. **Default values in script**: Edit the script directly
+#### GWO-AMD Options
 
-### Full Script Reference
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--gwo-dir` | GWO hourly data directory (enables GWO mode) | - |
+| `--station-map` | Variable-to-station mapping | `slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba` |
+| `--wind-factor` | Wind speed multiplier | `1.8` |
+| `--max-gap-hours` | Max hours to interpolate for missing data | `6` |
 
-The script `scripts/make_fvcom_met.sh` provides a complete template:
+#### Gap Filling (requires `--gwo-dir`)
 
-```bash
-#!/bin/bash
-# Default values can be edited directly in the script
-GRID=~/Github/TB-FVCOM/goto2023/input/TokyoBay18_grd.dat
-START=2020
-END=
-UTM_ZONE=54
-OUTPUT=met_forcing.nc
-GWO_DIR=${DATA_DIR}/met/JMA_DataBase/GWO/Hourly
-STATION_MAP="slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba"
-WIND_FACTOR=1.8
-MAX_GAP_HOURS=6
-FILL_GAPS=true
-FALLBACK_STATIONS="Chiba:Tokyo,Yokohama,Tateyama"
-SOLAR_MODEL=empirical
-
-# ... (argument parsing and execution)
-```
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--fill-gaps` | Enable 4-step gap filling | `false` |
+| `--fallback-stations` | Fallback chain (e.g., `"Chiba:Tokyo,Yokohama"`) | - |
+| `--correlation-file` | YAML file with pre-computed correlations | - |
+| `--solar-model` | `empirical`, `pvlib-kasten`, or `pvlib-larson` | `empirical` |
+| `--no-extend-boundary` | Disable using prev/next year data for boundary gaps | - |
+| `--strict` | Fail if gaps remain | `false` |
+| `--recompute-correlations` | Force recompute even if cache exists | - |
+| `--no-correlation-cache` | Disable auto-caching of correlations | - |
 
 ### Time Specification
 
@@ -98,23 +97,6 @@ SOLAR_MODEL=empirical
 | `2020-01-01T00:00:00` | `2020-01-07T00:00:00` | 2020-01-01T00:00 → 2020-01-07T00:00 |
 
 Note: END is optional only for year format. For year/date formats, END is inclusive (adds 1 year/day).
-
-### Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--start` | Start time (see above) | required |
-| `--end` | End time (see above) | - |
-| `--utm-zone` | UTM zone number (e.g., 54 for Tokyo Bay) | required |
-| `--southern` | Southern hemisphere UTM | northern |
-| `--gwo-dir` | GWO hourly data directory | - |
-| `--station-map` | Variable-to-station mapping | `slht:Tokyo,kous:Tokyo,clod:Tokyo,*:Chiba` |
-| `--wind-factor` | Wind speed multiplier | 1.8 |
-| `--max-gap-hours` | Max hours to interpolate | 6 |
-| `--fill-gaps` | Enable 4-step gap filling | false |
-| `--fallback-stations` | Fallback chain (e.g., "Chiba:Tokyo,Yokohama") | - |
-| `--solar-model` | Solar estimation: empirical, pvlib-kasten, pvlib-larson | empirical |
-| `--strict` | Fail if gaps remain | false |
 
 ### Station Mapping
 
@@ -135,15 +117,9 @@ Format: `variable:station,variable:station,*:default_station`
 ### Pre-compute Correlations (Optional)
 
 ```bash
-#!/bin/bash
-GWO_DIR=/path/to/GWO/Hourly
-STATIONS=Tokyo,Chiba,Yokohama,Tateyama
-YEARS=2015-2020
-OUTPUT=gwo_correlations.yaml
-
-xfvcom-calc-gwo-corr --gwo-dir "$GWO_DIR" \
-    --stations "$STATIONS" --years "$YEARS" \
-    --include-solar-model -o "$OUTPUT"
+xfvcom-calc-gwo-corr --gwo-dir /path/to/GWO/Hourly \
+    --stations Tokyo,Chiba,Yokohama,Tateyama --years 2015-2020 \
+    --include-solar-model -o gwo_correlations.yaml
 ```
 
 Correlations are auto-cached when using `--fill-gaps` with `--fallback-stations`.
@@ -165,46 +141,67 @@ Correlations are auto-cached when using `--fill-gaps` with `--fallback-stations`
 
 ## River Forcing
 
-```bash
-#!/bin/bash
-NML=rivers.nml
-START=2025-01-01T00:00Z
-END=2025-12-31T23:00Z
-DT=3600
-TS_SPEC="Arakawa=discharge.csv:flux"
-CONST_SPEC="Arakawa.salt=0.05"
-OUTPUT=river_forcing.nc
+### CLI Options
 
+| Option | Description | Default |
+|--------|-------------|---------|
+| `nml` | River namelist file — positional | required |
+| `--start` | Start time (ISO-8601, UTC) | required |
+| `--end` | End time (ISO-8601, UTC) | required |
+| `--start-tz` | Timezone for naive start/end | `UTC` |
+| `--dt` | Time step in seconds | `3600` |
+| `--flux` | Default discharge | `0.0` |
+| `--temp` | Default temperature | `20.0` |
+| `--salt` | Default salinity | `0.0` |
+| `--ts SPEC` | Time-series (`RIVER=path:var` or `path:var`, repeatable) | - |
+| `--const SPEC` | Constant value (`RIVER.var=value` or `var=value`, repeatable) | - |
+| `--config` | YAML config with defaults and river definitions | - |
+| `--data-tz` | Timezone of CSV/TSV data | `Asia/Tokyo` |
+| `-o`, `--output` | Output NetCDF file | - |
+
+### Example
+
+```bash
 # Generate namelist first
-xfvcom-make-river-nml river_data.csv --output "$NML"
+xfvcom-make-river-nml river_data.csv --output rivers.nml
 
 # Generate NetCDF
-xfvcom-make-river-nc "$NML" \
-    --start "$START" --end "$END" --dt "$DT" \
-    --ts "$TS_SPEC" --const "$CONST_SPEC" \
-    -o "$OUTPUT"
+xfvcom-make-river-nc rivers.nml \
+    --start 2025-01-01T00:00Z --end 2025-12-31T23:00Z --dt 3600 \
+    --ts "Arakawa=discharge.csv:flux" --const "Arakawa.salt=0.05" \
+    -o river_forcing.nc
 ```
 
 ---
 
 ## Groundwater Forcing
 
-```bash
-#!/bin/bash
-GRID=grid.nc
-START=2025-01-01T00:00Z
-END=2025-12-31T23:00Z
-FLUX=0.001
-TEMPERATURE=15.0
-SALINITY=0.0
-DYE=1.0
-OUTPUT=groundwater_forcing.nc
+### CLI Options
 
-xfvcom-make-groundwater-nc "$GRID" \
-    --start "$START" --end "$END" \
-    --flux "$FLUX" --temperature "$TEMPERATURE" \
-    --salinity "$SALINITY" --dye-concentration "$DYE" \
-    -o "$OUTPUT"
+| Option | Description | Default |
+|--------|-------------|---------|
+| `grid_file` | Grid file (`.nc` or `.dat`) — positional | required |
+| `--start` | Start time (ISO-8601) | required |
+| `--end` | End time (ISO-8601) | required |
+| `--dt` | Time step in seconds | `3600` |
+| `--start-tz` | Timezone for naive start/end | `UTC` |
+| `--utm-zone` | UTM zone (required for `.dat` files) | - |
+| `--southern` | Southern hemisphere | - |
+| `--flux` | Flux velocity (m/s): constant or CSV | `0.0` |
+| `--temperature` | Temperature (°C): constant or CSV | `0.0` |
+| `--salinity` | Salinity (PSU): constant or CSV | `0.0` |
+| `--dye` | Dye concentration: constant or CSV | - |
+| `--ideal` | Use ideal time format instead of MJD | - |
+| `--nml` | Also generate FVCOM namelist snippet | - |
+| `-o`, `--output` | Output NetCDF file | `groundwater_forcing.nc` |
+
+### Example
+
+```bash
+xfvcom-make-groundwater-nc grid.nc \
+    --start 2025-01-01T00:00Z --end 2025-12-31T23:00Z \
+    --flux 0.001 --temperature 15.0 --salinity 0.0 --dye 1.0 \
+    -o groundwater_forcing.nc
 ```
 
 ---
@@ -226,8 +223,10 @@ time,flux
 ## Validation
 
 ```bash
-xfvcom-check-met met_forcing.nc
-xfvcom-check-met met_forcing.nc -o anomalies.csv
+xfvcom-check-met met_forcing.nc                    # Check for NaN/Inf/out-of-bounds
+xfvcom-check-met met_forcing.nc -o anomalies.csv   # Export to CSV
+xfvcom-check-met met_forcing.nc --var uwind_speed   # Check specific variable
+xfvcom-check-met met_forcing.nc --uniform           # Check spatial uniformity
 ```
 
 [Back to README](../README.md)
