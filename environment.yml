@@ -51,6 +51,7 @@ dependencies:
   # ── Geospatial ──────────────────────────────────────────────────
   - geopandas-base
   - shapely
+  - pyogrio  # GeoPandas file I/O engine (GPKG, Shapefile)
 
   # ── NetCDF / climate tools ──────────────────────────────────────
   - nctoolkit  # Includes nco, cdo as dependencies

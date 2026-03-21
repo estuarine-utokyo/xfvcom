@@ -135,13 +135,22 @@ class FvcomPlotOptions:
     land_color: str = "#A0522D"
 
     # ------------------------------------------------------------
-    # 11. Miscellaneous
+    # 11. Coastmask (OSM-derived land masking)
+    # ------------------------------------------------------------
+    coastmask: Any | None = None  # CoastMask object from xfvcom.coastmask
+    coastmask_facecolor: str = "lightgray"
+    coastmask_edgecolor: str = "black"
+    coastmask_linewidth: float = 0.5
+    coastmask_zorder: int = 5
+
+    # ------------------------------------------------------------
+    # 12. Miscellaneous
     # ------------------------------------------------------------
     verbose: bool = False
     log_scale: bool = False
 
     # ------------------------------------------------------------
-    # 12. Future / rarely-used kwargs bucket
+    # 13. Future / rarely-used kwargs bucket
     # ------------------------------------------------------------
     extra: dict[str, Any] = field(default_factory=dict, repr=False)
     da_is_scalar: bool = False

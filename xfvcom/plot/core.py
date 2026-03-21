@@ -1178,6 +1178,16 @@ class FvcomPlotter(PlotHelperMixin):
             obcline_color=obcline_color,
         )
 
+        # -------- coastmask overlay (OSM-derived land) ---------------
+        if opts.coastmask is not None:
+            opts.coastmask.add_to_mpl(
+                ax,
+                facecolor=opts.coastmask_facecolor,
+                edgecolor=opts.coastmask_edgecolor,
+                linewidth=opts.coastmask_linewidth,
+                zorder=opts.coastmask_zorder,
+            )
+
         # -------- vector-overlay hook inside plot_2d -----------------
         self._draw_vectors(
             ax=ax,
@@ -2711,9 +2721,7 @@ class FvcomPlotter(PlotHelperMixin):
             x, y = self.ds["lon"].values, self.ds["lat"].values
             from matplotlib.collections import LineCollection
 
-            coast_segs = [
-                [(x[n0], y[n0]), (x[n1], y[n1])] for n0, n1 in boundary_edges
-            ]
+            coast_segs = [[(x[n0], y[n0]), (x[n1], y[n1])] for n0, n1 in boundary_edges]
             coast_lc = LineCollection(
                 coast_segs,
                 colors=coast_color,
