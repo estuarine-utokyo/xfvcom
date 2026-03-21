@@ -29,12 +29,22 @@ fig = plotter.plot_2d("temp", time="2020-07-01", siglay=0)
 ```python
 opts = FvcomPlotOptions(
     add_tiles=True,
-    tile_provider="satellite",
+    tile_provider=GoogleTiles(style="satellite"),
     with_mesh=True,
     mesh_color="white",
     cmap="RdYlBu_r",
     vmin=15, vmax=30,
 )
+fig = plotter.plot_2d("temp", time="2020-07-01", siglay=0, opts=opts)
+```
+
+### With Coast Masking (OSM-derived)
+
+```python
+from xfvcom.coastmask import load
+
+mask = load("tokyo_bay")
+opts = FvcomPlotOptions(coastmask=mask)
 fig = plotter.plot_2d("temp", time="2020-07-01", siglay=0, opts=opts)
 ```
 
@@ -52,21 +62,76 @@ fig = plotter.plot_2d("temp", time="2020-07-01", siglay=0, opts=opts)
 
 ### FvcomPlotOptions Reference
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `figsize` | `tuple` | Figure size |
-| `cmap` | `str` | Colormap name |
-| `vmin`, `vmax` | `float` | Color range |
-| `levels` | `int` | Number of contour levels |
-| `with_mesh` | `bool` | Draw mesh edges |
-| `mesh_color` | `str` | Mesh edge color |
-| `add_tiles` | `bool` | Add map tiles |
-| `tile_provider` | `str` | `"osm"`, `"satellite"`, or Cartopy tile object |
-| `plot_vec2d` | `bool` | Overlay velocity vectors |
-| `vec_siglay` | `int` | Sigma layer for vectors |
-| `arrow_color` | `str` | Vector arrow color |
-| `xlim`, `ylim` | `tuple` | Map extent |
-| `coastlines` | `bool` | Draw coastlines |
+#### Color & Scaling
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `cmap` | `str` | `"viridis"` | Colormap name |
+| `vmin`, `vmax` | `float \| None` | `None` | Color range limits |
+| `levels` | `int \| list[float]` | `20` | Number of contour levels |
+| `extend` | `str` | `"both"` | Colorbar extension (`"both"`, `"neither"`, `"min"`, `"max"`) |
+| `norm` | `Normalize \| None` | `None` | Custom matplotlib normalization |
+| `log_scale` | `bool` | `False` | Use logarithmic color scale |
+
+#### Figure & Axes
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `figsize` | `tuple \| None` | `None` | Figure size (width, height) |
+| `dpi` | `int \| None` | `None` | Figure resolution |
+| `title` | `str \| None` | `None` | Plot title |
+| `xlabel`, `ylabel` | `str \| None` | `None` | Axis labels |
+| `xlim`, `ylim` | `tuple \| None` | `None` | Map extent |
+| `date_fmt` | `str` | `"%Y-%m-%d"` | Date format for time axes |
+| `projection` | `ccrs.Projection` | `ccrs.Mercator()` | Cartopy projection |
+
+#### Mesh & Map
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `with_mesh` | `bool` | `False` | Draw mesh edges |
+| `mesh_color` | `str` | `"#36454F"` | Mesh edge color |
+| `mesh_linewidth` | `float` | `0.5` | Mesh edge width |
+| `coastlines` | `bool` | `False` | Draw Cartopy coastlines |
+| `coastline_color` | `str` | `"gray"` | Coastline color |
+| `add_tiles` | `bool` | `False` | Add map tiles |
+| `tile_provider` | `GoogleTiles` | `GoogleTiles(style="satellite")` | Map tile source |
+| `tile_zoom` | `int` | `12` | Tile zoom level |
+| `plot_grid` | `bool` | `False` | Draw lat/lon grid lines |
+
+#### Coast Masking
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `coastmask` | `CoastMask \| None` | `None` | OSM-derived land mask object |
+| `coastmask_facecolor` | `str` | `"lightgray"` | Land fill color |
+| `coastmask_edgecolor` | `str` | `"black"` | Land boundary color |
+| `coastmask_linewidth` | `float` | `0.5` | Land boundary width |
+| `coastmask_zorder` | `int` | `5` | Drawing order |
+
+#### Colorbar
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `colorbar` | `bool` | `True` | Show colorbar |
+| `cbar_label` | `str \| None` | `None` | Colorbar label |
+| `cbar_size` | `str \| None` | `None` | Colorbar size (e.g. `"3%"`) |
+| `cbar_pad` | `float \| None` | `None` | Colorbar padding |
+
+#### Vector Overlay
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `plot_vec2d` | `bool` | `False` | Overlay velocity vectors |
+| `vec_siglay` | `int \| None` | `None` | Sigma layer for vectors |
+| `arrow_color` | `str` | `"k"` | Vector arrow color |
+| `arrow_scale` | `float \| None \| "auto"` | `"auto"` | Arrow scaling factor |
+| `arrow_width` | `float` | `0.002` | Arrow width |
+| `arrow_alpha` | `float` | `0.7` | Arrow transparency |
+| `skip` | `int \| None` | `None` | Arrow sampling interval |
+| `show_vec_legend` | `bool` | `True` | Show vector legend |
+| `vec_legend_speed` | `float \| None` | `None` | Reference speed (None → 0.3×max) |
+| `with_magnitude` | `bool` | `True` | Color arrows by magnitude |
 
 ---
 
@@ -99,11 +164,14 @@ from xfvcom.plot.utils import create_anim_2d_plot
 
 create_anim_2d_plot(
     plotter=plotter,
+    processes=4,              # Max parallel processes for frame rendering
     var_name="temp",
     siglay=0,
     fps=10,
-    output_format="gif",  # or "mp4"
-    plot_kwargs={"vmin": 15, "vmax": 30, "cmap": "RdYlBu_r"}
+    generate_gif=True,        # Generate GIF (default: True)
+    generate_mp4=False,       # Generate MP4 (default: False)
+    cleanup=False,            # Delete frame PNGs after animation
+    plot_kwargs={"vmin": 15, "vmax": 30, "cmap": "RdYlBu_r"},
 )
 ```
 
@@ -131,7 +199,8 @@ pp = make_node_marker_post(
     nodes=[100, 200, 300],
     plotter=plotter,
     marker_kwargs={"color": "red", "markersize": 8},
-    index_base=1,
+    text_kwargs={"fontsize": 8},  # Optional: label styling
+    index_base=1,                 # 1-based (FVCOM convention)
 )
 fig = plotter.plot_2d("temp", post_process_func=pp)
 ```
@@ -144,6 +213,7 @@ fig = plotter.plot_2d("temp", post_process_func=pp)
 |-------|----------|
 | Map flipped/shifted | Set `projection=ccrs.PlateCarree()` in options |
 | Vector scale wrong | Use `vec_legend_speed` to fix reference speed |
-| Tiles not loading | Check internet connection; try `tile_provider="osm"` |
+| Tiles not loading | Check internet connection; try a different `tile_provider` |
+| Text clipped by mask | Use `make_node_marker_post(..., text_clip_buffer=-0.001)` |
 
 [Back to README](../README.md)

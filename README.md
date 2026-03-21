@@ -47,7 +47,7 @@ Use pip only for packages unavailable on conda-forge.
 
 | Topic | Description |
 |-------|-------------|
-| [Plotting](docs/plot_2d.md) | 2D horizontal plots, time series, vertical sections |
+| [Plotting](docs/plot_2d.md) | 2D horizontal plots, time series, animations |
 | [Forcing Files](docs/forcing_generator.md) | River, meteorological, groundwater forcing generation |
 
 ---
