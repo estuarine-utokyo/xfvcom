@@ -1,7 +1,7 @@
 """Extract and analyze member-to-node mappings from FVCOM ensemble runs.
 
 This module provides utilities to extract which nodes are active in each
-ensemble member by parsing FVCOM namelist files.
+ensemble member by parsing FVCOM namelist files and configuration.
 
 Source configurations can be loaded from external YAML files via
 xfvcom.config.load_source_config(). When external config is loaded,

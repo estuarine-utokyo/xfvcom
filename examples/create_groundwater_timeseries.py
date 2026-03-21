@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """
 Create time series CSV files for groundwater forcing with realistic variations.
 """

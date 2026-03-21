@@ -1,4 +1,7 @@
-"""Tests for xfvcom.coastmask module using synthetic polygons."""
+"""Tests for xfvcom.coastmask module using synthetic polygons.
+
+Covers CoastMask creation, caching, rendering, and water/river subtraction.
+"""
 
 from __future__ import annotations
 

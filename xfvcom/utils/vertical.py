@@ -1,7 +1,7 @@
 """Vertical coordinate utilities for FVCOM sigma coordinates.
 
 This module provides functions for working with FVCOM's sigma coordinate system,
-including depth calculations and depth-range averaging.
+including depth calculations at sigma layers and depth-range averaging.
 """
 
 from __future__ import annotations

@@ -1,4 +1,7 @@
-"""Matplotlib / Cartopy rendering helpers for coastmask."""
+"""Matplotlib / Cartopy rendering helpers for coastmask.
+
+Provides add_land_to_axes() for GeoAxes and add_land_to_plain_axes() for plain Axes.
+"""
 
 from __future__ import annotations
 

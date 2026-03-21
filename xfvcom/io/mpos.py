@@ -1,6 +1,6 @@
 """MPOS (Marine/Port Observation System) data loader for Tokyo Bay.
 
-Loads observation data from the MPOS nc_structured/masked_filled NetCDF files,
+Loads observation data from MPOS nc_structured/masked_filled NetCDF files,
 performs vertical interpolation to match FVCOM model depths, and computes
 daily means.
 

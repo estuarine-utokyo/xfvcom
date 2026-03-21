@@ -1,4 +1,6 @@
 # xfvcom/plot_options.py
+"""Per-plot option container shared across all xfvcom plotting methods."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

@@ -1,6 +1,4 @@
-"""
-xfvcom.plot sub-package public API.
-"""
+"""xfvcom.plot sub-package public API."""
 
 from __future__ import annotations
 

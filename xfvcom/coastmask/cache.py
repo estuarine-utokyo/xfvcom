@@ -1,4 +1,7 @@
-"""GeoPackage cache management for processed coastmask data."""
+"""GeoPackage cache management for processed coastmask data.
+
+Stores computed land/water GeoDataFrames to avoid repeated OSM downloads.
+"""
 
 from __future__ import annotations
 

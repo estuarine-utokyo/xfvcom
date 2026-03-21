@@ -1,4 +1,7 @@
-"""Configuration and bbox presets for coastmask."""
+"""Configuration and bbox presets for coastmask.
+
+Provides CoastmaskConfig for paths/tolerances and PRESETS for Japanese bays.
+"""
 
 from __future__ import annotations
 

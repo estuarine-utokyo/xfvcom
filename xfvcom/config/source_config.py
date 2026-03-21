@@ -20,6 +20,8 @@ and other xfvcom modules fall back to their hardcoded values for
 backward compatibility.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 

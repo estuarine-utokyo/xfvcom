@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """Quick test of dye_timeseries functionality with actual data."""
 
 import sys

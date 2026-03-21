@@ -1,9 +1,7 @@
 # xfvcom/io/__init__.py
-"""
-I/O sub-package of xfvcom.
+"""I/O sub-package of xfvcom.
 
-* core.py      – former standalone io.py
-* river_nml.py – river namelist parser
+Includes data loaders, force file generators, and GWO-AMD reader.
 """
 
 from __future__ import annotations

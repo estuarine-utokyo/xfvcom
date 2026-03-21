@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-Calculate correlations between GWO weather stations for gap filling.
-"""
+"""Calculate correlations between GWO weather stations for gap filling."""
 
 from __future__ import annotations
 

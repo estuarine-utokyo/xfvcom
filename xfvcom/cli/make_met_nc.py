@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-Generate FVCOM meteorological forcing NetCDF files.
+"""Generate FVCOM meteorological forcing NetCDF files.
 
 Supports: constant values (default), CSV/TSV time series, GWO-AMD data with gap filling.
 """

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .metrics import calc_bias, calc_rmse, pearson_r, willmott_d
 from .time_utils import sliced_time_label, time_label  # re-export for convenience
 from .timeseries_utils import (

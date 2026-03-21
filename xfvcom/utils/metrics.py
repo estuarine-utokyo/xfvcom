@@ -1,6 +1,6 @@
 """Statistical metrics for model-observation comparison.
 
-Provides standard metrics used in ocean model validation:
+Standard metrics for ocean model validation:
   - Willmott's d (index of agreement)
   - RMSE (root mean squared error)
   - Bias (mean error)

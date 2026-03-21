@@ -1,7 +1,7 @@
 """Ensemble analysis sub-package for xfvcom.
 
 This module provides utilities for analyzing FVCOM ensemble model output,
-including member-node mapping extraction and source identification.
+including member-node mapping extraction, source identification, and labeling.
 """
 
 from __future__ import annotations

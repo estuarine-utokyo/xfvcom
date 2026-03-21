@@ -1,6 +1,5 @@
 """
-xfvcom.grid.interpolation - Interpolation utilities for FVCOM unstructured grids
----------------------------------------------------------------------------------
+xfvcom.grid.interpolation — Interpolation utilities for FVCOM unstructured grids.
 
 Functions for interpolating between element centers and nodes.
 

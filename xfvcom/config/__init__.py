@@ -15,6 +15,8 @@ Usage:
     colors = get_source_colors()
 """
 
+from __future__ import annotations
+
 from xfvcom.config.source_config import (
     build_din_array,
     clear_config,

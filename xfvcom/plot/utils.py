@@ -1,3 +1,5 @@
+"""Animation and plot utility functions for xfvcom."""
+
 from __future__ import annotations
 
 import glob

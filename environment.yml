@@ -48,7 +48,7 @@ dependencies:
   - plotly
   - ipywidgets
 
-  # ── Geospatial ──────────────────────────────────────────────────
+  # ── Geospatial (coastmask, etc.) ────────────────────────────────
   - geopandas-base
   - shapely
   - pyogrio  # GeoPandas file I/O engine (GPKG, Shapefile)

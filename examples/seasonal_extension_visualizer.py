@@ -3,6 +3,8 @@ Improved visualization for seasonal extension that shows the extension clearly
 even when data is constant.
 """
 
+from __future__ import annotations
+
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np

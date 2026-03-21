@@ -201,6 +201,9 @@ examples/sliced_TokyoBay2020kisarazufinal_sewer.nc
 *~
 .DS_Store
 
+# Coastmask cache
+coastmask_cache/
+
 # Generated outputs
 examples/output/
 examples/PNG/

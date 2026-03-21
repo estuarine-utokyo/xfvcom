@@ -1,6 +1,6 @@
 """Dynamic source detection from FVCOM namelist and directory structure.
 
-This module provides utilities to automatically detect dye sources from:
+Provides utilities to automatically detect dye sources from:
 1. Directory structure (which members exist)
 2. Namelist files (what sources each member represents)
 3. River namelist files (source names and node IDs)

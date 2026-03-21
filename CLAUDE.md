@@ -49,6 +49,7 @@ python -m black . && python -m isort . && python -m mypy .
 - Use `list()` copy to satisfy list invariance: `layers: list[int | None] = list(sigmas)`
 - Cast pandas values explicitly: `node_id = int(row["column"])`
 - Handle `None` from `importlib.util.spec_from_file_location()`: check `if spec is None`
+- Use `ffill()`/`bfill()` instead of deprecated `fillna(method=...)` (pandas-stubs ≥ 3.0)
 
 ### Development
 ```bash

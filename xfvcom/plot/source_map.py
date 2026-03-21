@@ -1,7 +1,7 @@
 """Map plot showing source nodes and target nodes.
 
 This module provides tools for creating map plots showing the locations
-of river/sewer source nodes and target analysis nodes in Tokyo Bay.
+of river/sewer source nodes and target analysis nodes.
 
 Source configurations can be loaded from external YAML files via
 xfvcom.config.load_source_config(). When external config is loaded,

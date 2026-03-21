@@ -1,6 +1,6 @@
 # docs/conf.py
-"""
-Sphinx configuration for xfvcom.
+"""Sphinx configuration for xfvcom.
+
 Only the minimal settings required for HTML output.
 """
 

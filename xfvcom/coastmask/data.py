@@ -1,4 +1,7 @@
-"""Load shapefiles and compute true land (land minus inland water)."""
+"""Load shapefiles and compute true land (land minus inland water).
+
+Handles OSM land polygon loading, water subtraction, and geometry validation.
+"""
 
 from __future__ import annotations
 

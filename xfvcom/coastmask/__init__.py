@@ -13,7 +13,7 @@ CoastmaskConfig
     Global configuration (shapefile paths, cache directory, tolerances).
 
 PRESETS
-    Built-in bbox presets for Japanese coastal areas.
+    Built-in bbox presets for Japanese coastal areas (Tokyo Bay, Osaka Bay, etc.).
 """
 
 from __future__ import annotations

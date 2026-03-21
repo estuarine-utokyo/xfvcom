@@ -1,8 +1,6 @@
 # Copyright Jun Sasaki
 # SPDX-License-Identifier: MIT
-"""
-Common utilities for FVCOM input file generators.
-"""
+"""Common utilities for FVCOM input file generators."""
 
 from __future__ import annotations
 

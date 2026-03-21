@@ -1,7 +1,7 @@
-"""
-Utility helpers for reading external time‑series tables that will be used as forcing
-inputs (e.g., river discharge, temperature) before conversion into FVCOM‑compatible
-NetCDF.
+"""Utility helpers for reading external time-series tables as forcing inputs.
+
+Reads CSV/TSV files (e.g., river discharge, temperature) for conversion into
+FVCOM-compatible NetCDF.
 
 This module is **stand‑alone**: it does *not* depend on the rest of xfvcom and can be
 imported safely by lightweight scripts such as generator CLI tools.  Keeping this

@@ -2,7 +2,7 @@
 
 This module provides tools for creating:
 - Stacked area plots showing time series of source contributions
-- Bar charts showing time-averaged source contributions at specific nodes
+- Bar charts showing time-averaged source contributions at specified nodes
 """
 
 from __future__ import annotations

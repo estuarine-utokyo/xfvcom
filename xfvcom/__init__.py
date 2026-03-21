@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # ------------------------------------------------------------------
 # 0) lightweight first: pure-utility modules (no heavy imports)
 # ------------------------------------------------------------------

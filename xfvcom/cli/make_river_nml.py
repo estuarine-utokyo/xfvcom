@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""
-CLI: xfvcom-make-river-nml
-"""
+"""CLI: xfvcom-make-river-nml — generate river namelist from CSV."""
 
 from __future__ import annotations
 
