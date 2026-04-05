@@ -49,6 +49,7 @@ Use pip only for packages unavailable on conda-forge.
 |-------|-------------|
 | [Plotting](docs/plot_2d.md) | 2D horizontal plots, time series, animations |
 | [Forcing Files](docs/forcing_generator.md) | River, meteorological, groundwater forcing generation |
+| [Coastmask](docs/coastmask.md) | OSM-derived land masking for coastal and ocean models |
 
 ---
 

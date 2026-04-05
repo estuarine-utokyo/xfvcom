@@ -324,3 +324,72 @@ class TestLoad:
         config = CoastmaskConfig(cache_dir=tmp_path)
         mask = load(custom_bbox, config=config)
         assert mask.bbox == custom_bbox
+
+    def test_overpass_cache_key_differs(self, tmp_path: Path) -> None:
+        """Overpass and Geofabrik use different cache directories."""
+        bbox = PRESETS["tokyo_bay"].bbox
+
+        cache_geo = CoastmaskCache(tmp_path, "tokyo_bay")
+        cache_geo.save(
+            gpd.GeoDataFrame(geometry=[box(0, 0, 1, 1)], crs="EPSG:4326"),
+            gpd.GeoDataFrame(geometry=[box(0, 0, 1, 1)], crs="EPSG:4326"),
+            gpd.GeoDataFrame(geometry=[], crs="EPSG:4326"),
+            bbox,
+        )
+
+        cache_ovp = CoastmaskCache(tmp_path, "tokyo_bay_overpass")
+        cache_ovp.save(
+            gpd.GeoDataFrame(geometry=[box(0, 0, 2, 2)], crs="EPSG:4326"),
+            gpd.GeoDataFrame(geometry=[box(0, 0, 2, 2)], crs="EPSG:4326"),
+            gpd.GeoDataFrame(geometry=[], crs="EPSG:4326"),
+            bbox,
+            water_source="overpass",
+        )
+
+        cfg_geo = CoastmaskConfig(cache_dir=tmp_path)
+        cfg_ovp = CoastmaskConfig(cache_dir=tmp_path, water_source="overpass")
+
+        mask_geo = load("tokyo_bay", config=cfg_geo)
+        mask_ovp = load("tokyo_bay", config=cfg_ovp)
+
+        # Different cache entries → different land areas
+        area_geo = mask_geo.land_gdf.geometry.area.sum()
+        area_ovp = mask_ovp.land_gdf.geometry.area.sum()
+        assert area_geo != area_ovp
+
+    def test_cache_metadata_water_source(
+        self,
+        tmp_path: Path,
+        simple_land: gpd.GeoDataFrame,
+        simple_water: gpd.GeoDataFrame,
+    ) -> None:
+        cache = CoastmaskCache(tmp_path, "test_meta")
+        bbox = (0.0, 0.0, 10.0, 10.0)
+        cache.save(
+            simple_land, simple_land, simple_water, bbox, water_source="overpass"
+        )
+        meta = cache.load_metadata()
+        assert meta["water_source"] == "overpass"
+
+    def test_cleanup_cache_key_differs(self, tmp_path: Path) -> None:
+        """Enabling cleanup produces a different cache key."""
+        bbox = PRESETS["tokyo_bay"].bbox
+        land = gpd.GeoDataFrame(geometry=[box(0, 0, 1, 1)], crs="EPSG:4326")
+        empty = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+        # Populate both cache variants
+        cache_plain = CoastmaskCache(tmp_path, "tokyo_bay")
+        cache_plain.save(land, land, empty, bbox)
+
+        cache_fill = CoastmaskCache(tmp_path, "tokyo_bay_fillhole1e-03")
+        cache_fill.save(land, land, empty, bbox)
+
+        cfg_plain = CoastmaskConfig(cache_dir=tmp_path)
+        cfg_fill = CoastmaskConfig(
+            cache_dir=tmp_path, fill_small_holes=True, min_hole_area_deg2=1e-3
+        )
+
+        mask_plain = load("tokyo_bay", config=cfg_plain)
+        mask_fill = load("tokyo_bay", config=cfg_fill)
+
+        assert mask_plain is not mask_fill

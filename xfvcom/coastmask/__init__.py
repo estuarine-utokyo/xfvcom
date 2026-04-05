@@ -23,8 +23,14 @@ from typing import Any
 import geopandas as gpd
 
 from .cache import CoastmaskCache
+from .cleanup import cleanup_land, fill_small_holes, remove_orphan_islands
 from .config import PRESETS, BboxPreset, CoastmaskConfig
-from .data import compute_true_land, load_land_polygons, load_water_polygons
+from .data import (
+    compute_true_land,
+    load_land_polygons,
+    load_water_polygons,
+    load_water_polygons_auto,
+)
 from .render import add_land_to_axes, add_land_to_plain_axes
 
 __all__ = [
@@ -35,6 +41,9 @@ __all__ = [
     "load",
     "add_land_to_axes",
     "add_land_to_plain_axes",
+    "cleanup_land",
+    "fill_small_holes",
+    "remove_orphan_islands",
 ]
 
 
@@ -209,12 +218,18 @@ def load(
     # Build cache key that reflects water-filtering options
     cache_name = name
     parts: list[str] = []
+    if config.water_source != "geofabrik":
+        parts.append(config.water_source)
     if not config.subtract_water:
         parts.append("nolake")
     if not config.subtract_river:
         parts.append("noriver")
     if config.min_water_area_deg2 > 0:
         parts.append(f"minarea{config.min_water_area_deg2:.0e}")
+    if config.fill_small_holes:
+        parts.append(f"fillhole{config.min_hole_area_deg2:.0e}")
+    if config.remove_orphan_islands:
+        parts.append(f"noisland{config.min_island_area_deg2:.0e}")
     if parts:
         cache_name += "_" + "_".join(parts)
 
@@ -230,8 +245,14 @@ def load(
             name=name,
         )
 
-    # Need shapefile paths for fresh processing
-    if config.land_shp_path is None:
+    # Need shapefile paths for fresh processing (Geofabrik mode)
+    if config.water_source == "geofabrik" and config.land_shp_path is None:
+        raise ValueError(
+            "land_shp_path must be set in CoastmaskConfig "
+            "when no cache exists for this region."
+        )
+    # Overpass mode still needs land_shp_path for the coastline
+    if config.water_source == "overpass" and config.land_shp_path is None:
         raise ValueError(
             "land_shp_path must be set in CoastmaskConfig "
             "when no cache exists for this region."
@@ -240,13 +261,17 @@ def load(
     # Load raw data
     raw_land_gdf = load_land_polygons(bbox, config)
 
-    need_water = (
-        config.subtract_water or config.subtract_river
-    ) and config.water_shp_path is not None
-    if need_water:
-        water_gdf = load_water_polygons(bbox, config)
+    # Load water polygons (dispatch by water_source)
+    if config.water_source == "overpass":
+        water_gdf = load_water_polygons_auto(bbox, config)
     else:
-        water_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+        need_water = (
+            config.subtract_water or config.subtract_river
+        ) and config.water_shp_path is not None
+        if need_water:
+            water_gdf = load_water_polygons_auto(bbox, config)
+        else:
+            water_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
     # Compute true land (= raw land minus water bodies)
     land_gdf = compute_true_land(
@@ -256,8 +281,31 @@ def load(
         simplify_tolerance=config.simplify_tolerance,
     )
 
+    # Post-processing cleanup
+    if config.fill_small_holes or config.remove_orphan_islands:
+        # Determine column names based on water source
+        class_col = "water_type" if config.water_source == "overpass" else "fclass"
+        land_gdf = cleanup_land(
+            land_gdf,
+            water_gdf,
+            do_fill_holes=config.fill_small_holes,
+            min_hole_area_deg2=config.min_hole_area_deg2,
+            do_remove_islands=config.remove_orphan_islands,
+            min_island_area_deg2=config.min_island_area_deg2,
+            protected_classes=config.protected_water_classes,
+            protected_names=config.protected_water_names,
+            class_column=class_col,
+            name_column="name",
+        )
+
     # Save to cache
-    cache.save(land_gdf, raw_land_gdf, water_gdf, bbox)
+    cache.save(
+        land_gdf,
+        raw_land_gdf,
+        water_gdf,
+        bbox,
+        water_source=config.water_source,
+    )
 
     return CoastMask(
         land_gdf=land_gdf,

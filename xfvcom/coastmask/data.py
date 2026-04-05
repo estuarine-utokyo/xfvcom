@@ -111,6 +111,52 @@ def load_water_polygons(
     return gdf
 
 
+def load_water_polygons_auto(
+    bbox: tuple[float, float, float, float],
+    config: CoastmaskConfig,
+) -> gpd.GeoDataFrame:
+    """Load water polygons, dispatching by ``config.water_source``.
+
+    - ``"geofabrik"``: delegates to :func:`load_water_polygons`.
+    - ``"overpass"``: delegates to
+      :func:`~xfvcom.coastmask.overpass.load_water_polygons_overpass`,
+      then filters by keep/fill types and ``min_river_area_deg2``.
+
+    Parameters
+    ----------
+    bbox : tuple
+        (west, south, east, north) in EPSG:4326.
+    config : CoastmaskConfig
+        Configuration with water source settings.
+
+    Returns
+    -------
+    GeoDataFrame
+        Water polygons to subtract from land.
+    """
+    if config.water_source == "geofabrik":
+        return load_water_polygons(bbox, config)
+
+    # Overpass mode
+    from .overpass import load_water_polygons_overpass
+
+    all_water = load_water_polygons_overpass(bbox, config)
+
+    if len(all_water) == 0:
+        return all_water
+
+    # Keep only water types in overpass_keep_types
+    keep_mask = all_water["water_type"].isin(config.overpass_keep_types)
+    water_gdf = all_water.loc[keep_mask].copy()
+
+    # Apply minimum river area filter
+    if config.min_river_area_deg2 > 0 and len(water_gdf) > 0:
+        areas = water_gdf.geometry.area
+        water_gdf = water_gdf.loc[areas >= config.min_river_area_deg2].copy()
+
+    return water_gdf
+
+
 def _extract_polygons(geom: shapely.Geometry) -> list[shapely.Geometry]:
     """Extract Polygon/MultiPolygon parts from any geometry."""
     if geom.is_empty:

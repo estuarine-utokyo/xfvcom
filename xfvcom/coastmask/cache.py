@@ -66,6 +66,7 @@ class CoastmaskCache:
         raw_land_gdf: gpd.GeoDataFrame,
         water_gdf: gpd.GeoDataFrame,
         bbox: tuple[float, float, float, float],
+        water_source: str = "geofabrik",
     ) -> None:
         """Save all layers and metadata to cache.
 
@@ -79,6 +80,8 @@ class CoastmaskCache:
             Inland water polygons.
         bbox : tuple
             (west, south, east, north).
+        water_source : str
+            Data source identifier (``"geofabrik"`` or ``"overpass"``).
         """
         self.root.mkdir(parents=True, exist_ok=True)
 
@@ -98,6 +101,7 @@ class CoastmaskCache:
         metadata: dict[str, Any] = {
             "name": self.name,
             "bbox": list(bbox),
+            "water_source": water_source,
             "n_land_polygons": len(land_gdf),
             "n_raw_land_polygons": len(raw_land_gdf),
             "n_water_polygons": len(water_gdf),
