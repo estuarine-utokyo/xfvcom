@@ -29,6 +29,11 @@ jobs:
         run: |
           python -m pip install -U pip
           pip install -e .[dev]
+          # xcoast hosts the OSM land-mask feature formerly known as
+          # xfvcom.coastmask. The xfvcom.coastmask shim re-exports it,
+          # and the test_import_graph test imports the shim, so xcoast
+          # must be present in CI.
+          pip install git+https://github.com/estuarine-utokyo/xcoast.git
 
       # 5) Code formatting (black)
       - name: Code formatting check
