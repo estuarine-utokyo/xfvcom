@@ -47,9 +47,11 @@ dependencies = [
   "cftime>=1.6.4",
   "chardet>=5.2.0",
   "pvlib>=0.10.0",
-  "geopandas>=1.0.0",
-  "shapely>=2.0.0",
 ]
+
+# Optional: install the standalone xcoast package to enable the
+# `xfvcom.coastmask` deprecation shim and the OSM-derived land mask
+# features (now maintained at https://github.com/estuarine-utokyo/xcoast).
 
 [project.optional-dependencies]
 interactive = ["hvplot>=0.10.0", "bokeh>=3.4.0", "holoviews>=1.19.0"]

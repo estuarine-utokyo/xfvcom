@@ -40,8 +40,13 @@ fig = plotter.plot_2d("temp", time="2020-07-01", siglay=0, opts=opts)
 
 ### With Coast Masking (OSM-derived)
 
+The land mask comes from the standalone
+[`xcoast`](https://github.com/estuarine-utokyo/xcoast) package (formerly
+`xfvcom.coastmask`). Install it with
+`pip install git+https://github.com/estuarine-utokyo/xcoast.git`.
+
 ```python
-from xfvcom.coastmask import load
+from xcoast import load
 
 mask = load("tokyo_bay")
 opts = FvcomPlotOptions(coastmask=mask)

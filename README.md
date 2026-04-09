@@ -147,12 +147,25 @@ elem_areas = grid_loader.calculate_element_area([10, 11, 12], index_base=1)
 
 ### Coast Masking
 
+> **Note**: As of v0.3, the OSM-derived land-mask feature has moved to the
+> standalone [`xcoast`](https://github.com/estuarine-utokyo/xcoast) package.
+> A deprecation shim under `xfvcom.coastmask` is kept temporarily for
+> backward compatibility but new code should import from `xcoast` directly.
+
 ```python
+# Recommended (new code)
+from xcoast import load, CoastmaskConfig
+
+# Backward-compatible shim (deprecated, emits a warning)
 from xfvcom.coastmask import load, CoastmaskConfig
 
 mask = load("tokyo_bay")  # Built-in preset
-mask.add_to_axes(ax)       # Add land mask to a Cartopy GeoAxes
+mask.add_to_mpl(ax)        # Add land mask to a Cartopy GeoAxes
 ```
+
+To install `xcoast`::
+
+    pip install git+https://github.com/estuarine-utokyo/xcoast.git
 
 ### Ensemble Analysis
 
@@ -185,8 +198,8 @@ create_anim_2d_plot(plotter, processes=4, var_name="temperature", siglay=0, fps=
 | `FvcomPlotter` | `xfvcom.plot` | Visualization engine |
 | `FvcomPlotConfig` | `xfvcom.plot` | Plot styling configuration |
 | `FvcomPlotOptions` | `xfvcom` | Per-plot options |
-| `CoastMask` | `xfvcom.coastmask` | OSM-derived land masking for coastal plots |
-| `CoastmaskConfig` | `xfvcom.coastmask` | Coastmask configuration (paths, tolerances) |
+| `CoastMask` | `xcoast` (formerly `xfvcom.coastmask`) | OSM-derived land masking for coastal plots |
+| `CoastmaskConfig` | `xcoast` (formerly `xfvcom.coastmask`) | Coastmask configuration (paths, tolerances) |
 | `MetValidator` | `xfvcom.validation` | Forcing file validation |
 | `GWOReader` | `xfvcom.io` | GWO-AMD meteorological data reader |
 | `GWOForcingSource` | `xfvcom.io` | GWO data source for forcing generation |

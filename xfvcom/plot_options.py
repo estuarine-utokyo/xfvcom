@@ -139,7 +139,7 @@ class FvcomPlotOptions:
     # ------------------------------------------------------------
     # 11. Coastmask (OSM-derived land masking)
     # ------------------------------------------------------------
-    coastmask: Any | None = None  # CoastMask object from xfvcom.coastmask
+    coastmask: Any | None = None  # CoastMask object from the xcoast package
     coastmask_facecolor: str = "lightgray"
     coastmask_edgecolor: str = "black"
     coastmask_linewidth: float = 0.5

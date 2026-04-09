@@ -48,10 +48,15 @@ dependencies:
   - plotly
   - ipywidgets
 
-  # ── Geospatial (coastmask, etc.) ────────────────────────────────
-  - geopandas-base
-  - shapely
-  - pyogrio  # GeoPandas file I/O engine (GPKG, Shapefile)
+  # ── Geospatial ──────────────────────────────────────────────────
+  # NOTE: The coastmask feature has moved to the standalone 'xcoast'
+  #       package (https://github.com/estuarine-utokyo/xcoast).
+  #       Install it separately if you need 'xfvcom.coastmask' (a
+  #       deprecation shim) or want to use xcoast directly:
+  #
+  #           pip install git+https://github.com/estuarine-utokyo/xcoast.git
+  #
+  #       xcoast brings in geopandas, shapely, and pyogrio transitively.
 
   # ── NetCDF / climate tools ──────────────────────────────────────
   - nctoolkit  # Includes nco, cdo as dependencies

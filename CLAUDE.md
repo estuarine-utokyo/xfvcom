@@ -76,7 +76,7 @@ Input Files → FvcomDataLoader → xarray Dataset → FvcomAnalyzer → Results
                                       ↓
                                 FvcomPlotter + FvcomPlotConfig → Plots
                                       ↓
-                                CoastMask (OSM shapefiles) → Land masking overlay
+                                CoastMask (xcoast pkg) → Land masking overlay
 
 Grid File → FvcomInputLoader → Area Calculations / Mesh Connectivity
 
@@ -92,7 +92,7 @@ GWO CSV → GWOReader → GapFiller → MetNetCDFGenerator → met.nc
 | `xfvcom/io/gwo_*.py` | `GWOReader`, `GapFiller`, `StationCorrelations` | JMA meteorological data processing |
 | `xfvcom/analysis.py` | `FvcomAnalyzer` | KDTree search, layer averages, tidal decomposition |
 | `xfvcom/plot/` | `FvcomPlotter`, `FvcomPlotConfig` | Visualization engine and styling |
-| `xfvcom/coastmask/` | `CoastMask`, `CoastmaskConfig` | OSM-derived land masking for coastal plots |
+| `xfvcom/coastmask/` | (deprecation shim) | Re-exports `CoastMask`, `CoastmaskConfig` from the standalone `xcoast` package — see https://github.com/estuarine-utokyo/xcoast |
 | `xfvcom/dye_timeseries.py` | `DyeCase`, `Selection`, `aggregate()` | Multi-member ensemble aggregation |
 | `xfvcom/grid/` | `FvcomGrid` | Area calculations (median-dual, triangle sum) |
 | `xfvcom/cli/` | CLI entry points | Command-line tools (`xfvcom-*`) |
