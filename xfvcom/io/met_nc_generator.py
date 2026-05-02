@@ -154,6 +154,10 @@ class MetNetCDFGenerator(BaseGenerator):
         correlations: "StationCorrelations | None" = None,
         solar_model: str = "empirical",
         extend_boundary: bool = True,
+        mpos_dir: Path | str | None = None,
+        mpos_stations: tuple[str, ...] | None = None,
+        mpos_idw_power: float = 2.0,
+        mpos_convert_to_utc: bool = True,
         **consts: float,
     ) -> None:
         t0 = pd.Timestamp(start)
@@ -170,6 +174,17 @@ class MetNetCDFGenerator(BaseGenerator):
         self._correlations = correlations
         self._solar_model = solar_model
         self._extend_boundary = extend_boundary
+
+        # MPOS spatial wind mode (mutually exclusive with --gwo-dir).
+        self._mpos_mode = mpos_dir is not None
+        self._mpos_dir = Path(mpos_dir) if mpos_dir else None
+        self._mpos_stations = mpos_stations
+        self._mpos_idw_power = mpos_idw_power
+        self._mpos_convert_to_utc = mpos_convert_to_utc
+        if self._mpos_mode and self._gwo_mode:
+            raise ValueError(
+                "--gwo-dir and --mpos-dir are mutually exclusive; choose one"
+            )
 
         if self._gwo_mode:
             # GWO mode: use naive timestamps (JST values labeled as UTC)
@@ -225,6 +240,22 @@ class MetNetCDFGenerator(BaseGenerator):
 
             for var in self._DEFAULTS:
                 self._sources[var] = _GWOSourceAdapter(gwo_source, var)
+        elif mpos_dir is not None:
+            # MPOS mode: spatial wind / air-temp from MPOS observations.
+            # Non-MPOS variables (rh, prmsl, swrad, lwrad, precip, cloud)
+            # fall back to constants or --ts overrides, as in legacy mode.
+            self._ts_map = _parse_ts_spec(ts_specs or [], self._DEFAULTS)
+            for var in self._DEFAULTS:
+                if var in ("uwind", "vwind", "air_temp"):
+                    # Placeholder; replaced with MposWindSource in load().
+                    self._sources[var] = _ScalarConstantSource(var, 0.0)
+                else:
+                    self._sources[var] = _choose_source(
+                        var,
+                        self._ts_map,
+                        self.consts[var],
+                        data_tz=self._data_tz,
+                    )
         else:
             # Legacy mode: use time series or constants
             self._ts_map = _parse_ts_spec(ts_specs or [], self._DEFAULTS)
@@ -320,6 +351,45 @@ class MetNetCDFGenerator(BaseGenerator):
         self.timeline = pd.date_range(
             self.start, self.end, freq=f"{self.dt}s", inclusive="both", tz="UTC"
         )
+
+        # In MPOS mode the wind / air-temperature sources need the mesh
+        # coordinates and are therefore instantiated only after the grid
+        # has been parsed.
+        if self._mpos_mode:
+            self._init_mpos_sources()
+
+    def _init_mpos_sources(self) -> None:
+        """Instantiate :class:`MposWindSource` and patch ``self._sources``."""
+        from .sources.mpos_wind import MposWindSource
+
+        # Pull mesh coordinates as float64 for IDW.
+        node_lon = np.asarray(self.mesh_ds["lon"].values, dtype=np.float64)
+        node_lat = np.asarray(self.mesh_ds["lat"].values, dtype=np.float64)
+        elem_lon = np.asarray(self.mesh_ds["lonc"].values, dtype=np.float64)
+        elem_lat = np.asarray(self.mesh_ds["latc"].values, dtype=np.float64)
+
+        # Pad the load window by one day on each side so that JST<->UTC
+        # conversion does not strip values from the edges.
+        pad = pd.Timedelta(days=1)
+        load_start = (self.timeline[0] - pad).tz_localize(None).isoformat()
+        load_end = (self.timeline[-1] + pad).tz_localize(None).isoformat()
+
+        source = MposWindSource(
+            start=load_start,
+            end=load_end,
+            target_node_lon=node_lon,
+            target_node_lat=node_lat,
+            target_elem_lon=elem_lon,
+            target_elem_lat=elem_lat,
+            mpos_dir=self._mpos_dir,
+            stations=self._mpos_stations,
+            idw_power=self._mpos_idw_power,
+            convert_to_utc=self._mpos_convert_to_utc,
+        )
+        self._mpos_source = source
+        # Wire all three MPOS-served variables through this single source.
+        for var in source.variables:
+            self._sources[var] = source
 
     def validate(self) -> None:
         for req in ("x", "y", "nv"):
@@ -444,19 +514,41 @@ class MetNetCDFGenerator(BaseGenerator):
                 std_name: str | None = None,
                 desc: str | None = None,
             ) -> None:
+                source = srcs[key]
+                spatial_dim: str | None = None
+                if "nele" in dims:
+                    spatial_dim = "elem"
+                elif "node" in dims:
+                    spatial_dim = "node"
+                use_spatial = (
+                    spatial_dim is not None
+                    and getattr(source, "is_spatial", False)
+                    and hasattr(source, "get_spatial_series")
+                )
+
                 try:
-                    data = srcs[key].get_series(key, self.timeline)
+                    if use_spatial:
+                        data = source.get_spatial_series(  # type: ignore[attr-defined]
+                            key, self.timeline, on=spatial_dim
+                        )
+                    else:
+                        data = source.get_series(key, self.timeline)
                 except ValueError as exc:
                     if str(exc).startswith("Column '"):
                         data = np.full(nt, self.consts[key], dtype=float)
+                        use_spatial = False
                     else:
                         raise
 
                 v = ds_out.createVariable(name, "f4", dims, fill_value=False)
-                data_f4: NDArray[np.float32] = data.astype("f4")
+                data_f4: NDArray[np.float32] = np.asarray(data, dtype="f4")
                 if dims == ("time",):
                     v[:] = data_f4
+                elif use_spatial:
+                    # Already shaped (n_time, n_target).
+                    v[:, :] = data_f4
                 else:
+                    # 1-D series broadcast over the spatial dimension.
                     v[:, :] = data_f4[:, None]
                 v.long_name = long_name
                 if std_name:

@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 
@@ -310,3 +311,196 @@ class MposLoader:
                 daily_bot[i] = np.nanmean(vals_b)
 
         return daily_time, daily_surf, daily_bot
+
+
+# =====================================================================
+# Meteorological loader
+# =====================================================================
+def _default_mpos_meteo_dir() -> Path:
+    """Resolve MPOS meteorological NetCDF directory from DATA_DIR."""
+    data_dir = os.environ.get("DATA_DIR")
+    if data_dir:
+        return Path(data_dir) / "MPOS" / "nc_meteo"
+    raise EnvironmentError(
+        "DATA_DIR environment variable is not set.\n"
+        "Set it (e.g., 'export DATA_DIR=/home/pj24001722/share/Data') or pass\n"
+        "mpos_dir explicitly to MposMeteoLoader."
+    )
+
+
+# Default stations to use as wind boundary forcing for Tokyo Bay FVCOM.
+# 02kawasaki is excluded by default because the station is shielded by the
+# adjacent "Wind Tower" structure to its northeast (per MLIT revise.pdf, 2013).
+DEFAULT_METEO_STATIONS: tuple[str, ...] = (
+    "01kemigawa",
+    "03urayasu",
+    "04chiba1gou",
+)
+
+
+@dataclass
+class MposMeteoLoader:
+    """Load multi-year MPOS meteorological observations for FVCOM forcing.
+
+    Reads ``Mpos_K_{stn}_{year}.nc`` files written by
+    ``xmpos.preprocess.mpos2nc_meteo`` and concatenates them into a single
+    ``xarray.Dataset`` with dimensions ``(time, station)``.
+
+    Parameters
+    ----------
+    mpos_dir : str or Path, optional
+        Directory containing the yearly NetCDF files. Defaults to
+        ``$DATA_DIR/MPOS/nc_meteo``.
+    stations : sequence of str, optional
+        Station identifiers to load (e.g. ``("01kemigawa", "04chiba1gou")``).
+        Defaults to :data:`DEFAULT_METEO_STATIONS`, which excludes
+        ``02kawasaki`` (see module docstring).
+    convert_to_utc : bool, optional
+        If True (default), shift the time axis by -9 hours to convert from
+        JST (the storage convention used by xmpos) to UTC, which is what
+        FVCOM forcing files expect. When False the JST values are kept
+        verbatim with naive timestamps.
+
+    Examples
+    --------
+    >>> loader = MposMeteoLoader()
+    >>> ds = loader.load("2020-01-01", "2021-01-01")
+    >>> ds["wind_speed_at_10m"].dims
+    ('time', 'station')
+    """
+
+    mpos_dir: Path = field(default_factory=_default_mpos_meteo_dir)
+    stations: tuple[str, ...] = DEFAULT_METEO_STATIONS
+    convert_to_utc: bool = True
+
+    def __post_init__(self) -> None:
+        self.mpos_dir = Path(self.mpos_dir)
+
+    def load(
+        self,
+        start: str,
+        end: str,
+    ) -> xr.Dataset:
+        """Load meteorological data for the requested time range.
+
+        Parameters
+        ----------
+        start, end : str
+            ISO date or datetime strings (e.g. ``"2020-01-01"``). The
+            range is interpreted in the time zone of the stored data
+            (JST); when ``convert_to_utc`` is True the returned time
+            axis is shifted to UTC after subsetting.
+
+        Returns
+        -------
+        xarray.Dataset
+            Variables: ``wind_speed_at_10m``, ``eastward_wind_at_10m``,
+            ``northward_wind_at_10m``, ``air_temperature``, plus per-
+            station ``latitude``, ``longitude``. Dimensions:
+            ``(time, station)``.
+        """
+        t_start = pd.Timestamp(start)
+        t_end = pd.Timestamp(end)
+        years = range(t_start.year, t_end.year + 1)
+
+        per_station: dict[str, xr.Dataset] = {}
+        for stn in self.stations:
+            yearly = []
+            for yr in years:
+                path = self.mpos_dir / f"Mpos_K_{stn}_{yr}.nc"
+                if not path.exists():
+                    continue
+                yearly.append(xr.open_dataset(path).load())
+            if not yearly:
+                raise FileNotFoundError(
+                    f"No MPOS meteorological NetCDF found for station "
+                    f"{stn!r} between {start} and {end} in {self.mpos_dir}"
+                )
+            ds_stn = xr.concat(yearly, dim="time", data_vars="minimal").sortby("time")
+            ds_stn = ds_stn.sel(time=slice(t_start, t_end))
+            per_station[stn] = ds_stn
+
+        wanted_vars = (
+            "wind_speed_at_10m",
+            "eastward_wind_at_10m",
+            "northward_wind_at_10m",
+            "air_temperature",
+        )
+
+        # Establish the canonical time axis from the first station.
+        first_stn = self.stations[0]
+        time_axis = per_station[first_stn]["time"]
+        nt = time_axis.size
+        nstn = len(self.stations)
+
+        data_vars: dict[str, xr.DataArray] = {}
+        for var in wanted_vars:
+            arr = np.full((nt, nstn), np.nan, dtype="float32")
+            attrs: dict[str, Any] = {}
+            for j, stn in enumerate(self.stations):
+                ds_stn = per_station[stn]
+                if var in ds_stn:
+                    # Reindex to common time axis to handle minor mismatches.
+                    a = ds_stn[var].reindex(time=time_axis).astype("float32")
+                    arr[:, j] = a.values
+                    if not attrs:
+                        attrs = {
+                            k: v
+                            for k, v in ds_stn[var].attrs.items()
+                            if k not in ("caveat_use_with_caution",)
+                        }
+            data_vars[var] = xr.DataArray(
+                arr,
+                dims=("time", "station"),
+                coords={"time": time_axis, "station": list(self.stations)},
+                attrs=attrs,
+            )
+
+        # Per-station static coordinates. Latitude/longitude were stored as
+        # scalars in each yearly file; xr.concat with data_vars="minimal"
+        # keeps them scalar.
+        def _scalar_coord(da: xr.DataArray) -> float:
+            arr = np.atleast_1d(da.values)
+            return float(arr[0])
+
+        lats = np.array(
+            [_scalar_coord(per_station[s]["latitude"]) for s in self.stations],
+            dtype="float64",
+        )
+        lons = np.array(
+            [_scalar_coord(per_station[s]["longitude"]) for s in self.stations],
+            dtype="float64",
+        )
+        ds = xr.Dataset(
+            data_vars,
+            coords={
+                "time": time_axis,
+                "station": list(self.stations),
+                "latitude": ("station", lats),
+                "longitude": ("station", lons),
+            },
+        )
+        ds["latitude"].attrs.update(
+            {"standard_name": "latitude", "units": "degrees_north"}
+        )
+        ds["longitude"].attrs.update(
+            {"standard_name": "longitude", "units": "degrees_east"}
+        )
+
+        if self.convert_to_utc:
+            shifted = pd.DatetimeIndex(ds["time"].values) - pd.Timedelta(hours=9)
+            ds = ds.assign_coords(time=shifted)
+            ds["time"].attrs["timezone"] = "UTC"
+            ds["time"].attrs[
+                "conversion_note"
+            ] = "Shifted from JST to UTC by subtracting 9 hours during load."
+        else:
+            ds["time"].attrs["timezone"] = "JST"
+
+        ds.attrs["source"] = "MPOS K-CSV via xmpos.preprocess.mpos2nc_meteo"
+        ds.attrs["stations_excluded_by_default"] = (
+            "02kawasaki: shielded by the 'Wind Tower' structure to NE; per "
+            "MLIT revise.pdf, NE wind speeds are systematically low and "
+            "uncorrected."
+        )
+        return ds

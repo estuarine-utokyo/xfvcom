@@ -90,6 +90,9 @@ GWO CSV → GWOReader → GapFiller → MetNetCDFGenerator → met.nc
 | `xfvcom/io/` | `FvcomDataLoader`, `FvcomInputLoader` | Load FVCOM NetCDF and grid files |
 | `xfvcom/io/*_generator.py` | `MetNetCDFGenerator`, `RiverNetCDFGenerator` | Generate FVCOM forcing files |
 | `xfvcom/io/gwo_*.py` | `GWOReader`, `GapFiller`, `StationCorrelations` | JMA meteorological data processing |
+| `xfvcom/io/mpos.py` | `MposLoader`, `MposMeteoLoader` | Tokyo Bay MPOS station data (water-quality + wind / air-temperature) |
+| `xfvcom/io/sources/mpos_wind.py` | `MposWindSource` | Spatial wind / air-temperature source for FVCOM (IDW from 3 MPOS stations; 02kawasaki excluded by default due to wind-tower shielding) |
+| `xfvcom/io/spatial_interp.py` | `idw_weights`, `idw_apply`, `haversine_km` | Geographic IDW for sparse-station -> mesh projection |
 | `xfvcom/analysis.py` | `FvcomAnalyzer` | KDTree search, layer averages, tidal decomposition |
 | `xfvcom/plot/` | `FvcomPlotter`, `FvcomPlotConfig` | Visualization engine and styling |
 | `xfvcom/coastmask/` | (deprecation shim) | Re-exports `CoastMask`, `CoastmaskConfig` from the standalone `xcoast` package — see https://github.com/estuarine-utokyo/xcoast |

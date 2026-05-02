@@ -29,7 +29,42 @@ xfvcom-make-met-nc grid.dat --start 2020 --gwo-dir /path/to/GWO/Hourly \
 xfvcom-make-met-nc grid.dat --start 2020 --gwo-dir /path/to/GWO/Hourly \
   --station-map "*:Chiba" --fill-gaps --fallback-stations "Chiba:Tokyo,Yokohama" \
   --correlation-file gwo_correlations.yaml --solar-model empirical --utm-zone 54
+
+# MPOS spatial wind for Tokyo Bay (3-station IDW)
+xfvcom-make-met-nc grid.nc --start 2020-06-01 --end 2020-06-08 \
+  --mpos-dir "$DATA_DIR/MPOS/nc_meteo" --utm-zone 54
 ```
+
+### MPOS spatial wind (Tokyo Bay)
+
+When `--mpos-dir` points to a directory of `Mpos_K_{stn}_{year}.nc` files
+produced by `xmpos.preprocess.mpos2nc_meteo`, the generator switches to
+spatial mode for the wind and air-temperature variables. Each FVCOM
+element (`uwind_speed`, `vwind_speed`) and node (`air_temperature`)
+receives its own time series, computed by inverse-distance weighting
+from the active MPOS stations.
+
+Defaults:
+
+- **Stations used**: `01kemigawa`, `03urayasu`, `04chiba1gou`. The
+  Kawasaki Artificial Island station (`02kawasaki`) is **excluded by
+  default** because its anemometer is shielded by the adjacent "Wind
+  Tower" structure to its NE; per MLIT `revise.pdf` (section 5),
+  northeasterly wind speeds at this site are systematically attenuated
+  and not corrected upstream. Override with
+  `--mpos-stations 01kemigawa,02kawasaki,03urayasu,04chiba1gou` when an
+  unfiltered field is needed.
+- **IDW power**: 2 (override with `--mpos-idw-power`).
+- **Time zone**: MPOS files are stored in JST; the generator converts
+  to UTC during load, matching the FVCOM forcing convention. Pass
+  `--mpos-keep-jst` to skip the shift (rarely needed).
+- **Variables not observed by MPOS** (`rh`, `prmsl`, `swrad`, `lwrad`,
+  `precip`, `cloud`) fall back to constants or `--ts` overrides, exactly
+  as in legacy mode. Atmospheric pressure is **not** observed by MPOS
+  and must be supplied externally if required (`metdata` package or
+  ERA5).
+
+`--mpos-dir` and `--gwo-dir` are mutually exclusive.
 
 ### Shell Script Wrapper
 

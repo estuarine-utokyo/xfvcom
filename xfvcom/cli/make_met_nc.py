@@ -77,6 +77,45 @@ Example bash script (edit variables as needed):
         help="Timezone of input data (default: Asia/Tokyo)",
     )
 
+    # MPOS source (Tokyo Bay Monitoring Post wind / air-temperature)
+    mpos_group = p.add_argument_group("MPOS options (spatial wind from Tokyo Bay)")
+    mpos_group.add_argument(
+        "--mpos-dir",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Directory containing Mpos_K_{stn}_{year}.nc (typically "
+            "$DATA_DIR/MPOS/nc_meteo). Enables MPOS mode: spatial wind / "
+            "air-temperature from the 3-station Tokyo Bay network "
+            "(02kawasaki excluded by default) interpolated onto the FVCOM "
+            "mesh via inverse-distance weighting."
+        ),
+    )
+    mpos_group.add_argument(
+        "--mpos-stations",
+        type=str,
+        metavar="LIST",
+        default=None,
+        help=(
+            "Comma-separated station identifiers, overriding the default "
+            "exclusion list. Example: '01kemigawa,03urayasu,04chiba1gou'."
+        ),
+    )
+    mpos_group.add_argument(
+        "--mpos-idw-power",
+        type=float,
+        default=2.0,
+        help="IDW power for spatial interpolation (default: 2.0)",
+    )
+    mpos_group.add_argument(
+        "--mpos-keep-jst",
+        action="store_true",
+        help=(
+            "Skip the JST->UTC conversion of MPOS timestamps. Use only "
+            "when matching a non-standard FVCOM forcing convention."
+        ),
+    )
+
     # GWO-AMD source
     gwo_group = p.add_argument_group("GWO-AMD options")
     gwo_group.add_argument(
@@ -229,6 +268,10 @@ Example bash script (edit variables as needed):
         if getattr(args, k) is not None
     }
 
+    mpos_stations: tuple[str, ...] | None = None
+    if args.mpos_stations:
+        mpos_stations = tuple(s.strip() for s in args.mpos_stations.split(","))
+
     gen = MetNetCDFGenerator(
         grid_nc=args.grid,
         start=start_str,
@@ -248,6 +291,10 @@ Example bash script (edit variables as needed):
         correlations=correlations,
         solar_model=args.solar_model,
         extend_boundary=not args.no_extend_boundary,
+        mpos_dir=args.mpos_dir,
+        mpos_stations=mpos_stations,
+        mpos_idw_power=args.mpos_idw_power,
+        mpos_convert_to_utc=not args.mpos_keep_jst,
         **const_vals,
     )
 
