@@ -32,6 +32,10 @@ See `bash setup.sh --help` for all options.
 > **Note**: Use `mamba` (via `setup.sh`) to avoid conflicts with Intel oneAPI Python on supercomputers.
 > Activation works with both `conda activate` and `mamba activate`.
 
+> **GRIB I/O** (`cfgrib`, `eccodes`) is bundled in this env, so ERA5 / IFS /
+> GFS GRIB files can be opened directly with
+> `xarray.open_dataset(path, engine="cfgrib")`.
+
 ### Alternative: pip (not recommended)
 
 ```bash

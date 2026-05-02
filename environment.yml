@@ -61,6 +61,8 @@ dependencies:
   # ── NetCDF / climate tools ──────────────────────────────────────
   - nctoolkit  # Includes nco, cdo as dependencies
   - metpy
+  - cfgrib    # Reads GRIB1/2 via xarray engine='cfgrib'
+  - eccodes   # ECMWF GRIB / BUFR codec, transitively pulled by cfgrib
 
   # ── File I/O ────────────────────────────────────────────────────
   - openpyxl

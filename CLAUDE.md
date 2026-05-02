@@ -21,6 +21,33 @@ python -c "import xfvcom; print(xfvcom.__version__)"
 
 **Note**: Use `mamba` (via `setup.sh` / `environment.yml`) for installation to avoid conflicts with Intel oneAPI Python on supercomputers. `pip install -e .[dev]` is supported but not recommended.
 
+## Package management policy
+
+All Python dependencies in this project are sourced from **conda-forge**
+via `mamba` (or `conda`). `pip install <package>` is **not** used to add
+runtime dependencies — pip and conda environments interact poorly and
+silently break compiled stacks (`numpy` / `netCDF4` / `h5py` / `hdf5` /
+`eccodes`, etc.).
+
+Workflow when adding a dependency:
+
+1. Add the package to `environment.yml` (it must resolve on `conda-forge`;
+   confirm with `mamba search -c conda-forge <pkg>` if uncertain).
+2. Apply with `mamba env update -n xfvcom -f environment.yml`.
+3. Commit `environment.yml` so the env is reproducible.
+
+Two narrow exceptions are allowed and already encoded in
+`environment.yml`:
+
+- **The local editable install** of this project itself: `pip install -e .`
+  inside the env (the `pip:` block at the bottom of `environment.yml`).
+- **Packages genuinely unavailable on conda-forge.** Verify absence first,
+  then fall back to `pip install <pkg>` and document the reason in
+  `environment.yml`.
+
+This rule mirrors the global policy in `~/.claude/CLAUDE.md`; do not
+deviate from it without an explicit exception.
+
 ## Essential Commands
 
 ### CI-equivalent checks (run before committing)
