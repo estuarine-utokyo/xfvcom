@@ -64,6 +64,22 @@ def interp_profile(
     return np.interp(dst_z, src_z[order], values[order])
 
 
+# Months belonging to each meteorological season
+SEASONS: dict[str, list[int]] = {
+    "DJF": [12, 1, 2],
+    "MAM": [3, 4, 5],
+    "JJA": [6, 7, 8],
+    "SON": [9, 10, 11],
+}
+MJD_EPOCH = pd.Timestamp("1858-11-17")
+
+
+def months_from_mjd(mjd: np.ndarray) -> np.ndarray:
+    """Return month-of-year (1..12) for an array of float MJD values."""
+    dt = MJD_EPOCH + pd.to_timedelta(mjd, unit="D")
+    return np.asarray(pd.DatetimeIndex(dt).month, dtype=np.int32)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--old", type=Path, required=True, help="legacy tsobc NetCDF")
@@ -102,8 +118,8 @@ def main() -> int:
     S_o_mean = S_o.mean(axis=0)
     S_n_mean = S_n.mean(axis=0)
 
-    # ---- plot annual-mean profiles ----
-    def plot_profile(field_o, field_n, var_label, units, fname):
+    # ---- profile-comparison helper ----
+    def plot_profile(field_o, field_n, axis_label, title, fname):
         fig, axes = plt.subplots(4, 4, figsize=(14, 14))
         axes = axes.flatten()
         for n in range(n_obc):
@@ -130,14 +146,14 @@ def main() -> int:
                 f"node {int(nd_o[n])}: h_old={h_o[n]:.0f}m h_new={h_n[n]:.0f}m",
                 fontsize=9,
             )
-            ax.set_xlabel(f"{var_label} ({units})", fontsize=8)
+            ax.set_xlabel(axis_label, fontsize=8)
             ax.set_ylabel("z (m)", fontsize=8)
             ax.grid(alpha=0.3)
             if n == 0:
                 ax.legend(fontsize=7, loc="lower right")
         for j in range(n_obc, len(axes)):
             axes[j].axis("off")
-        fig.suptitle(f"OBC annual-mean {var_label} ({args.year})", fontsize=13)
+        fig.suptitle(title, fontsize=13)
         fig.tight_layout(rect=(0, 0, 1, 0.97))
         out = args.output_dir / fname
         fig.savefig(out, dpi=120)
@@ -148,38 +164,89 @@ def main() -> int:
     plot_profile(
         T_o_mean,
         T_n_mean,
-        "temperature",
-        "°C",
+        "temperature (°C)",
+        f"OBC annual-mean temperature ({args.year})",
         f"tsobc_compare_T_annual_mean_{args.year}.png",
     )
     plot_profile(
         S_o_mean,
         S_n_mean,
-        "salinity",
-        "PSU",
+        "salinity (PSU)",
+        f"OBC annual-mean salinity ({args.year})",
         f"tsobc_compare_S_annual_mean_{args.year}.png",
     )
 
-    # ---- per-node statistics (regrid old to new z, then compare) ----
+    # ---- seasonal-mean plots ----
+    print("[plot] seasonal-mean profiles")
+    mon_o = months_from_mjd(t_o)
+    mon_n = months_from_mjd(t_n)
+    season_means: dict[str, dict[str, np.ndarray]] = {}
+    for season, months in SEASONS.items():
+        sel_o = np.isin(mon_o, months)
+        sel_n = np.isin(mon_n, months)
+        if sel_o.sum() == 0 or sel_n.sum() == 0:
+            print(f"  {season}: no samples — skipping")
+            continue
+        T_o_m = T_o[sel_o].mean(axis=0)
+        T_n_m = T_n[sel_n].mean(axis=0)
+        S_o_m = S_o[sel_o].mean(axis=0)
+        S_n_m = S_n[sel_n].mean(axis=0)
+        season_means[season] = {
+            "T_old": T_o_m,
+            "T_new": T_n_m,
+            "S_old": S_o_m,
+            "S_new": S_n_m,
+        }
+        plot_profile(
+            T_o_m,
+            T_n_m,
+            "temperature (°C)",
+            f"OBC {season} temperature ({args.year})",
+            f"tsobc_compare_T_{season}_{args.year}.png",
+        )
+        plot_profile(
+            S_o_m,
+            S_n_m,
+            "salinity (PSU)",
+            f"OBC {season} salinity ({args.year})",
+            f"tsobc_compare_S_{season}_{args.year}.png",
+        )
+
+    # ---- per-node statistics (annual + per-season, regrid old to new z) ----
     print()
-    print(f"=== Per-node statistics ({args.year} subset, regridded to new z) ===")
-    print(
-        f"{'node':>5}  {'h_old':>7} {'h_new':>7}  "
+    print(f"=== Per-node statistics ({args.year}, regridded to new z) ===")
+    header = (
+        f"{'season':>6}  {'node':>5}  {'h_old':>7} {'h_new':>7}  "
         f"{'RMSE_T':>7} {'bias_T':>7}  {'RMSE_S':>7} {'bias_S':>7}"
     )
-    for n in range(n_obc):
-        # Interpolate the annual-mean old profile to new z
-        T_o_on_new = interp_profile(T_o_mean[:, n], z_o[:, n], z_n[:, n])
-        S_o_on_new = interp_profile(S_o_mean[:, n], z_o[:, n], z_n[:, n])
-        d_T = T_n_mean[:, n] - T_o_on_new
-        d_S = S_n_mean[:, n] - S_o_on_new
-        rmse_T = float(np.sqrt(np.mean(d_T**2)))
-        bias_T = float(d_T.mean())
-        rmse_S = float(np.sqrt(np.mean(d_S**2)))
-        bias_S = float(d_S.mean())
-        print(
-            f"{int(nd_o[n]):>5}  {h_o[n]:>7.1f} {h_n[n]:>7.1f}  "
-            f"{rmse_T:>7.3f} {bias_T:>+7.3f}  {rmse_S:>7.3f} {bias_S:>+7.3f}"
+    print(header)
+    print("-" * len(header))
+
+    def stats_row(season_label, T_o_m, T_n_m, S_o_m, S_n_m):
+        for n in range(n_obc):
+            T_o_on_new = interp_profile(T_o_m[:, n], z_o[:, n], z_n[:, n])
+            S_o_on_new = interp_profile(S_o_m[:, n], z_o[:, n], z_n[:, n])
+            d_T = T_n_m[:, n] - T_o_on_new
+            d_S = S_n_m[:, n] - S_o_on_new
+            rmse_T = float(np.sqrt(np.mean(d_T**2)))
+            bias_T = float(d_T.mean())
+            rmse_S = float(np.sqrt(np.mean(d_S**2)))
+            bias_S = float(d_S.mean())
+            print(
+                f"{season_label:>6}  {int(nd_o[n]):>5}  "
+                f"{h_o[n]:>7.1f} {h_n[n]:>7.1f}  "
+                f"{rmse_T:>7.3f} {bias_T:>+7.3f}  "
+                f"{rmse_S:>7.3f} {bias_S:>+7.3f}"
+            )
+
+    stats_row("ANNUAL", T_o_mean, T_n_mean, S_o_mean, S_n_mean)
+    for season, vals in season_means.items():
+        stats_row(
+            season,
+            vals["T_old"],
+            vals["T_new"],
+            vals["S_old"],
+            vals["S_new"],
         )
 
     return 0
