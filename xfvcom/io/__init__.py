@@ -23,6 +23,7 @@ if _core_all:  # truthy & already a list[str]
 
 from .groundwater_nc_generator import GroundwaterNetCDFGenerator  # noqa: F401
 from .input_loader import FvcomInputLoader  # noqa: F401
+from .jcope_grid import JcopeGrid  # noqa: F401
 from .netcdf_utils import (  # noqa: F401
     decode_fvcom_time,
     encode_fvcom_time,
@@ -41,6 +42,7 @@ from .river_nml import parse_river_namelist  # noqa: F401
 __all__.append("parse_river_namelist")
 __all__.append("GroundwaterNetCDFGenerator")
 __all__.append("FvcomInputLoader")
+__all__.append("JcopeGrid")
 __all__.append("NamelistParser")
 __all__.append("parse_member_namelist")
 

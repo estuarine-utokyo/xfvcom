@@ -115,6 +115,7 @@ else:
 
 # Import interpolation functions directly (no lazy loading needed)
 from .interpolation import elems2nodes, nodes2elems
+from .sigma import sigma_from_z, vertical_interp, z_from_sigma
 
 __all__ = [
     "FvcomGrid",
@@ -124,4 +125,7 @@ __all__ = [
     "calculate_element_area",
     "elems2nodes",
     "nodes2elems",
+    "sigma_from_z",
+    "vertical_interp",
+    "z_from_sigma",
 ]
