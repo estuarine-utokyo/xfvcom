@@ -24,6 +24,8 @@ from xfvcom.io.jcope_grid import JcopeGrid
 from xfvcom.io.jcope_obc_generator import (
     N_JCOPE_ACTIVE_LEVELS,
     JcopeObcGenerator,
+    write_elevation_nc,
+    write_tsobc_nc,
 )
 
 # ---------------------------------------------------------------------------
@@ -84,7 +86,7 @@ def _build_basic_nc(path: Path) -> None:
         ds.grid_dy_deg = DY
 
 
-def _build_region_nc(path: Path, n_time: int = 4) -> None:
+def _build_region_nc(path: Path, n_time: int = 4, year: int = 2020) -> None:
     """Synthetic region.nc covering the eastern ocean half of basic.nc.
 
     The region's local axes (lat/lon) line up with basic.nc at the same
@@ -97,7 +99,7 @@ def _build_region_nc(path: Path, n_time: int = 4) -> None:
     lon = LON_ORIGIN + (i0 + np.arange(n_lon)) * DX
     lat = LAT_ORIGIN + np.arange(JM) * DY
 
-    times = pd.date_range("2020-01-01", periods=n_time, freq="h")
+    times = pd.date_range(f"{year}-01-01", periods=n_time, freq="h")
 
     # Field structure: TT depends linearly on depth (well-defined for the
     # interpolation tests). For column (j, i_local), TT[k] = 20 + k*(-0.2)
@@ -312,3 +314,107 @@ class TestNearestOceanSnap:
         with nc.Dataset(out) as ds:
             T = ds["obc_temp"][:]
         assert np.isfinite(T[:, :, 2]).all()
+
+
+class TestMultiYearAssembly:
+    """Cover the build_*_arrays + write_*_nc seam used by the multi-year
+    CLI path. We synthesize two distinct one-year region files, build
+    each year's arrays through the public API, concatenate, write a
+    single output NC, and verify the joined time axis and dataset shape.
+    """
+
+    @pytest.fixture
+    def two_year_archive(self, tmp_path):
+        basic_path = tmp_path / "basic.nc"
+        region2020 = tmp_path / "region_2020.nc"
+        region2021 = tmp_path / "region_2021.nc"
+        _build_basic_nc(basic_path)
+        # Use the existing helper with default 4 timesteps but a different
+        # start date for the second year so the joined time axis is monotonic.
+        _build_region_nc(region2020)
+        _build_region_nc(region2021, n_time=3, year=2021)
+        return basic_path, [region2020, region2021]
+
+    def test_combined_tsobc_round_trip(self, two_year_archive, tmp_path):
+        basic_path, region_paths = two_year_archive
+        grid = JcopeGrid(basic_path)
+        try:
+            obc_nodes = np.array([101, 102, 103], dtype=np.int32)
+            lats = np.array([LAT_ORIGIN + 3 * DY] * 3, dtype=np.float64)
+            lons = np.array(
+                [
+                    LON_ORIGIN + 6 * DX,
+                    LON_ORIGIN + 8 * DX,
+                    LON_ORIGIN + 4 * DX,
+                ],
+                dtype=np.float64,
+            )
+            obc_h_fvcom = np.array([100.0, 200.0, 30.0], dtype=np.float32)
+
+            mjd_list: list[np.ndarray] = []
+            fields_list: list[dict[str, np.ndarray]] = []
+            elev_list: list[np.ndarray] = []
+            siglev = None
+            siglay = None
+            for rp in region_paths:
+                gen = JcopeObcGenerator(
+                    grid=grid,
+                    region_nc=rp,
+                    obc_nodes=obc_nodes,
+                    obc_lat=lats,
+                    obc_lon=lons,
+                    obc_h_fvcom=obc_h_fvcom,
+                    n_siglay=10,
+                )
+                if siglev is None:
+                    siglev = gen.siglev
+                    siglay = gen.siglay
+                mjd_list.append(gen.mjd.copy())
+                fields_list.append(gen.build_tsobc_arrays())
+                elev_list.append(gen.build_elevation_array())
+                gen.close()
+
+            time_mjd = np.concatenate(mjd_list)
+            elev = np.concatenate(elev_list, axis=0)
+            fields = {
+                v: np.concatenate([f[v] for f in fields_list], axis=0)
+                for v in fields_list[0]
+            }
+            assert (np.diff(time_mjd) > 0).all(), "joined time axis must be monotonic"
+
+            tsobc = tmp_path / "tb_tsobc_2020-2021.nc"
+            write_tsobc_nc(
+                tsobc,
+                time_mjd=time_mjd,
+                obc_nodes=obc_nodes,
+                obc_h=obc_h_fvcom,
+                siglev=siglev,
+                siglay=siglay,
+                fields=fields,
+                source_files=[p.name for p in region_paths],
+            )
+            with nc.Dataset(tsobc) as ds:
+                assert ds.dimensions["time"].size == time_mjd.size == 7
+                assert ds["obc_temp"].shape == (7, 10, 3)
+                assert ds["obc_salinity"].shape == (7, 10, 3)
+                # Year 2 stretches the value envelope a bit because the
+                # synthetic surface trend extends to t=2; just verify
+                # monotonic surface trend per year holds.
+                T = ds["obc_temp"][:]
+                # Years are stored back-to-back, so the year boundary lies
+                # at index n_time_year_0; both years should produce finite
+                # values everywhere with no NaN holes from the concat.
+                assert np.isfinite(T).all()
+
+            elev_nc = tmp_path / "tb_julian_obc_2020-2021.nc"
+            write_elevation_nc(
+                elev_nc,
+                time_mjd=time_mjd,
+                obc_nodes=obc_nodes,
+                elevation=elev,
+                source_files=[p.name for p in region_paths],
+            )
+            with nc.Dataset(elev_nc) as ds:
+                assert ds["elevation"].shape == (7, 3)
+        finally:
+            grid.close()

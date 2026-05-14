@@ -44,13 +44,21 @@ from ..grid.sigma import vertical_interp
 from .jcope_grid import JcopeGrid
 from .netcdf_utils import to_mjd
 
-__all__ = ["JcopeObcGenerator"]
+__all__ = ["JcopeObcGenerator", "write_tsobc_nc", "write_elevation_nc"]
 
 # JCOPE-T DA stores 47 vertical levels in basic.dat but the per-hour
 # variable files (TT/ST/UT/VT) only carry the 46 active layer centers
 # (k=0..45). The 47th (deepest) ZZ entry is a POM-style padding below the
 # seabed and must be ignored for interpolation.
 N_JCOPE_ACTIVE_LEVELS = 46
+
+# FVCOM-side variable specs for the tsobc writer.
+#   key  -> (jcope variable name in region.nc, FVCOM output variable name,
+#           CF-ish units, long_name)
+_TSOBC_VAR_MAP: dict[str, tuple[str, str, str, str]] = {
+    "temp": ("TT", "obc_temp", "Celcius", "sea_water_temperature"),
+    "salt": ("ST", "obc_salinity", "PSU", "sea_water_salinity"),
+}
 
 
 class JcopeObcGenerator:
@@ -149,7 +157,9 @@ class JcopeObcGenerator:
 
         # Time axis converted to MJD float64 once
         time_index = pd.DatetimeIndex(self._region_ds["time"].values)
-        self._mjd: NDArray[np.float64] = to_mjd(time_index)
+        self.mjd: NDArray[np.float64] = to_mjd(time_index)
+        # Back-compat alias for code that referenced the underscored name.
+        self._mjd = self.mjd
 
     # ---------- lifecycle ---------- #
 
@@ -280,6 +290,41 @@ class JcopeObcGenerator:
                 out[t, :, n] = vertical_interp(field[t, :, n], src_z, dst_z)
         return out
 
+    # ---------- array builders ---------- #
+
+    def build_tsobc_arrays(
+        self,
+        variables: Iterable[str] = ("temp", "salt"),
+    ) -> dict[str, NDArray[np.float32]]:
+        """Return interpolated FVCOM-σ fields without writing a NetCDF.
+
+        Used directly by multi-year callers that need to concatenate one
+        year's arrays onto another's before writing a single combined
+        output. Single-year callers should use :meth:`write_tsobc` which
+        wraps this method.
+        """
+        vars_list = list(variables)
+        for v in vars_list:
+            if v not in _TSOBC_VAR_MAP:
+                raise ValueError(
+                    f"variable {v!r} is not supported "
+                    f"(allowed: {sorted(_TSOBC_VAR_MAP)})"
+                )
+        out: dict[str, NDArray[np.float32]] = {}
+        for v in vars_list:
+            jcope_name, _vname, _units, _long = _TSOBC_VAR_MAP[v]
+            jcope_field = self._read_variable_profile(jcope_name)[
+                :, :N_JCOPE_ACTIVE_LEVELS, :
+            ]
+            out[v] = self._interp_to_fvcom_sigma(
+                jcope_field, self.obc_h_jcope, self.obc_h_fvcom
+            )
+        return out
+
+    def build_elevation_array(self) -> NDArray[np.float32]:
+        """Return the ``(n_time, n_obc)`` SSH array, no NetCDF write."""
+        return self._read_variable_2d("EGT")
+
     # ---------- public writers ---------- #
 
     def write_tsobc(
@@ -289,112 +334,19 @@ class JcopeObcGenerator:
         variables: Iterable[str] = ("temp", "salt"),
         title: str | None = None,
     ) -> Path:
-        """Write a FVCOM TIME SERIES OBC TS FILE.
-
-        Parameters
-        ----------
-        out_path
-            Output NetCDF path.
-        variables
-            Subset of ``{"temp", "salt"}`` to include. The mapping from
-            FVCOM variable names to JCOPE-T DA names is::
-
-                temp -> TT  (potential temperature, °C)
-                salt -> ST  (salinity, PSU)
-        title
-            Optional NetCDF ``title`` attribute (defaults to a generic
-            description).
-        """
-        var_map = {
-            "temp": ("TT", "Celcius", "sea_water_temperature"),
-            "salt": ("ST", "PSU", "sea_water_salinity"),
-        }
-        vars_list = list(variables)
-        for v in vars_list:
-            if v not in var_map:
-                raise ValueError(
-                    f"variable {v!r} is not supported by write_tsobc "
-                    f"(allowed: {sorted(var_map)})"
-                )
-
-        # Interpolate each requested variable onto FVCOM σ
-        fvcom_fields: dict[str, NDArray[np.float32]] = {}
-        for v in vars_list:
-            jcope_name, _units, _long = var_map[v]
-            jcope_field = self._read_variable_profile(jcope_name)[
-                :, :N_JCOPE_ACTIVE_LEVELS, :
-            ]
-            fvcom_fields[v] = self._interp_to_fvcom_sigma(
-                jcope_field, self.obc_h_jcope, self.obc_h_fvcom
-            )
-
-        out_path = Path(out_path).expanduser().resolve()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with nc.Dataset(out_path, "w", format="NETCDF4") as ds:
-            ds.createDimension("time", None)
-            ds.createDimension("nobc", self.n_obc)
-            ds.createDimension("siglay", self.n_siglay)
-            ds.createDimension("siglev", self.n_siglev)
-            ds.createDimension("DateStrLen", 26)
-
-            v_time = ds.createVariable("time", "f8", ("time",))
-            v_time.long_name = "time"
-            v_time.units = "days since 1858-11-17 00:00:00"
-            v_time.format = "modified julian day (MJD)"
-            v_time.time_zone = "UTC"
-            v_time[:] = self._mjd
-
-            v_nodes = ds.createVariable("obc_nodes", "i4", ("nobc",))
-            v_nodes.long_name = "Open Boundary Node Number"
-            v_nodes.units = "-"
-            v_nodes[:] = self.obc_nodes
-
-            v_h = ds.createVariable("obc_h", "f4", ("nobc",))
-            v_h.long_name = "Open Boundary Depth"
-            v_h.units = "m"
-            v_h[:] = self.obc_h_fvcom
-
-            v_siglev = ds.createVariable("siglev", "f4", ("siglev", "nobc"))
-            v_siglev.long_name = "ocean_sigma/general_coordinate"
-            v_siglev.units = "-"
-            v_siglev[:] = np.broadcast_to(
-                self.siglev[:, None], (self.n_siglev, self.n_obc)
-            ).astype(np.float32)
-
-            v_siglay = ds.createVariable("siglay", "f4", ("siglay", "nobc"))
-            v_siglay.long_name = "ocean_sigma/general_coordinate"
-            v_siglay.units = "-"
-            v_siglay[:] = np.broadcast_to(
-                self.siglay[:, None], (self.n_siglay, self.n_obc)
-            ).astype(np.float32)
-
-            for v in vars_list:
-                jcope_name, units, long_name = var_map[v]
-                vname = f"obc_{v if v == 'temp' else 'salinity'}"
-                v_var = ds.createVariable(
-                    vname,
-                    "f4",
-                    ("time", "siglay", "nobc"),
-                )
-                v_var.long_name = long_name
-                v_var.units = units
-                v_var[:] = fvcom_fields[v]
-
-            ds.title = (
-                title or f"Open boundary temperature and salinity from JCOPE-T DA"
-            )
-            ds.type = "FVCOM TIME SERIES OBC TS FILE"
-            ds.source = (
-                "JCOPE-T DA (JAMSTEC), interpolated to FVCOM OBC sigma "
-                "layers via xfvcom.io.JcopeObcGenerator"
-            )
-            ds.history = (
-                f"Created {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}"
-                f" UTC from {self.region_nc_path.name}"
-            )
-
-        return out_path
+        """Write a FVCOM TIME SERIES OBC TS FILE for a single year."""
+        fields = self.build_tsobc_arrays(variables=variables)
+        return write_tsobc_nc(
+            out_path,
+            time_mjd=self.mjd,
+            obc_nodes=self.obc_nodes,
+            obc_h=self.obc_h_fvcom,
+            siglev=self.siglev,
+            siglay=self.siglay,
+            fields=fields,
+            title=title,
+            source_files=[self.region_nc_path.name],
+        )
 
     def write_elevation(
         self,
@@ -402,47 +354,167 @@ class JcopeObcGenerator:
         *,
         title: str | None = None,
     ) -> Path:
-        """Write a FVCOM TIME SERIES ELEVATION FORCING FILE."""
-        egt = self._read_variable_2d("EGT")  # (n_time, n_obc)
+        """Write a FVCOM TIME SERIES ELEVATION FORCING FILE for one year."""
+        return write_elevation_nc(
+            out_path,
+            time_mjd=self.mjd,
+            obc_nodes=self.obc_nodes,
+            elevation=self.build_elevation_array(),
+            title=title,
+            source_files=[self.region_nc_path.name],
+        )
 
-        out_path = Path(out_path).expanduser().resolve()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with nc.Dataset(out_path, "w", format="NETCDF4") as ds:
-            ds.createDimension("time", None)
-            ds.createDimension("nobc", self.n_obc)
-            ds.createDimension("DateStrLen", 26)
+# ---------- module-level NC writers ---------- #
 
-            v_nodes = ds.createVariable("obc_nodes", "i4", ("nobc",))
-            v_nodes.long_name = "Open Boundary Node Number"
-            v_nodes.units = "-"
-            v_nodes[:] = self.obc_nodes
 
-            v_time = ds.createVariable("time", "f8", ("time",))
-            v_time.long_name = "time"
-            v_time.units = "days since 1858-11-17 00:00:00"
-            v_time.format = "modified julian day (MJD)"
-            v_time.time_zone = "UTC"
-            v_time[:] = self._mjd
+def _format_history(source_files: Iterable[str]) -> str:
+    when = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    sources = ", ".join(source_files)
+    return f"Created {when} UTC from {sources}"
 
-            v_elev = ds.createVariable(
-                "elevation",
-                "f4",
-                ("time", "nobc"),
+
+def write_tsobc_nc(
+    out_path: str | Path,
+    *,
+    time_mjd: NDArray[np.float64],
+    obc_nodes: NDArray[np.int32],
+    obc_h: NDArray[np.float32],
+    siglev: NDArray[np.float64],
+    siglay: NDArray[np.float64],
+    fields: dict[str, NDArray[np.float32]],
+    title: str | None = None,
+    source_files: Iterable[str] = (),
+) -> Path:
+    """Write a FVCOM TIME SERIES OBC TS FILE from pre-computed arrays.
+
+    ``fields`` maps short variable keys (``"temp"`` / ``"salt"``) to
+    ``(n_time, n_siglay, n_obc)`` float32 arrays already interpolated to
+    the FVCOM σ grid (typically produced by
+    :meth:`JcopeObcGenerator.build_tsobc_arrays`).
+    """
+    n_time = int(time_mjd.size)
+    n_obc = int(obc_nodes.size)
+    n_siglay = int(siglay.size)
+    n_siglev = int(siglev.size)
+    for v, arr in fields.items():
+        if v not in _TSOBC_VAR_MAP:
+            raise ValueError(
+                f"variable {v!r} is not supported (allowed: {sorted(_TSOBC_VAR_MAP)})"
             )
-            v_elev.long_name = "Open Boundary Elevation"
-            v_elev.units = "meters"
-            v_elev[:] = egt
-
-            ds.title = title or "Open boundary elevation from JCOPE-T DA"
-            ds.type = "FVCOM TIME SERIES ELEVATION FORCING FILE"
-            ds.source = (
-                "JCOPE-T DA (JAMSTEC), at OBC node nearest ocean cell, "
-                "produced by xfvcom.io.JcopeObcGenerator"
-            )
-            ds.history = (
-                f"Created {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}"
-                f" UTC from {self.region_nc_path.name}"
+        if arr.shape != (n_time, n_siglay, n_obc):
+            raise ValueError(
+                f"field {v!r} has shape {arr.shape}; "
+                f"expected ({n_time}, {n_siglay}, {n_obc})"
             )
 
-        return out_path
+    out_path = Path(out_path).expanduser().resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with nc.Dataset(out_path, "w", format="NETCDF4") as ds:
+        ds.createDimension("time", None)
+        ds.createDimension("nobc", n_obc)
+        ds.createDimension("siglay", n_siglay)
+        ds.createDimension("siglev", n_siglev)
+        ds.createDimension("DateStrLen", 26)
+
+        v_time = ds.createVariable("time", "f8", ("time",))
+        v_time.long_name = "time"
+        v_time.units = "days since 1858-11-17 00:00:00"
+        v_time.format = "modified julian day (MJD)"
+        v_time.time_zone = "UTC"
+        v_time[:] = time_mjd
+
+        v_nodes = ds.createVariable("obc_nodes", "i4", ("nobc",))
+        v_nodes.long_name = "Open Boundary Node Number"
+        v_nodes.units = "-"
+        v_nodes[:] = obc_nodes
+
+        v_h = ds.createVariable("obc_h", "f4", ("nobc",))
+        v_h.long_name = "Open Boundary Depth"
+        v_h.units = "m"
+        v_h[:] = obc_h
+
+        v_siglev = ds.createVariable("siglev", "f4", ("siglev", "nobc"))
+        v_siglev.long_name = "ocean_sigma/general_coordinate"
+        v_siglev.units = "-"
+        v_siglev[:] = np.broadcast_to(
+            np.asarray(siglev)[:, None], (n_siglev, n_obc)
+        ).astype(np.float32)
+
+        v_siglay = ds.createVariable("siglay", "f4", ("siglay", "nobc"))
+        v_siglay.long_name = "ocean_sigma/general_coordinate"
+        v_siglay.units = "-"
+        v_siglay[:] = np.broadcast_to(
+            np.asarray(siglay)[:, None], (n_siglay, n_obc)
+        ).astype(np.float32)
+
+        for v, arr in fields.items():
+            _jname, vname, units, long_name = _TSOBC_VAR_MAP[v]
+            v_var = ds.createVariable(vname, "f4", ("time", "siglay", "nobc"))
+            v_var.long_name = long_name
+            v_var.units = units
+            v_var[:] = arr
+
+        ds.title = title or "Open boundary temperature and salinity from JCOPE-T DA"
+        ds.type = "FVCOM TIME SERIES OBC TS FILE"
+        ds.source = (
+            "JCOPE-T DA (JAMSTEC), interpolated to FVCOM OBC sigma "
+            "layers via xfvcom.io.JcopeObcGenerator"
+        )
+        ds.history = _format_history(source_files)
+
+    return out_path
+
+
+def write_elevation_nc(
+    out_path: str | Path,
+    *,
+    time_mjd: NDArray[np.float64],
+    obc_nodes: NDArray[np.int32],
+    elevation: NDArray[np.float32],
+    title: str | None = None,
+    source_files: Iterable[str] = (),
+) -> Path:
+    """Write a FVCOM TIME SERIES ELEVATION FORCING FILE from pre-computed arrays."""
+    n_time = int(time_mjd.size)
+    n_obc = int(obc_nodes.size)
+    if elevation.shape != (n_time, n_obc):
+        raise ValueError(
+            f"elevation has shape {elevation.shape}; expected ({n_time}, {n_obc})"
+        )
+
+    out_path = Path(out_path).expanduser().resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with nc.Dataset(out_path, "w", format="NETCDF4") as ds:
+        ds.createDimension("time", None)
+        ds.createDimension("nobc", n_obc)
+        ds.createDimension("DateStrLen", 26)
+
+        v_nodes = ds.createVariable("obc_nodes", "i4", ("nobc",))
+        v_nodes.long_name = "Open Boundary Node Number"
+        v_nodes.units = "-"
+        v_nodes[:] = obc_nodes
+
+        v_time = ds.createVariable("time", "f8", ("time",))
+        v_time.long_name = "time"
+        v_time.units = "days since 1858-11-17 00:00:00"
+        v_time.format = "modified julian day (MJD)"
+        v_time.time_zone = "UTC"
+        v_time[:] = time_mjd
+
+        v_elev = ds.createVariable("elevation", "f4", ("time", "nobc"))
+        v_elev.long_name = "Open Boundary Elevation"
+        v_elev.units = "meters"
+        v_elev[:] = elevation
+
+        ds.title = title or "Open boundary elevation from JCOPE-T DA"
+        ds.type = "FVCOM TIME SERIES ELEVATION FORCING FILE"
+        ds.source = (
+            "JCOPE-T DA (JAMSTEC), at OBC node nearest ocean cell, "
+            "produced by xfvcom.io.JcopeObcGenerator"
+        )
+        ds.history = _format_history(source_files)
+
+    return out_path

@@ -29,7 +29,26 @@ from pathlib import Path
 import numpy as np
 
 from xfvcom.grid.grid_obj import FvcomGrid
-from xfvcom.io import JcopeGrid, JcopeObcGenerator
+from xfvcom.io import (
+    JcopeGrid,
+    JcopeObcGenerator,
+    write_elevation_nc,
+    write_tsobc_nc,
+)
+
+
+def parse_year_spec(spec: str) -> list[int]:
+    """Accept a single year, a comma list, or a 'YYYY-YYYY' inclusive range."""
+    if "-" in spec and "," not in spec:
+        lo, hi = spec.split("-", 1)
+        return list(range(int(lo), int(hi) + 1))
+    return [int(s) for s in spec.split(",") if s.strip()]
+
+
+def format_year_label(years: list[int]) -> str:
+    if len(years) == 1:
+        return str(years[0])
+    return f"{min(years)}-{max(years)}"
 
 
 def parse_obc_dat(path: Path) -> np.ndarray:
@@ -89,8 +108,17 @@ def main() -> int:
     parser.add_argument(
         "--region-nc",
         type=Path,
-        required=True,
-        help="path to jcopetda_region_YYYY.nc time-series archive",
+        default=None,
+        help="path to jcopetda_region_YYYY.nc time-series archive "
+        "(single-year mode; mutually exclusive with --region-pattern)",
+    )
+    parser.add_argument(
+        "--region-pattern",
+        type=str,
+        default=None,
+        help="path template containing {year}, e.g. "
+        "'/data/jcopetda/region/.../jcopetda_region_{year}.nc' "
+        "(required when --years selects more than one year)",
     )
     parser.add_argument(
         "--fvcom-grid", type=Path, required=True, help="path to FVCOM *_grd.dat"
@@ -117,8 +145,15 @@ def main() -> int:
         help="number of FVCOM sigma layers (uniform, default 30)",
     )
     parser.add_argument("--tag", default="jcope", help="filename tag (default: jcope)")
-    parser.add_argument(
-        "--year", type=int, required=True, help="year stamp for output filename"
+    year_group = parser.add_mutually_exclusive_group(required=True)
+    year_group.add_argument(
+        "--year", type=int, help="single year; use --region-nc for the archive"
+    )
+    year_group.add_argument(
+        "--years",
+        type=str,
+        help="year list ('2020,2022') or inclusive range ('2020-2023'); "
+        "requires --region-pattern",
     )
     parser.add_argument(
         "--output-dir",
@@ -134,8 +169,30 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # ---- resolve year list and region-NC source(s) ----
+    if args.year is not None:
+        years = [args.year]
+    else:
+        years = parse_year_spec(args.years)
+    if not years:
+        sys.exit("no years to process")
+
+    if len(years) == 1 and args.region_nc is not None:
+        region_paths = [args.region_nc]
+    elif args.region_pattern is not None:
+        region_paths = [Path(args.region_pattern.format(year=y)) for y in years]
+    elif len(years) == 1:
+        sys.exit("single-year run needs either --region-nc or --region-pattern")
+    else:
+        sys.exit("multi-year run requires --region-pattern")
+
+    missing = [p for p in region_paths if not p.exists()]
+    if missing:
+        sys.exit("missing region NCs: " + ", ".join(str(p) for p in missing))
+
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
+    # ---- load FVCOM-side metadata once ----
     print(f"[grid] reading FVCOM mesh from {args.fvcom_grid}")
     mesh = FvcomGrid.from_dat(args.fvcom_grid, utm_zone=args.utm_zone)
     if mesh.lat is None or mesh.lon is None:
@@ -154,7 +211,6 @@ def main() -> int:
     obc_ids = parse_obc_dat(args.fvcom_obc)
     print(f"  OBC nodes ({obc_ids.size}): {obc_ids.tolist()}")
 
-    # Translate 1-based IDs to 0-based array indices.
     idx0 = obc_ids - 1
     obc_lat = np.asarray(mesh.lat)[idx0]
     obc_lon = np.asarray(mesh.lon)[idx0]
@@ -167,37 +223,83 @@ def main() -> int:
         f"ocean fraction {grid.mask.mean()*100:.1f}%"
     )
 
-    print(f"[jcope] opening region archive at {args.region_nc}")
-    gen = JcopeObcGenerator(
-        grid=grid,
-        region_nc=args.region_nc,
-        obc_nodes=obc_ids,
-        obc_lat=obc_lat,
-        obc_lon=obc_lon,
-        obc_h_fvcom=obc_h_fvcom,
-        n_siglay=args.n_siglay,
-    )
+    # ---- loop over years, accumulating arrays ----
+    tsobc_fields_by_year: dict[int, dict[str, np.ndarray]] = {}
+    elevation_by_year: dict[int, np.ndarray] = {}
+    mjd_by_year: dict[int, np.ndarray] = {}
+    siglev = None
+    siglay = None
+    obc_h_jcope_first = None
 
+    for year, region_nc in zip(years, region_paths):
+        print(f"[jcope] opening region archive for {year}: {region_nc}")
+        gen = JcopeObcGenerator(
+            grid=grid,
+            region_nc=region_nc,
+            obc_nodes=obc_ids,
+            obc_lat=obc_lat,
+            obc_lon=obc_lon,
+            obc_h_fvcom=obc_h_fvcom,
+            n_siglay=args.n_siglay,
+        )
+        if siglev is None:
+            siglev = gen.siglev
+            siglay = gen.siglay
+            obc_h_jcope_first = gen.obc_h_jcope.copy()
+
+        mjd_by_year[year] = gen.mjd.copy()
+        if not args.no_tsobc:
+            tsobc_fields_by_year[year] = gen.build_tsobc_arrays()
+        if not args.no_elevation:
+            elevation_by_year[year] = gen.build_elevation_array()
+        gen.close()
+
+    # ---- summary table (FVCOM h vs JCOPE h, computed once) ----
     print()
     print("OBC summary (node → FVCOM h vs JCOPE h):")
     print("  node  lat       lon        h_fvcom  h_jcope")
     for n, nid in enumerate(obc_ids):
         print(
             f"  {int(nid):4d}  {obc_lat[n]:8.4f}  {obc_lon[n]:8.4f}  "
-            f"{float(obc_h_fvcom[n]):7.2f}  {float(gen.obc_h_jcope[n]):7.2f}"
+            f"{float(obc_h_fvcom[n]):7.2f}  {float(obc_h_jcope_first[n]):7.2f}"
         )
     print()
 
-    if not args.no_tsobc:
-        out = args.output_dir / f"tb_tsobc_{args.tag}_{args.year}.nc"
-        print(f"[write] {out}")
-        gen.write_tsobc(out)
-    if not args.no_elevation:
-        out = args.output_dir / f"tb_julian_obc_{args.tag}_{args.year}.nc"
-        print(f"[write] {out}")
-        gen.write_elevation(out)
+    label = format_year_label(years)
+    source_files = [Path(p).name for p in region_paths]
 
-    gen.close()
+    if not args.no_tsobc:
+        time_mjd = np.concatenate([mjd_by_year[y] for y in years])
+        fields_concat = {
+            v: np.concatenate([tsobc_fields_by_year[y][v] for y in years], axis=0)
+            for v in tsobc_fields_by_year[years[0]]
+        }
+        out = args.output_dir / f"tb_tsobc_{args.tag}_{label}.nc"
+        print(f"[write] {out}  (n_time={time_mjd.size})")
+        write_tsobc_nc(
+            out,
+            time_mjd=time_mjd,
+            obc_nodes=obc_ids,
+            obc_h=obc_h_fvcom,
+            siglev=siglev,
+            siglay=siglay,
+            fields=fields_concat,
+            source_files=source_files,
+        )
+
+    if not args.no_elevation:
+        time_mjd = np.concatenate([mjd_by_year[y] for y in years])
+        elevation_concat = np.concatenate([elevation_by_year[y] for y in years], axis=0)
+        out = args.output_dir / f"tb_julian_obc_{args.tag}_{label}.nc"
+        print(f"[write] {out}  (n_time={time_mjd.size})")
+        write_elevation_nc(
+            out,
+            time_mjd=time_mjd,
+            obc_nodes=obc_ids,
+            elevation=elevation_concat,
+            source_files=source_files,
+        )
+
     grid.close()
     print("done.")
     return 0
