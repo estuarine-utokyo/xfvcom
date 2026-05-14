@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from numpy.typing import NDArray
 
 from xfvcom.grid.grid_obj import FvcomGrid
 from xfvcom.io import (
@@ -211,7 +212,7 @@ def main() -> int:
     obc_ids = parse_obc_dat(args.fvcom_obc)
     print(f"  OBC nodes ({obc_ids.size}): {obc_ids.tolist()}")
 
-    idx0 = obc_ids - 1
+    idx0: NDArray[np.int64] = (obc_ids - 1).astype(np.int64)
     obc_lat = np.asarray(mesh.lat)[idx0]
     obc_lon = np.asarray(mesh.lon)[idx0]
     obc_h_fvcom = h_all[idx0]
@@ -227,9 +228,9 @@ def main() -> int:
     tsobc_fields_by_year: dict[int, dict[str, np.ndarray]] = {}
     elevation_by_year: dict[int, np.ndarray] = {}
     mjd_by_year: dict[int, np.ndarray] = {}
-    siglev = None
-    siglay = None
-    obc_h_jcope_first = None
+    siglev: NDArray[np.float64] | None = None
+    siglay: NDArray[np.float64] | None = None
+    obc_h_jcope_first: NDArray[np.float32] | None = None
 
     for year, region_nc in zip(years, region_paths):
         print(f"[jcope] opening region archive for {year}: {region_nc}")
@@ -253,6 +254,12 @@ def main() -> int:
         if not args.no_elevation:
             elevation_by_year[year] = gen.build_elevation_array()
         gen.close()
+
+    # All three must be set after the loop runs at least once (years is
+    # guaranteed non-empty above).
+    assert siglev is not None
+    assert siglay is not None
+    assert obc_h_jcope_first is not None
 
     # ---- summary table (FVCOM h vs JCOPE h, computed once) ----
     print()

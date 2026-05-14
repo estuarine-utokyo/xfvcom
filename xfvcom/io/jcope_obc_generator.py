@@ -99,7 +99,7 @@ class JcopeObcGenerator:
         *,
         grid: JcopeGrid,
         region_nc: str | Path,
-        obc_nodes: Sequence[int],
+        obc_nodes: Sequence[int] | NDArray[np.integer],
         obc_lat: ArrayLike,
         obc_lon: ArrayLike,
         obc_h_fvcom: ArrayLike,

@@ -142,6 +142,8 @@ class JcopeGrid:
                 if not box_mask.any():
                     continue
                 # Distances within the box (in grid cells)
+                jj: NDArray[np.int64]
+                ii: NDArray[np.int64]
                 jj, ii = np.meshgrid(
                     np.arange(j_lo, j_hi),
                     np.arange(i_lo, i_hi),

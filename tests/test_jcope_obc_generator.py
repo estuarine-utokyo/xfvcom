@@ -19,6 +19,7 @@ import netCDF4 as nc
 import numpy as np
 import pandas as pd
 import pytest
+from numpy.typing import NDArray
 
 from xfvcom.io.jcope_grid import JcopeGrid
 from xfvcom.io.jcope_obc_generator import (
@@ -47,13 +48,13 @@ def _build_basic_nc(path: Path) -> None:
     lat = LAT_ORIGIN + np.arange(JM) * DY
 
     h = np.tile(np.arange(IM) * 50.0, (JM, 1)).astype(np.float32)
-    mask = np.zeros((JM, IM), dtype=np.int8)
+    mask: NDArray[np.int8] = np.zeros((JM, IM), dtype=np.int8)
     mask[:, 5:] = 1
     h[mask == 0] = 0.0
 
-    Z = np.zeros((KM_BASIC, JM, IM), dtype=np.float32)
-    ZZ = np.zeros((KM_BASIC, JM, IM), dtype=np.float32)
-    DZ = np.zeros((KM_BASIC, JM, IM), dtype=np.float32)
+    Z: NDArray[np.float32] = np.zeros((KM_BASIC, JM, IM), dtype=np.float32)
+    ZZ: NDArray[np.float32] = np.zeros((KM_BASIC, JM, IM), dtype=np.float32)
+    DZ: NDArray[np.float32] = np.zeros((KM_BASIC, JM, IM), dtype=np.float32)
     for j in range(JM):
         for i in range(IM):
             depth = -h[j, i]
@@ -103,11 +104,11 @@ def _build_region_nc(path: Path, n_time: int = 4, year: int = 2020) -> None:
 
     # Field structure: TT depends linearly on depth (well-defined for the
     # interpolation tests). For column (j, i_local), TT[k] = 20 + k*(-0.2)
-    TT = np.zeros((n_time, KM_REGION, JM, n_lon), dtype=np.float32)
+    TT: NDArray[np.float32] = np.zeros((n_time, KM_REGION, JM, n_lon), dtype=np.float32)
     ST = np.zeros_like(TT)
     UT = np.zeros_like(TT)
     VT = np.zeros_like(TT)
-    EGT = np.zeros((n_time, JM, n_lon), dtype=np.float32)
+    EGT: NDArray[np.float32] = np.zeros((n_time, JM, n_lon), dtype=np.float32)
     for t in range(n_time):
         for k in range(KM_REGION):
             TT[t, k, :, :] = 20.0 - 0.2 * k + 0.01 * t
