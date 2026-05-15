@@ -217,3 +217,7 @@ examples/frames/
 !examples/groundwater_data.csv
 !examples/arakawa_flux.csv
 !examples/short_wave.csv
+
+# pjsub test-runner job logs (kept out of git; regenerate by re-submitting)
+xfvcom_*_tests.*.out
+*.pjsub.*.out

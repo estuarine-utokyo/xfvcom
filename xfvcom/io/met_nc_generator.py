@@ -158,6 +158,8 @@ class MetNetCDFGenerator(BaseGenerator):
         mpos_stations: tuple[str, ...] | None = None,
         mpos_idw_power: float = 2.0,
         mpos_convert_to_utc: bool = True,
+        metforce_file: Path | str | None = None,
+        metforce_fallback: str | None = "nearest",
         **consts: float,
     ) -> None:
         t0 = pd.Timestamp(start)
@@ -184,6 +186,16 @@ class MetNetCDFGenerator(BaseGenerator):
         if self._mpos_mode and self._gwo_mode:
             raise ValueError(
                 "--gwo-dir and --mpos-dir are mutually exclusive; choose one"
+            )
+
+        # metforce spatial-grid mode (mutually exclusive with the above).
+        self._metforce_mode = metforce_file is not None
+        self._metforce_file = Path(metforce_file) if metforce_file else None
+        self._metforce_fallback = metforce_fallback
+        if self._metforce_mode and (self._gwo_mode or self._mpos_mode):
+            raise ValueError(
+                "--metforce-file is mutually exclusive with --gwo-dir / "
+                "--mpos-dir; choose one"
             )
 
         if self._gwo_mode:
@@ -248,6 +260,35 @@ class MetNetCDFGenerator(BaseGenerator):
             for var in self._DEFAULTS:
                 if var in ("uwind", "vwind", "air_temp"):
                     # Placeholder; replaced with MposWindSource in load().
+                    self._sources[var] = _ScalarConstantSource(var, 0.0)
+                else:
+                    self._sources[var] = _choose_source(
+                        var,
+                        self._ts_map,
+                        self.consts[var],
+                        data_tz=self._data_tz,
+                    )
+        elif metforce_file is not None:
+            # metforce mode: 8 atmospheric variables (uwind, vwind, air_temp,
+            # rh, prmsl, swrad, lwrad, precip) come from the gridded OI
+            # analysis bilinearly interpolated onto the FVCOM mesh. Cloud
+            # cover is not produced by metforce and falls back to the
+            # scalar default (or --ts override).
+            self._ts_map = _parse_ts_spec(ts_specs or [], self._DEFAULTS)
+            _metforce_vars = (
+                "uwind",
+                "vwind",
+                "air_temp",
+                "rh",
+                "prmsl",
+                "swrad",
+                "lwrad",
+                "precip",
+            )
+            for var in self._DEFAULTS:
+                if var in _metforce_vars:
+                    # Placeholder; replaced with MetforceGriddedSource in
+                    # load() after the mesh has been parsed.
                     self._sources[var] = _ScalarConstantSource(var, 0.0)
                 else:
                     self._sources[var] = _choose_source(
@@ -357,6 +398,33 @@ class MetNetCDFGenerator(BaseGenerator):
         # has been parsed.
         if self._mpos_mode:
             self._init_mpos_sources()
+
+        # metforce mode follows the same pattern.
+        if self._metforce_mode:
+            self._init_metforce_sources()
+
+    def _init_metforce_sources(self) -> None:
+        """Instantiate :class:`MetforceGriddedSource` and patch ``self._sources``."""
+        from .sources.metforce import MetforceGriddedSource
+
+        # Pull mesh coordinates as float64 for xarray.interp.
+        node_lon = np.asarray(self.mesh_ds["lon"].values, dtype=np.float64)
+        node_lat = np.asarray(self.mesh_ds["lat"].values, dtype=np.float64)
+        elem_lon = np.asarray(self.mesh_ds["lonc"].values, dtype=np.float64)
+        elem_lat = np.asarray(self.mesh_ds["latc"].values, dtype=np.float64)
+
+        assert self._metforce_file is not None  # narrowed by _metforce_mode
+        source = MetforceGriddedSource(
+            self._metforce_file,
+            target_node_lon=node_lon,
+            target_node_lat=node_lat,
+            target_elem_lon=elem_lon,
+            target_elem_lat=elem_lat,
+            fallback_method=self._metforce_fallback,
+        )
+        self._metforce_source = source
+        for var in source.variables:
+            self._sources[var] = source
 
     def _init_mpos_sources(self) -> None:
         """Instantiate :class:`MposWindSource` and patch ``self._sources``."""
@@ -632,7 +700,15 @@ class MetNetCDFGenerator(BaseGenerator):
                 "http://fvcom.smast.umassd.edu, http://codfish.smast.umassd.edu"
             )
             ds_out.Conventions = "CF-1.0"
-            ds_out.infos = "GWO atmospheric forcing data"
+            if self._metforce_mode and self._metforce_file is not None:
+                ds_out.infos = (
+                    f"metforce OI atmospheric forcing "
+                    f"(source: {self._metforce_file.name})"
+                )
+            elif self._mpos_mode:
+                ds_out.infos = "MPOS Tokyo Bay station OI atmospheric forcing"
+            else:
+                ds_out.infos = "GWO atmospheric forcing data"
             ds_out.CoordinateSystem = "cartesian"
             ds_out.CoordinateProjection = "init=WGS84"
 

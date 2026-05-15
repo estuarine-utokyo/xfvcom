@@ -98,6 +98,7 @@ ignore_missing_imports = true
 xfvcom-make-river-nml = "xfvcom.cli.make_river_nml:main"
 xfvcom-make-river-nc = "xfvcom.cli.make_river_nc:main"
 xfvcom-make-met-nc = "xfvcom.cli.make_met_nc:main"
+xfvcom-make-met-nc-from-metforce = "xfvcom.cli.make_met_nc_from_metforce:main"
 xfvcom-make-groundwater-nc = "xfvcom.cli.make_groundwater_nc:main"
 xfvcom-dye-ts = "xfvcom.cli.dye_timeseries:main"
 xfvcom-check-met = "xfvcom.cli.check_met_nc:main"
