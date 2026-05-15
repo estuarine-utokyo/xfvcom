@@ -1,0 +1,33 @@
+#!/bin/bash
+#PJM -L rscgrp=a-batch
+#PJM -L vnode=1
+#PJM -L vnode-core=2
+#PJM -L elapse=00:15:00
+#PJM -j
+#PJM -X
+#PJM -N xfvcom_new_bc_tests
+
+# Run the metforce-source pytest suite on a compute node so that the
+# login-node CPU ulimit does not kill Python imports.
+#
+# Submit: pjsub scripts/run_metforce_tests.pjsub
+# Output: ./xfvcom_metforce_tests.<jobid>.out
+
+set -eo pipefail
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+cd "${HOME}/Github/xfvcom"
+
+set +u
+source "${HOME}/mambaforge/etc/profile.d/conda.sh"
+conda activate xfvcom
+set -u
+
+echo "::: python: $(which python)"
+echo "::: pytest: $(which pytest)"
+echo "::: xfvcom CLI:"
+which xfvcom-make-met-nc-from-metforce
+
+pytest tests/test_metforce_source.py tests/test_river_dl_source.py -v

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import netCDF4 as nc
 import numpy as np
@@ -11,6 +11,7 @@ import yaml  # type: ignore[import-untyped]
 from numpy.typing import NDArray
 
 from xfvcom.io.sources.base import BaseForcingSource
+from xfvcom.io.sources.river_dl import RiverDLNetCDFSource
 from xfvcom.io.sources.timeseries import TimeSeriesSource
 
 from .base_generator import BaseGenerator
@@ -126,6 +127,7 @@ class RiverNetCDFGenerator(BaseGenerator):
         *,
         start_tz: str = "UTC",
         data_tz: str = "Asia/Tokyo",
+        river_dl_map: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> None:
         # store path & call BaseGenerator
         self.nml_path = nml_path
@@ -240,6 +242,31 @@ class RiverNetCDFGenerator(BaseGenerator):
                 self.rivers.append(name)
 
         # ------------------------------------------------------------
+        # river_dl per-river NetCDF sources (constructed once; reused
+        # for every requested variable on that river).
+        # ------------------------------------------------------------
+        self._river_dl_sources: dict[str, RiverDLNetCDFSource] = {}
+        if river_dl_map:
+            for name, spec in river_dl_map.items():
+                if "source" not in spec:
+                    raise ValueError(
+                        f"river_dl_map entry {name!r} missing required key "
+                        f"'source' (path to discharge_hourly.nc)"
+                    )
+                self._river_dl_sources[name] = RiverDLNetCDFSource(
+                    nc_path=Path(spec["source"]),
+                    scale=float(spec.get("scale", 1.0)),
+                    temp_const=float(spec.get("temp", cfg_temp)),
+                    salt_const=float(spec.get("salt", cfg_salt)),
+                )
+            # Ensure the rivers list contains every named river_dl entry,
+            # preserving the order in which they were supplied (mirrors
+            # the existing ts_map / const_map merge logic above).
+            for name in river_dl_map.keys():
+                if name not in self.rivers:
+                    self.rivers.append(name)
+
+        # ------------------------------------------------------------
         # Finalise default constants *after* YAML and CLI overrides
         # ------------------------------------------------------------
         self.default_flux = cfg_flux
@@ -348,6 +375,15 @@ class RiverNetCDFGenerator(BaseGenerator):
         salt_f4: NDArray[np.float32] = np.empty((nt, nr), dtype="f4")
 
         for j, river_name in enumerate(self.rivers):
+            # river_dl per-river NetCDF takes priority over ts/const maps
+            # when present; one source object supplies all three variables.
+            if river_name in self._river_dl_sources:
+                rdl = self._river_dl_sources[river_name]
+                flux_f4[:, j] = rdl.get_series("flux", self.timeline)
+                temp_f4[:, j] = rdl.get_series("temp", self.timeline)
+                salt_f4[:, j] = rdl.get_series("salt", self.timeline)
+                continue
+
             # pick source objects (priority: ts → const → CLI default → 0)
             src_flux = _choose_source(
                 "flux",
