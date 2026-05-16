@@ -192,3 +192,44 @@ Registered in `pyproject.toml` under `[project.scripts]`:
 - **Documentation files** (README.md, etc.): English
 - **Code comments**: English
 - **Commit messages**: English
+
+## Direction files (`docs/directions/`)
+
+Task-specific delegation instructions for automated Claude Code
+sessions (interactive or `claude -p` headless) are committed under
+`docs/directions/` with the filename convention
+
+```
+docs/directions/YYYYMMDD_<topic-slug>.md
+```
+
+Each file captures the human's intent at the moment of delegation
+and pairs with the resulting implementation commit(s).
+
+Rules:
+
+* **Immutable** once committed. They capture intent at the
+  delegation moment; the *result* lives in the implementation
+  commits and any updates to durable docs (e.g. `docs/*.md`,
+  the Sphinx-built user manual).
+* **Self-contained**. A fresh-session or headless Claude reading
+  the file alongside this CLAUDE.md should have enough context
+  to start work without conversation history. Reference durable
+  docs by path.
+* **Date prefix** sorts chronologically.
+  `<topic-slug>` is lowercase-with-underscores and describes the
+  deliverable (e.g. `tb_wnd_metforce_2020_rebuild`, not `task_c`).
+* **Pair with implementation commits**: in the body of each commit
+  that implements the directive, say
+  `Implements docs/directions/YYYYMMDD_<topic>.md`. That gives
+  `git log` a clean trail from intent to delivery.
+
+These files live under `docs/` for proximity to the package's
+other documentation, but they are **not** indexed by Sphinx —
+they are delegation artefacts, not part of the published xfvcom
+user manual.
+
+Sibling repos with the same convention:
+`~/Github/metforce/docs/directions/`,
+`~/Github/TB-FVCOM/{hydro,ersem}/docs/directions/`,
+`~/Github/jcopetda/docs/directions/`.
