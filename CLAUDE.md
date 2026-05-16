@@ -233,3 +233,41 @@ Sibling repos with the same convention:
 `~/Github/metforce/docs/directions/`,
 `~/Github/TB-FVCOM/{hydro,ersem}/docs/directions/`,
 `~/Github/jcopetda/docs/directions/`.
+
+## Campaign logs (`docs/campaigns/` if needed)
+
+A "campaign" is a multi-repo investigation or fix arc whose state
+outlives any single direction file. The orchestrator session
+driving the campaign produces a **campaign log** that captures
+*why* each direction was issued, what cross-repo decisions were
+taken (and which alternatives were rejected, with reasons), and
+the open state of the dependency graph at session end — so a
+future orchestrator (or a future Claude resuming the campaign)
+can reconstruct the meta-state, not just the per-direction
+artefacts. Without this layer, the rationale that ties multiple
+directions together evaporates when the orchestrator session
+ends.
+
+Convention:
+
+* When a campaign has a clear root document — typically an
+  incident or validation reference in the upstream repo — the
+  campaign log lives as a trailing section of that document. The
+  2026-05-16 MSM-S sentinel incident's campaign log lives at the
+  end of `~/Github/metforce/docs/msm_s_archive_validation.md`.
+  When you execute the
+  `docs/directions/20260516_tb_wnd_metforce_2020_rebuild.md`
+  direction (the xfvcom-side downstream task in that campaign),
+  that campaign log is the meta-context document.
+* If a future campaign is xfvcom-rooted with no upstream root doc,
+  fall back to `docs/campaigns/YYYYMMDD_<topic-slug>.md`. These
+  files are markdown but, like `docs/directions/`, are **not**
+  indexed by Sphinx — they are delegation / orchestration
+  artefacts, not part of the published xfvcom user manual.
+* **Campaign logs are mutable.** Unlike direction files
+  (immutable once committed), a campaign log is a living record
+  of an ongoing or recently-closed arc. Date-stamp each material
+  update inside the log itself.
+* Sibling-repo direction files cross-link back to the campaign
+  log so a delegated session reading just its direction can find
+  the meta-context.
