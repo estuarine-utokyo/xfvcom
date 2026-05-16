@@ -13,7 +13,10 @@
 # Output filename drops the legacy ``18`` (F04-era wind-scale x1.8)
 # suffix because the new_bc baseline runs at wind scale = 1.0.
 #
-# Implements docs/directions/20260516_tb_wnd_metforce_2020_rebuild.md.
+# Implements docs/directions/20260516_tb_wnd_metforce_2020_rebuild.md
+# (initial rebuild) and
+# docs/directions/20260516_tb_wnd_metforce_2020_trailing_step.md
+# (trailing 2021-01-01T00:00 bookend + float64 time axis).
 # See ~/Github/metforce/docs/msm_s_archive_validation.md for the
 # upstream incident report and Path-B fix.
 #
@@ -57,18 +60,20 @@ date
 xfvcom-make-met-nc-from-metforce "${GRID_DAT}" \
     --metforce-file "${METFORCE_NC}" \
     --start 2020-01-01T00:00:00 \
-    --end 2020-12-31T23:00:00 \
+    --end 2021-01-01T00:00:00 \
+    --pad-trailing-bookend \
     --utm-zone 54 \
     -o "${OUT_NC}"
-# The default --start 2020 expands to end=2021-01-01T00:00 (inclusive),
-# adding one trailing hour past the metforce source range
-# (fvcom_forcing_2020.nc covers 2020-01-01T00..2020-12-31T23, 8784 h).
-# Pinning --end avoids a trailing-hour NaN at idx=8784.
+# fvcom_forcing_2020.nc covers 2020-01-01T00..2020-12-31T23 (8784 h).
+# FVCOM's inclusive END_DATE = 2021-01-01T00:00 demands a forcing sample
+# at exactly that moment, so we extend the output by one record at
+# t_last + 3600 s with the last-hour fields copied verbatim
+# (--pad-trailing-bookend). Result: nt = 8785, last MJD = 59215.0.
 
 echo "===== output header ====="
 ncdump -h "${OUT_NC}" | head -30
 
-echo "===== validate NaN counts ====="
+echo "===== validate output ====="
 python - <<'PY'
 import os
 import numpy as np
@@ -78,33 +83,45 @@ out = os.path.join(
     os.environ["HOME"],
     "Github/TB-FVCOM/input/goto2023/forcing-fvcom-grid/2020/tb_wnd_metforce_2020.nc",
 )
-ds = xr.open_dataset(out)
+ds = xr.open_dataset(out, decode_cf=False)
 
 CORE = (
     "uwind_speed", "vwind_speed",
     "air_temperature", "relative_humidity",
     "air_pressure", "short_wave", "long_wave",
 )
+CLOUD = "cloud_cover"
 PRECIP = "Precipitation"
 
+nt = int(ds.sizes["time"])
+last_mjd = float(ds["time"].values[-1])
+dt = np.diff(ds["time"].values) * 86400.0
+
 print(f"{'variable':<22s} {'dims':<20s} {'shape':<22s} nan_cells")
-for v in list(CORE) + [PRECIP]:
+for v in list(CORE) + [CLOUD, PRECIP]:
     a = ds[v].values
     n = int(np.isnan(a).sum())
     print(f"  {v:<20s} {str(ds[v].dims):<20s} {str(a.shape):<22s} {n}")
 
-bad = [v for v in CORE if int(np.isnan(ds[v].values).sum()) > 0]
-if bad:
-    raise SystemExit(f"FAIL: core variables still have NaN: {bad}")
-
-t = ds["time"].values.astype("datetime64[s]").astype("int64")
-dt = np.diff(t)
-uniq, cnt = np.unique(dt, return_counts=True)
 print()
-print("time dt unique seconds (top 5):")
-for uu, cc in sorted(zip(uniq, cnt), key=lambda x: -x[1])[:5]:
-    print(f"  dt={uu}s count={cc}")
-print(f"time len: {len(t)}, dt min/max: {int(dt.min())}/{int(dt.max())}")
+print(f"time dtype: {ds['time'].dtype}")
+print(f"nt: {nt}, last MJD: {last_mjd!r}")
+print(f"dt min/max (s): {dt.min()}/{dt.max()}")
+
+# Hard assertions for the inclusive 2021-01-01T00:00 bookend rebuild.
+assert nt == 8785, f"want 8785, got {nt}"
+# Float64 represents MJD 59215.0 exactly (integer day count).
+assert last_mjd == 59215.0, last_mjd
+# Float64 MJD around 58849 has ~1.3e-11 day grid spacing, i.e. ~0.5 us
+# per hourly step. We tolerate up to 1 ms drift (8 orders of magnitude
+# better than the float32 legacy of +/- 100 s).
+drift = max(abs(dt.min() - 3600.0), abs(dt.max() - 3600.0))
+assert drift < 1.0e-3, (dt.min(), dt.max(), drift)
+for v in CORE + (CLOUD,):
+    n = int(np.isnan(ds[v].values).sum())
+    assert n == 0, f"{v} still carries {n} NaN cells"
+print()
+print("ALL ASSERTIONS PASSED")
 PY
 
 echo "===== done ====="
