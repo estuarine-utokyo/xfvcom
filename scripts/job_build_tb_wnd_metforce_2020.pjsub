@@ -1,0 +1,112 @@
+#!/bin/bash
+#PJM -L rscgrp=a-batch
+#PJM -L vnode=1
+#PJM -L vnode-core=4
+#PJM -L elapse=00:30:00
+#PJM -j
+#PJM -X
+
+# Rebuild the FVCOM-mesh atmospheric forcing for the 2026-05-16 new_bc
+# baseline (Tokyo Bay, goto2023 mesh) from the sentinel-clean
+# metforce Path-B output ``analysis/fvcom_forcing_2020.nc``.
+#
+# Output filename drops the legacy ``18`` (F04-era wind-scale x1.8)
+# suffix because the new_bc baseline runs at wind scale = 1.0.
+#
+# Implements docs/directions/20260516_tb_wnd_metforce_2020_rebuild.md.
+# See ~/Github/metforce/docs/msm_s_archive_validation.md for the
+# upstream incident report and Path-B fix.
+#
+# Submit:  pjsub scripts/job_build_tb_wnd_metforce_2020.pjsub
+# Output:  job_build_tb_wnd_metforce_2020.pjsub.<jobid>.out  (gitignored)
+
+set -eo pipefail
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+cd "${HOME}/Github/xfvcom"
+
+set +u
+source "${HOME}/mambaforge/etc/profile.d/conda.sh"
+conda activate xfvcom
+set -u
+
+METFORCE_NC="${HOME}/Github/metforce/analysis/fvcom_forcing_2020.nc"
+GRID_DAT="${HOME}/Github/TB-FVCOM/input/goto2023/grid/TokyoBay_grd.dat"
+OUT_DIR="${HOME}/Github/TB-FVCOM/input/goto2023/forcing-fvcom-grid/2020"
+OUT_NC="${OUT_DIR}/tb_wnd_metforce_2020.nc"
+
+for f in "${METFORCE_NC}" "${GRID_DAT}"; do
+    if [[ ! -f "${f}" ]]; then
+        echo "[FATAL] required input missing: ${f}" >&2
+        exit 2
+    fi
+done
+mkdir -p "${OUT_DIR}"
+
+echo "::: host:     $(hostname)"
+echo "::: python:   $(which python)"
+echo "::: cli:      $(which xfvcom-make-met-nc-from-metforce)"
+echo "::: metforce: ${METFORCE_NC}"
+echo "::: grid:     ${GRID_DAT}"
+echo "::: out:      ${OUT_NC}"
+date
+
+xfvcom-make-met-nc-from-metforce "${GRID_DAT}" \
+    --metforce-file "${METFORCE_NC}" \
+    --start 2020-01-01T00:00:00 \
+    --end 2020-12-31T23:00:00 \
+    --utm-zone 54 \
+    -o "${OUT_NC}"
+# The default --start 2020 expands to end=2021-01-01T00:00 (inclusive),
+# adding one trailing hour past the metforce source range
+# (fvcom_forcing_2020.nc covers 2020-01-01T00..2020-12-31T23, 8784 h).
+# Pinning --end avoids a trailing-hour NaN at idx=8784.
+
+echo "===== output header ====="
+ncdump -h "${OUT_NC}" | head -30
+
+echo "===== validate NaN counts ====="
+python - <<'PY'
+import os
+import numpy as np
+import xarray as xr
+
+out = os.path.join(
+    os.environ["HOME"],
+    "Github/TB-FVCOM/input/goto2023/forcing-fvcom-grid/2020/tb_wnd_metforce_2020.nc",
+)
+ds = xr.open_dataset(out)
+
+CORE = (
+    "uwind_speed", "vwind_speed",
+    "air_temperature", "relative_humidity",
+    "air_pressure", "short_wave", "long_wave",
+)
+PRECIP = "Precipitation"
+
+print(f"{'variable':<22s} {'dims':<20s} {'shape':<22s} nan_cells")
+for v in list(CORE) + [PRECIP]:
+    a = ds[v].values
+    n = int(np.isnan(a).sum())
+    print(f"  {v:<20s} {str(ds[v].dims):<20s} {str(a.shape):<22s} {n}")
+
+bad = [v for v in CORE if int(np.isnan(ds[v].values).sum()) > 0]
+if bad:
+    raise SystemExit(f"FAIL: core variables still have NaN: {bad}")
+
+t = ds["time"].values.astype("datetime64[s]").astype("int64")
+dt = np.diff(t)
+uniq, cnt = np.unique(dt, return_counts=True)
+print()
+print("time dt unique seconds (top 5):")
+for uu, cc in sorted(zip(uniq, cnt), key=lambda x: -x[1])[:5]:
+    print(f"  dt={uu}s count={cc}")
+print(f"time len: {len(t)}, dt min/max: {int(dt.min())}/{int(dt.max())}")
+PY
+
+echo "===== done ====="
+date
+ls -la "${OUT_NC}"
