@@ -174,6 +174,82 @@ Correlations are auto-cached when using `--fill-gaps` with `--fallback-stations`
 
 ---
 
+## Metforce 2D-OI Gridded Source
+
+`xfvcom-make-met-nc-from-metforce` bilinearly interpolates the unified
+metforce analysis `fvcom_forcing_<YEAR>.nc` (regular ~5 km MSM-S / ERA5
+grid, eight variables on `(time, lat, lon)`) onto the FVCOM mesh and
+writes a FVCOM-compliant atmospheric forcing NetCDF
+(`uwind_speed`, `vwind_speed`, `air_temperature`, `relative_humidity`,
+`air_pressure`, `short_wave`, `long_wave`, `Precipitation`, and a
+constant `cloud_cover`).
+
+### Filename convention (new_bc baseline)
+
+The legacy `tb18_*.nc` files carried the `18` as an F04-era
+**wind-scale × 1.8** suffix (Optuna-tuned). The 2026-05-16 new_bc
+baseline runs at scale = 1.0 (default), so the FVCOM-mesh forcing
+file emitted by this CLI drops the `18`:
+
+| Era | Wind scale | File pattern |
+|---|---|---|
+| F04 (legacy production) | 1.8 | `tb18_wnd.nc` (single-point) |
+| 2026-05-16 new_bc (post-incident, scale = 1.0) | 1.0 | **`tb_wnd_metforce_<year>.nc`** |
+
+The transitional `tb18_wnd_metforce_2020.nc` (Job 5831777 input)
+inherited the legacy prefix by accident and is the file that crashed
+the 2026-05-16 new_bc baseline at simulation time
+`2020-02-21T13:58:20` because it carried propagated `int16` sentinel
+NaN from the MSM-S daily archive. Rebuilds **must** be emitted as
+`tb_wnd_metforce_<year>.nc`; do not overwrite the legacy file.
+
+### Metforce Path-B input
+
+Source `~/Github/metforce/analysis/fvcom_forcing_<YEAR>.nc` is the
+sentinel-clean output of metforce's Bayesian uninformative-prior OI
+("Path B", shipped 2026-05-16). The six core OI variables
+(`U10`, `V10`, `T2`, `SH`, `SLP`, `DSWRF`) plus the derived `DLWRF`
+are NaN-free; `PRECIP` retains ~28 scattered NaN hours per year that
+metforce does not gap-fill (it comes from the background field, not
+OI). For new_bc the residual is acceptable because
+`PRECIPITATION_ON = F` in the run NML. See
+`~/Github/metforce/docs/msm_s_archive_validation.md` for the upstream
+incident report and Path-B specification.
+
+### 2020 rebuild wrapper
+
+`scripts/job_build_tb_wnd_metforce_2020.pjsub` is the canonical
+pjsub wrapper for the 2020 rebuild on GENKAI. It pins the source
+NetCDF, the goto2023 grid, the UTM zone, and clamps the timeline to
+the metforce source range (`--end 2020-12-31T23:00:00`, 8784 hours)
+so the rebuild has no trailing-hour NaN. Output:
+
+```
+~/Github/TB-FVCOM/input/goto2023/forcing-fvcom-grid/2020/tb_wnd_metforce_2020.nc
+```
+
+### Known issue: time-axis `dt` drift
+
+The generator currently writes the MJD `time` variable as `float32`.
+At the 2020 epoch (MJD ≈ 58849) the `float32` ULP is ≈ 339 s, so a
+nominally hourly cadence decodes as `dt ∈ {3375, 3712, 3713} s`
+(mean 3600 s) — a Julian-day round-trip artefact rather than a real
+timeline drift. The legacy file inherited the same drift. Until the
+`time` variable is widened to `float64`, downstream consumers should
+treat the cadence as nominally hourly.
+
+### Direct CLI Usage
+
+```bash
+xfvcom-make-met-nc-from-metforce TokyoBay_grd.dat \
+    --metforce-file ~/Github/metforce/analysis/fvcom_forcing_2020.nc \
+    --start 2020-01-01T00:00:00 --end 2020-12-31T23:00:00 \
+    --utm-zone 54 \
+    -o tb_wnd_metforce_2020.nc
+```
+
+---
+
 ## River Forcing
 
 ### CLI Options
