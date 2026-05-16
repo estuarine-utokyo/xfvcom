@@ -160,6 +160,7 @@ class MetNetCDFGenerator(BaseGenerator):
         mpos_convert_to_utc: bool = True,
         metforce_file: Path | str | None = None,
         metforce_fallback: str | None = "nearest",
+        metforce_pad_trailing_bookend: bool = False,
         **consts: float,
     ) -> None:
         t0 = pd.Timestamp(start)
@@ -192,6 +193,7 @@ class MetNetCDFGenerator(BaseGenerator):
         self._metforce_mode = metforce_file is not None
         self._metforce_file = Path(metforce_file) if metforce_file else None
         self._metforce_fallback = metforce_fallback
+        self._metforce_pad_trailing_bookend = metforce_pad_trailing_bookend
         if self._metforce_mode and (self._gwo_mode or self._mpos_mode):
             raise ValueError(
                 "--metforce-file is mutually exclusive with --gwo-dir / "
@@ -331,15 +333,18 @@ class MetNetCDFGenerator(BaseGenerator):
     # helpers
     # ------------------------------------------------------------------
     @staticmethod
-    def _to_mjd(t: pd.DatetimeIndex) -> NDArray[np.float32]:
-        # Use naive origin for naive timestamps, UTC origin for tz-aware
+    def _to_mjd(t: pd.DatetimeIndex) -> NDArray[np.float64]:
+        # Use naive origin for naive timestamps, UTC origin for tz-aware.
+        # Returned as float64 so the integer hourly cadence is preserved
+        # exactly; storing MJD in float32 truncates 3600 s spacings into
+        # the 3375 s / 3712.5 s drift seen in pre-2026-05-16 forcing files.
         if t.tz is None:
             origin = pd.Timestamp("1858-11-17T00:00:00")
         else:
             origin = pd.Timestamp("1858-11-17T00:00:00Z")
         delta = t - origin
         seconds = np.asarray(delta.total_seconds(), dtype=np.float64)
-        return (seconds / 86400.0).astype("f4")
+        return seconds / 86400.0
 
     @staticmethod
     def _itime_pair(mjd: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -421,6 +426,7 @@ class MetNetCDFGenerator(BaseGenerator):
             target_elem_lon=elem_lon,
             target_elem_lat=elem_lat,
             fallback_method=self._metforce_fallback,
+            pad_trailing_bookend=self._metforce_pad_trailing_bookend,
         )
         self._metforce_source = source
         for var in source.variables:
@@ -471,7 +477,7 @@ class MetNetCDFGenerator(BaseGenerator):
         nele: int = int(self.mesh_ds.sizes["nele"])
         node: int = int(self.mesh_ds.sizes["node"])
 
-        mjd: NDArray[np.float32] = self._to_mjd(self.timeline)
+        mjd: NDArray[np.float64] = self._to_mjd(self.timeline)
         itime: NDArray[np.int32]
         itime2: NDArray[np.int32]
         itime, itime2 = self._itime_pair(mjd)
@@ -561,7 +567,7 @@ class MetNetCDFGenerator(BaseGenerator):
             # ---------------------------------------------------------
             # time variables
             # ---------------------------------------------------------
-            v_time = ds_out.createVariable("time", "f4", ("time",))
+            v_time = ds_out.createVariable("time", "f8", ("time",))
             v_time[:] = mjd
             v_time.long_name = "time"
             v_time.units = "days since 1858-11-17 00:00:00"

@@ -94,6 +94,21 @@ Example:
         ),
     )
 
+    # Trailing endpoint behaviour
+    p.add_argument(
+        "--pad-trailing-bookend",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Extend the metforce source by one extra record at "
+            "t_last + native_step, copying the last record's field values. "
+            "Use when --end is exactly one source-hour past the metforce "
+            "end (e.g. --end 2021-01-01T00:00:00 on a 2020 file ending at "
+            "2020-12-31T23:00:00), so FVCOM's inclusive END_DATE finds a "
+            "forcing sample at the closing timestep. Default: off."
+        ),
+    )
+
     # Output and grid options
     p.add_argument("-o", "--output", type=Path, help="Output NetCDF file path")
     p.add_argument(
@@ -142,6 +157,7 @@ Example:
         start_tz=args.start_tz,
         metforce_file=args.metforce_file,
         metforce_fallback=fallback,
+        metforce_pad_trailing_bookend=args.pad_trailing_bookend,
         **const_vals,
     )
 

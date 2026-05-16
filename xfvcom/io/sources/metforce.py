@@ -79,6 +79,14 @@ class MetforceGriddedSource(BaseForcingSource):
         ``"nearest"`` (default) reuses the closest source-grid value; pass
         ``None`` to disable the fallback (NaN will propagate, exposing the
         coverage gap immediately).
+    pad_trailing_bookend : bool, optional
+        When True, extend the cached source by one extra record at
+        ``t_last + native_step`` whose field values are copied verbatim
+        from the last source record. Used to satisfy FVCOM's inclusive
+        ``END_DATE`` requirement when a caller asks for one source-hour
+        past the metforce end (e.g. ``--end 2021-01-01T00:00:00`` on a
+        2020 file that ends at ``2020-12-31T23:00:00``). Defaults to
+        False to preserve existing behaviour.
 
     Notes
     -----
@@ -102,6 +110,7 @@ class MetforceGriddedSource(BaseForcingSource):
         target_elem_lon: NDArray[np.float64],
         target_elem_lat: NDArray[np.float64],
         fallback_method: str | None = "nearest",
+        pad_trailing_bookend: bool = False,
     ) -> None:
         path = Path(metforce_file)
         if not path.exists():
@@ -139,6 +148,29 @@ class MetforceGriddedSource(BaseForcingSource):
         self._src_time = pd.DatetimeIndex(self._ds["time"].values)
         if self._src_time.tz is not None:
             self._src_time = self._src_time.tz_localize(None)
+
+        if pad_trailing_bookend:
+            self._append_trailing_bookend()
+
+    def _append_trailing_bookend(self) -> None:
+        """Append one extra record at ``t_last + native_step``.
+
+        Field values are copied verbatim from the last source record, so a
+        downstream linear-in-time interpolation onto the FVCOM timeline
+        sees a flat extrapolation for the closing hour rather than NaN.
+        """
+        if self._src_time.size < 2:
+            raise ValueError(
+                "pad_trailing_bookend requires at least 2 source timesteps "
+                "to infer the native cadence."
+            )
+        step = self._src_time[1] - self._src_time[0]
+        new_t = self._src_time[-1] + step
+        last = self._ds.isel(time=[-1]).assign_coords(
+            time=np.array([np.datetime64(new_t)], dtype="datetime64[ns]")
+        )
+        self._ds = xr.concat([self._ds, last], dim="time")
+        self._src_time = pd.DatetimeIndex(self._ds["time"].values)
 
     # ------------------------------------------------------------------
     # Introspection used by MetNetCDFGenerator
@@ -259,9 +291,8 @@ class MetforceGriddedSource(BaseForcingSource):
     ) -> NDArray[np.float64]:
         """Linearly interpolate a 1-D-in-time DataArray onto *times*."""
         target = self._to_naive(times)
-        if (
-            target.size == self._src_time.size
-            and bool((target == self._src_time).all())
+        if target.size == self._src_time.size and bool(
+            (target == self._src_time).all()
         ):
             return np.asarray(da.values, dtype=np.float64)
         out = da.interp(time=target, method="linear")
@@ -272,9 +303,8 @@ class MetforceGriddedSource(BaseForcingSource):
     ) -> NDArray[np.float64]:
         """Linearly interpolate a (time, point) DataArray onto *times*."""
         target = self._to_naive(times)
-        if (
-            target.size == self._src_time.size
-            and bool((target == self._src_time).all())
+        if target.size == self._src_time.size and bool(
+            (target == self._src_time).all()
         ):
             return np.asarray(da.values, dtype=np.float64)
         # Linear in time only; spatial axis is unchanged.
