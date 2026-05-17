@@ -22,6 +22,14 @@ YAML map schema (example)::
       - name: Shibaura
         source: ${DATA_DIR}/river_dl/sewage/Shibaura/discharge_hourly.nc
         temp: 20.0
+      # kind: constant — for sources with no upstream river_dl NetCDF.
+      # The (flux, temp, salt) tuple is broadcast across the time axis.
+      - name: Kisarazu
+        kind: constant
+        flux: 0.2902       # m^3/s, constant
+        temp: 10.0
+        salt: 0.0          # optional; default from defaults: block
+        # 'source' is forbidden; 'scale' is forbidden (already in physical units).
 
 Environment variables in the ``source`` field (``${DATA_DIR}`` etc.) are
 expanded by ``os.path.expandvars``.
@@ -55,7 +63,9 @@ def _expand(path: str) -> str:
     return os.path.expanduser(os.path.expandvars(path))
 
 
-def _load_river_map(yaml_path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, float]]:
+def _load_river_map(
+    yaml_path: Path,
+) -> tuple[dict[str, dict[str, Any]], dict[str, float]]:
     """Parse the river_dl YAML map.
 
     Returns ``(river_dl_map, defaults)``. ``river_dl_map`` is keyed by river
@@ -75,22 +85,52 @@ def _load_river_map(yaml_path: Path) -> tuple[dict[str, dict[str, Any]], dict[st
     river_dl_map: dict[str, dict[str, Any]] = {}
     for rv in raw.get("rivers", []):
         name = rv.get("name")
-        src = rv.get("source")
-        if not name or not src:
+        if not name:
+            raise ValueError(f"river-map entry missing required key 'name': {rv!r}")
+        kind = str(rv.get("kind", "river_dl"))
+        entry: dict[str, Any] = {"kind": kind}
+
+        if kind == "constant":
+            # Constant source: no upstream NetCDF; broadcast a fixed
+            # (flux, temp, salt) tuple on the time axis.
+            if "source" in rv:
+                raise ValueError(
+                    f"river-map entry {name!r} declares kind: constant "
+                    f"but also carries a 'source' field; remove one or "
+                    f"the other"
+                )
+            if "scale" in rv:
+                raise ValueError(
+                    f"river-map entry {name!r} declares kind: constant; "
+                    f"'scale' is meaningless because the value is "
+                    f"already in physical units"
+                )
+            if "flux" not in rv:
+                raise ValueError(
+                    f"river-map entry {name!r} declares kind: constant "
+                    f"but is missing required key 'flux'"
+                )
+            entry["flux"] = float(rv["flux"])
+            entry["temp"] = float(rv.get("temp", defaults["temp"]))
+            entry["salt"] = float(rv.get("salt", defaults["salt"]))
+        elif kind == "river_dl":
+            src = rv.get("source")
+            if not src:
+                raise ValueError(
+                    f"river-map entry {name!r} missing required key "
+                    f"'source' (kind: river_dl): {rv!r}"
+                )
+            entry["source"] = Path(_expand(str(src)))
+            if "scale" in rv:
+                entry["scale"] = float(rv["scale"])
+            entry["temp"] = float(rv.get("temp", defaults["temp"]))
+            entry["salt"] = float(rv.get("salt", defaults["salt"]))
+        else:
             raise ValueError(
-                f"river-map entry missing required keys 'name' / 'source': {rv!r}"
+                f"river-map entry {name!r} has unsupported kind: "
+                f"{kind!r} (expected 'river_dl' or 'constant')"
             )
-        entry: dict[str, Any] = {"source": Path(_expand(str(src)))}
-        if "scale" in rv:
-            entry["scale"] = float(rv["scale"])
-        if "temp" in rv:
-            entry["temp"] = float(rv["temp"])
-        else:
-            entry["temp"] = defaults["temp"]
-        if "salt" in rv:
-            entry["salt"] = float(rv["salt"])
-        else:
-            entry["salt"] = defaults["salt"]
+
         river_dl_map[name] = entry
     return river_dl_map, defaults
 
@@ -150,16 +190,17 @@ Example:
     temp = args.temp if args.temp is not None else defaults["temp"]
     salt = args.salt if args.salt is not None else defaults["salt"]
 
-    # Validate every map entry's source file exists; fail fast.
+    # Validate every river_dl entry's source file exists; fail fast.
+    # kind: constant entries have no source file and are skipped.
     missing = [
         name
         for name, spec in river_dl_map.items()
-        if not Path(spec["source"]).exists()
+        if spec.get("kind", "river_dl") == "river_dl"
+        and not Path(spec["source"]).exists()
     ]
     if missing:
         print(
-            "[ERROR] river_dl source NetCDF missing for: "
-            + ", ".join(missing),
+            "[ERROR] river_dl source NetCDF missing for: " + ", ".join(missing),
             file=sys.stderr,
         )
         return 2

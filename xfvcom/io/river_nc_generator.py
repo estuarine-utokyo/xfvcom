@@ -244,22 +244,64 @@ class RiverNetCDFGenerator(BaseGenerator):
         # ------------------------------------------------------------
         # river_dl per-river NetCDF sources (constructed once; reused
         # for every requested variable on that river).
+        #
+        # An entry may declare ``kind: constant`` in lieu of ``source:``
+        # to represent a source with no upstream NetCDF (e.g. a sewer
+        # plant whose discharge is approximated by a fixed annual mean
+        # while a real observation feed is unavailable).  Constant
+        # entries are stored separately in ``self._constant_sources``
+        # and consumed by the render() loop before the river_dl path.
         # ------------------------------------------------------------
         self._river_dl_sources: dict[str, RiverDLNetCDFSource] = {}
+        self._constant_sources: dict[str, dict[str, float]] = {}
         if river_dl_map:
-            for name, spec in river_dl_map.items():
-                if "source" not in spec:
-                    raise ValueError(
-                        f"river_dl_map entry {name!r} missing required key "
-                        f"'source' (path to discharge_hourly.nc)"
+            for name, entry in river_dl_map.items():
+                kind = str(entry.get("kind", "river_dl"))
+                if kind == "constant":
+                    if "source" in entry:
+                        raise ValueError(
+                            f"river_dl_map entry {name!r} declares "
+                            f"kind: constant but also carries a "
+                            f"'source' key; remove one or the other"
+                        )
+                    if "flux" not in entry:
+                        raise ValueError(
+                            f"river_dl_map entry {name!r} declares "
+                            f"kind: constant but is missing required "
+                            f"key 'flux'"
+                        )
+                    if "scale" in entry:
+                        raise ValueError(
+                            f"river_dl_map entry {name!r} declares "
+                            f"kind: constant; 'scale' is meaningless "
+                            f"for a constant source (the value is "
+                            f"already in physical units)"
+                        )
+                    self._constant_sources[name] = {
+                        "flux": float(entry["flux"]),
+                        "temp": float(entry.get("temp", cfg_temp)),
+                        "salt": float(entry.get("salt", cfg_salt)),
+                    }
+                elif kind == "river_dl":
+                    if "source" not in entry:
+                        raise ValueError(
+                            f"river_dl_map entry {name!r} missing "
+                            f"required key 'source' (path to "
+                            f"discharge_hourly.nc)"
+                        )
+                    self._river_dl_sources[name] = RiverDLNetCDFSource(
+                        nc_path=Path(entry["source"]),
+                        scale=float(entry.get("scale", 1.0)),
+                        temp_const=float(entry.get("temp", cfg_temp)),
+                        salt_const=float(entry.get("salt", cfg_salt)),
                     )
-                self._river_dl_sources[name] = RiverDLNetCDFSource(
-                    nc_path=Path(spec["source"]),
-                    scale=float(spec.get("scale", 1.0)),
-                    temp_const=float(spec.get("temp", cfg_temp)),
-                    salt_const=float(spec.get("salt", cfg_salt)),
-                )
-            # Ensure the rivers list contains every named river_dl entry,
+                else:
+                    raise ValueError(
+                        f"river_dl_map entry {name!r} has unsupported "
+                        f"kind: {kind!r} (expected 'river_dl' or "
+                        f"'constant')"
+                    )
+            # Ensure the rivers list contains every named entry,
             # preserving the order in which they were supplied (mirrors
             # the existing ts_map / const_map merge logic above).
             for name in river_dl_map.keys():
@@ -375,6 +417,17 @@ class RiverNetCDFGenerator(BaseGenerator):
         salt_f4: NDArray[np.float32] = np.empty((nt, nr), dtype="f4")
 
         for j, river_name in enumerate(self.rivers):
+            # kind: constant entries from river_dl_map: broadcast a
+            # fixed value across the time axis for each of the three
+            # variables.  Checked before river_dl because a source can
+            # only be one or the other (validated at __init__ time).
+            if river_name in self._constant_sources:
+                const = self._constant_sources[river_name]
+                flux_f4[:, j] = np.float32(const["flux"])
+                temp_f4[:, j] = np.float32(const["temp"])
+                salt_f4[:, j] = np.float32(const["salt"])
+                continue
+
             # river_dl per-river NetCDF takes priority over ts/const maps
             # when present; one source object supplies all three variables.
             if river_name in self._river_dl_sources:
