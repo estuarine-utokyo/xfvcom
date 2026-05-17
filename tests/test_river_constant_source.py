@@ -67,38 +67,47 @@ def tiny_nml(tmp_path: Path) -> Path:
 # ------------------------------------------------------------------
 # 1. YAML schema validation (_load_river_map)
 # ------------------------------------------------------------------
+_MC = (
+    "    temp_source:\n"
+    "      kind: monthly_climatology\n"
+    "      monthly_means: [10, 11, 12, 15, 18, 22, 25, 27, 24, 19, 15, 11]\n"
+)
+
+
 def test_load_river_map_default_kind_is_river_dl(tmp_path: Path) -> None:
     """An entry with neither 'kind' nor explicit kind: river_dl behaves
-    identically to one with kind: river_dl (backward compat)."""
+    identically to one with kind: river_dl (backward compat).  Schema v3
+    requires a temp_source on every row (or via the defaults block)."""
     yaml_p = tmp_path / "map.yaml"
     yaml_p.write_text(
-        "rivers:\n" "  - name: A\n" "    source: /tmp/a.nc\n",
+        "rivers:\n  - name: A\n    source: /tmp/a.nc\n" + _MC,
         encoding="utf-8",
     )
     river_dl_map, _defaults = _load_river_map(yaml_p)
     assert river_dl_map["A"]["kind"] == "river_dl"
     assert "source" in river_dl_map["A"]
+    assert river_dl_map["A"]["temp_source"]["kind"] == "monthly_climatology"
 
 
 def test_load_river_map_kind_constant_basic(tmp_path: Path) -> None:
     yaml_p = tmp_path / "map.yaml"
     yaml_p.write_text(
         "defaults:\n"
-        "  temp: 15.0\n"
         "  salt: 0.0\n"
         "rivers:\n"
         "  - name: K\n"
         "    kind: constant\n"
-        "    flux: 0.2902\n"
-        "    temp: 10.0\n",
+        "    flux: 0.2902\n" + _MC,
         encoding="utf-8",
     )
     river_dl_map, _ = _load_river_map(yaml_p)
     assert river_dl_map["K"]["kind"] == "constant"
     assert river_dl_map["K"]["flux"] == 0.2902
-    assert river_dl_map["K"]["temp"] == 10.0
     assert river_dl_map["K"]["salt"] == 0.0  # from defaults
     assert "source" not in river_dl_map["K"]
+    # temp_source captured; no constant 'temp' field in schema v3
+    assert "temp" not in river_dl_map["K"]
+    assert river_dl_map["K"]["temp_source"]["kind"] == "monthly_climatology"
 
 
 def test_load_river_map_kind_constant_with_source_raises(tmp_path: Path) -> None:
@@ -108,7 +117,7 @@ def test_load_river_map_kind_constant_with_source_raises(tmp_path: Path) -> None
         "  - name: K\n"
         "    kind: constant\n"
         "    flux: 1.0\n"
-        "    source: /tmp/forbidden.nc\n",
+        "    source: /tmp/forbidden.nc\n" + _MC,
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="kind: constant"):
@@ -122,7 +131,7 @@ def test_load_river_map_kind_constant_with_scale_raises(tmp_path: Path) -> None:
         "  - name: K\n"
         "    kind: constant\n"
         "    flux: 1.0\n"
-        "    scale: 2.0\n",
+        "    scale: 2.0\n" + _MC,
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="scale"):
@@ -132,7 +141,7 @@ def test_load_river_map_kind_constant_with_scale_raises(tmp_path: Path) -> None:
 def test_load_river_map_kind_constant_missing_flux_raises(tmp_path: Path) -> None:
     yaml_p = tmp_path / "map.yaml"
     yaml_p.write_text(
-        "rivers:\n" "  - name: K\n" "    kind: constant\n" "    temp: 10.0\n",
+        "rivers:\n  - name: K\n    kind: constant\n" + _MC,
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="flux"):
@@ -142,7 +151,7 @@ def test_load_river_map_kind_constant_missing_flux_raises(tmp_path: Path) -> Non
 def test_load_river_map_unknown_kind_raises(tmp_path: Path) -> None:
     yaml_p = tmp_path / "map.yaml"
     yaml_p.write_text(
-        "rivers:\n" "  - name: K\n" "    kind: streamflow\n" "    source: /tmp/x.nc\n",
+        "rivers:\n  - name: K\n    kind: streamflow\n    source: /tmp/x.nc\n" + _MC,
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="unsupported kind"):

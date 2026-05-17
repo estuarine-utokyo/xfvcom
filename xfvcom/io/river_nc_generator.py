@@ -254,6 +254,15 @@ class RiverNetCDFGenerator(BaseGenerator):
         # ------------------------------------------------------------
         self._river_dl_sources: dict[str, RiverDLNetCDFSource] = {}
         self._constant_sources: dict[str, dict[str, float]] = {}
+        # Schema-v3 per-river temperature source.  Each value is a dict
+        # already validated upstream by _validate_temp_source.  When
+        # populated, render() computes the river_temp column from this
+        # spec and ignores any temp_const that a RiverDLNetCDFSource was
+        # constructed with.  Schema v3 makes this dict mandatory for
+        # every river_dl_map entry; legacy callers (kind: constant or
+        # kind: river_dl with a constant 'temp:' field) still work for
+        # backward compat in the generator API itself.
+        self._temp_sources: dict[str, dict[str, Any]] = {}
         if river_dl_map:
             for name, entry in river_dl_map.items():
                 kind = str(entry.get("kind", "river_dl"))
@@ -301,6 +310,14 @@ class RiverNetCDFGenerator(BaseGenerator):
                         f"kind: {kind!r} (expected 'river_dl' or "
                         f"'constant')"
                     )
+                if "temp_source" in entry:
+                    ts = entry["temp_source"]
+                    if not isinstance(ts, dict) or "kind" not in ts:
+                        raise ValueError(
+                            f"river_dl_map entry {name!r} temp_source must "
+                            f"be a dict with a 'kind' key"
+                        )
+                    self._temp_sources[name] = dict(ts)
             # Ensure the rivers list contains every named entry,
             # preserving the order in which they were supplied (mirrors
             # the existing ts_map / const_map merge logic above).
@@ -385,6 +402,105 @@ class RiverNetCDFGenerator(BaseGenerator):
             raise ValueError("No river entries found in NML.")
 
     # ------------------------------------------------------------------
+    # Schema-v3 temp_source evaluation
+    # ------------------------------------------------------------------
+    def _evaluate_temp_source(
+        self, river_name: str, spec: dict[str, Any]
+    ) -> NDArray[np.float32]:
+        """Return a (nt,) float32 array of river_temp values for the
+        given river, computed from the temp_source spec dict.
+
+        Supported kinds:
+          * ``air_regression``: open the metforce NC(s) per requested
+            year, look up hourly T2 at the (air_lat, air_lon) nearest
+            grid cell, apply ``T_water = slope * T_air + intercept``,
+            optional clip to [min_temp, max_temp].
+          * ``monthly_climatology``: index ``monthly_means[t.month-1]``
+            for each timestep in the timeline.
+        """
+        kind = str(spec["kind"])
+        if kind == "monthly_climatology":
+            means = np.asarray(spec["monthly_means"], dtype=np.float32)
+            months = np.asarray(self.timeline.month, dtype=np.int32) - 1
+            return means[months].astype(np.float32)
+        if kind == "air_regression":
+            return self._evaluate_air_regression(river_name, spec)
+        raise ValueError(
+            f"river {river_name!r}: temp_source.kind={kind!r} not supported"
+        )
+
+    def _evaluate_air_regression(
+        self, river_name: str, spec: dict[str, Any]
+    ) -> NDArray[np.float32]:
+        """Implement ``T_water = slope * T_air + intercept`` at hourly
+        cadence from a metforce-style ``fvcom_forcing_<year>.nc`` archive.
+
+        The template ``spec["air_nc_template"]`` substitutes ``{year}``
+        from the time axis; multi-year ranges open each year's NC and
+        concatenate on time.
+        """
+        import netCDF4 as nc4
+
+        template = str(spec["air_nc_template"])
+        var = str(spec["air_var"])
+        air_lat = float(spec["air_lat"])
+        air_lon = float(spec["air_lon"])
+        slope = float(spec["slope"])
+        intercept = float(spec["intercept"])
+
+        years = sorted(set(self.timeline.year))
+        # Per-year segment: open NC, find nearest cell, build a pd.Series.
+        series_parts: list[pd.Series] = []
+        for year in years:
+            path = Path(template.format(year=year))
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"river {river_name!r} air_regression: metforce NC "
+                    f"not found for year {year}: {path}"
+                )
+            ds = nc4.Dataset(path)
+            try:
+                lats = ds.variables["lat"][:].astype(float)
+                lons = ds.variables["lon"][:].astype(float)
+                ilat = int(np.argmin(np.abs(lats - air_lat)))
+                ilon = int(np.argmin(np.abs(lons - air_lon)))
+                v = ds.variables[var]
+                arr = np.asarray(v[:, ilat, ilon], dtype=np.float64)
+                tv = ds.variables["time"]
+                t_idx = pd.DatetimeIndex(
+                    nc4.num2date(tv[:], tv.units, only_use_cftime_datetimes=False)
+                )
+            finally:
+                ds.close()
+            # Make timezone-aware UTC for compatibility with self.timeline.
+            if t_idx.tz is None:
+                t_idx = t_idx.tz_localize("UTC")
+            series_parts.append(pd.Series(arr, index=t_idx))
+
+        if not series_parts:
+            raise RuntimeError(
+                f"river {river_name!r}: no metforce NC opened for " f"years={years}"
+            )
+        air_series = pd.concat(series_parts).sort_index()
+        # Reindex onto the timeline; linear interp where needed (the
+        # metforce hourly axis is the same hourly cadence we use here,
+        # so this is mostly a no-op except at endpoints).
+        air_on_timeline = air_series.reindex(self.timeline).interpolate(
+            method="time", limit_direction="both"
+        )
+        if air_on_timeline.isna().any():
+            raise RuntimeError(
+                f"river {river_name!r}: metforce {var} has NaN on the "
+                f"requested timeline; refusing to silently fill"
+            )
+        water = slope * air_on_timeline.to_numpy(dtype=np.float64) + intercept
+        if "min_temp" in spec:
+            water = np.clip(water, float(spec["min_temp"]), None)
+        if "max_temp" in spec:
+            water = np.clip(water, None, float(spec["max_temp"]))
+        return water.astype(np.float32)
+
+    # ------------------------------------------------------------------
     # Low-level NetCDF writer
     # ------------------------------------------------------------------
     def render(self) -> bytes:
@@ -426,6 +542,10 @@ class RiverNetCDFGenerator(BaseGenerator):
                 flux_f4[:, j] = np.float32(const["flux"])
                 temp_f4[:, j] = np.float32(const["temp"])
                 salt_f4[:, j] = np.float32(const["salt"])
+                if river_name in self._temp_sources:
+                    temp_f4[:, j] = self._evaluate_temp_source(
+                        river_name, self._temp_sources[river_name]
+                    )
                 continue
 
             # river_dl per-river NetCDF takes priority over ts/const maps
@@ -435,6 +555,10 @@ class RiverNetCDFGenerator(BaseGenerator):
                 flux_f4[:, j] = rdl.get_series("flux", self.timeline)
                 temp_f4[:, j] = rdl.get_series("temp", self.timeline)
                 salt_f4[:, j] = rdl.get_series("salt", self.timeline)
+                if river_name in self._temp_sources:
+                    temp_f4[:, j] = self._evaluate_temp_source(
+                        river_name, self._temp_sources[river_name]
+                    )
                 continue
 
             # pick source objects (priority: ts → const → CLI default → 0)

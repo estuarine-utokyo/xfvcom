@@ -63,36 +63,130 @@ def _expand(path: str) -> str:
     return os.path.expanduser(os.path.expandvars(path))
 
 
+_VALID_TEMP_SOURCE_KINDS = {"air_regression", "monthly_climatology"}
+
+
+def _validate_temp_source(name: str, spec: Any) -> dict[str, Any]:
+    """Validate a ``temp_source`` dict (per-row or inherited default).
+
+    Returns a normalised dict ready to hand to ``RiverNetCDFGenerator``.
+    Raises ``ValueError`` with a single-line message naming the
+    offending entry on any schema violation.
+    """
+    if not isinstance(spec, dict):
+        raise ValueError(
+            f"river-map entry {name!r}: 'temp_source' must be a mapping, "
+            f"got {type(spec).__name__}"
+        )
+    kind = spec.get("kind")
+    if kind not in _VALID_TEMP_SOURCE_KINDS:
+        raise ValueError(
+            f"river-map entry {name!r}: temp_source.kind={kind!r} not "
+            f"supported (expected one of "
+            f"{sorted(_VALID_TEMP_SOURCE_KINDS)})"
+        )
+    out: dict[str, Any] = {"kind": kind}
+    if kind == "air_regression":
+        for k in (
+            "air_nc_template",
+            "air_var",
+            "air_lat",
+            "air_lon",
+            "slope",
+            "intercept",
+        ):
+            if k not in spec:
+                raise ValueError(
+                    f"river-map entry {name!r}: temp_source.kind=air_regression "
+                    f"missing required key {k!r}"
+                )
+        out["air_nc_template"] = _expand(str(spec["air_nc_template"]))
+        out["air_var"] = str(spec["air_var"])
+        out["air_lat"] = float(spec["air_lat"])
+        out["air_lon"] = float(spec["air_lon"])
+        out["slope"] = float(spec["slope"])
+        out["intercept"] = float(spec["intercept"])
+        if "min_temp" in spec:
+            out["min_temp"] = float(spec["min_temp"])
+        if "max_temp" in spec:
+            out["max_temp"] = float(spec["max_temp"])
+    elif kind == "monthly_climatology":
+        means = spec.get("monthly_means")
+        if not isinstance(means, list) or len(means) != 12:
+            raise ValueError(
+                f"river-map entry {name!r}: temp_source.kind=monthly_climatology "
+                f"requires monthly_means as a 12-element list (Jan..Dec)"
+            )
+        out["monthly_means"] = [float(m) for m in means]
+    return out
+
+
 def _load_river_map(
     yaml_path: Path,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, float]]:
-    """Parse the river_dl YAML map.
+    """Parse the river_dl YAML map (schema v3).
 
     Returns ``(river_dl_map, defaults)``. ``river_dl_map`` is keyed by river
-    name; each value carries at least ``source: Path`` plus optional
-    ``scale``, ``temp``, ``salt``. ``defaults`` is a flat mapping passed to
-    the generator's CLI-level fallbacks.
+    name; each value carries at least ``source: Path`` (or constant fields)
+    plus a required ``temp_source`` mapping that drives the river_temp
+    column at NC build time.
+
+    Schema v3 changes vs v2:
+      * ``temp:`` (a scalar) is REJECTED.  The user's rule "周年計算で
+        定数はあり得ない" forbids a constant water-T for annual runs.
+      * ``temp_source:`` is REQUIRED (per-row or via the defaults block).
+        Two supported ``kind`` values:
+        - ``air_regression``: T_water = slope * T_air + intercept,
+          where T_air comes from a metforce NC at a specified
+          (lat, lon).  Required subfields:
+          ``air_nc_template``, ``air_var``, ``air_lat``, ``air_lon``,
+          ``slope``, ``intercept``.  Optional ``min_temp`` / ``max_temp``
+          clip.
+        - ``monthly_climatology``: T_water taken from a 12-element
+          ``monthly_means`` list, broadcast on the time axis as a
+          month-of-year step function.
+
+    See ``~/Github/TB-FVCOM/hydro/docs/directions/20260517_xfvcom_river_temp_seasonal.md``
+    for the full design.
     """
     with yaml_path.open("r", encoding="utf-8") as fh:
         raw = yaml.safe_load(fh) or {}
 
+    defaults_raw = raw.get("defaults", {}) or {}
+    if "temp" in defaults_raw:
+        raise ValueError(
+            "river-map defaults: 'temp:' scalar field is not allowed in "
+            "schema v3; declare a 'temp_source' instead (kind: "
+            "air_regression or kind: monthly_climatology)"
+        )
     defaults = {
-        "flux": float(raw.get("defaults", {}).get("flux", 0.0)),
-        "temp": float(raw.get("defaults", {}).get("temp", 15.0)),
-        "salt": float(raw.get("defaults", {}).get("salt", 0.0)),
+        "flux": float(defaults_raw.get("flux", 0.0)),
+        "salt": float(defaults_raw.get("salt", 0.0)),
     }
+    default_temp_source: dict[str, Any] | None = None
+    if "temp_source" in defaults_raw:
+        default_temp_source = _validate_temp_source(
+            "<defaults>", defaults_raw["temp_source"]
+        )
 
     river_dl_map: dict[str, dict[str, Any]] = {}
     for rv in raw.get("rivers", []):
         name = rv.get("name")
         if not name:
             raise ValueError(f"river-map entry missing required key 'name': {rv!r}")
+        if "temp" in rv:
+            raise ValueError(
+                f"river-map entry {name!r}: 'temp:' scalar field is not "
+                f"allowed in schema v3; declare a 'temp_source' instead "
+                f"(kind: air_regression or kind: monthly_climatology)"
+            )
         kind = str(rv.get("kind", "river_dl"))
         entry: dict[str, Any] = {"kind": kind}
 
         if kind == "constant":
             # Constant source: no upstream NetCDF; broadcast a fixed
-            # (flux, temp, salt) tuple on the time axis.
+            # flux (and salt) on the time axis.  Temperature comes from
+            # the row's temp_source like every other entry.
             if "source" in rv:
                 raise ValueError(
                     f"river-map entry {name!r} declares kind: constant "
@@ -111,7 +205,6 @@ def _load_river_map(
                     f"but is missing required key 'flux'"
                 )
             entry["flux"] = float(rv["flux"])
-            entry["temp"] = float(rv.get("temp", defaults["temp"]))
             entry["salt"] = float(rv.get("salt", defaults["salt"]))
         elif kind == "river_dl":
             src = rv.get("source")
@@ -123,12 +216,22 @@ def _load_river_map(
             entry["source"] = Path(_expand(str(src)))
             if "scale" in rv:
                 entry["scale"] = float(rv["scale"])
-            entry["temp"] = float(rv.get("temp", defaults["temp"]))
             entry["salt"] = float(rv.get("salt", defaults["salt"]))
         else:
             raise ValueError(
                 f"river-map entry {name!r} has unsupported kind: "
                 f"{kind!r} (expected 'river_dl' or 'constant')"
+            )
+
+        if "temp_source" in rv:
+            entry["temp_source"] = _validate_temp_source(name, rv["temp_source"])
+        elif default_temp_source is not None:
+            entry["temp_source"] = dict(default_temp_source)
+        else:
+            raise ValueError(
+                f"river-map entry {name!r}: 'temp_source' is required "
+                f"in schema v3 (per-row or via the defaults block); "
+                f"declare kind: air_regression or kind: monthly_climatology"
             )
 
         river_dl_map[name] = entry
@@ -187,8 +290,20 @@ Example:
 
     # CLI overrides take precedence over YAML defaults.
     flux = args.flux if args.flux is not None else defaults["flux"]
-    temp = args.temp if args.temp is not None else defaults["temp"]
     salt = args.salt if args.salt is not None else defaults["salt"]
+    # NB: schema v3 makes per-row temp_source mandatory; ``--temp`` is a
+    # CLI default only consulted when the generator's _ScalarConstantSource
+    # fallback (priority 3 inside _choose_source) is reached -- which no
+    # longer happens for any river_dl_map entry, because every entry has
+    # a temp_source.  We keep ``--temp`` for backward compat callers that
+    # bypass the river_dl_map path entirely, but warn if it's set.
+    if args.temp is not None:
+        print(
+            f"[WARN] --temp={args.temp} is ignored for river_dl_map entries; "
+            f"all temperature now flows through YAML temp_source.",
+            file=sys.stderr,
+        )
+    temp = args.temp if args.temp is not None else 15.0
 
     # Validate every river_dl entry's source file exists; fail fast.
     # kind: constant entries have no source file and are skipped.
