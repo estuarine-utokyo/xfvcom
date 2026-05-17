@@ -8,6 +8,8 @@
 |-----------|-------------|--------|
 | Meteorological | `xfvcom-make-met-nc` | Wind, radiation, pressure, humidity |
 | River | `xfvcom-make-river-nc` | River discharge, temperature, salinity |
+| River (from river_dl) | `xfvcom-make-river-nc-from-river-dl` | Same as above, sourced from per-river `discharge_hourly.nc` files |
+| Rivers NML | `xfvcom-make-rivers-namelist` | `RIVERS_NAMELIST*.nml` (companion to the river_dl adapter) |
 | Groundwater | `xfvcom-make-groundwater-nc` | Groundwater flux, temperature, salinity, dye |
 
 ---
@@ -282,6 +284,77 @@ xfvcom-make-river-nc rivers.nml \
     --ts "Arakawa=discharge.csv:flux" --const "Arakawa.salt=0.05" \
     -o river_forcing.nc
 ```
+
+### From river_dl archives (`xfvcom-make-river-nc-from-river-dl`)
+
+For projects that already maintain per-river `discharge_hourly.nc`
+files under a `river_dl` archive (e.g. MLIT observation feeds), the
+sibling CLI `xfvcom-make-river-nc-from-river-dl` consumes a
+`--river-map` YAML that pins each FVCOM river name to one
+`discharge_hourly.nc`:
+
+```yaml
+defaults:
+  temp: 15.0
+  salt: 0.0
+rivers:
+  - name: EastArakawa
+    source: ${DATA_DIR}/river_dl/discharge/Arakawa/Iwabuchi/discharge_hourly.nc
+    scale: 0.25
+  - name: Shibaura
+    source: ${DATA_DIR}/river_dl/sewage/Shibaura/discharge_hourly.nc
+    temp: 20.0
+```
+
+#### Constant sources
+
+A YAML entry may declare `kind: constant` in place of `source:` to
+represent a flux with no upstream NetCDF (e.g. a sewer plant whose
+discharge is approximated by a fixed annual mean while real
+observation data is unavailable). The `(flux, temp, salt)` tuple is
+broadcast across the requested time axis:
+
+```yaml
+rivers:
+  - name: Kisarazu
+    kind: constant
+    flux: 0.2902       # m^3/s, constant
+    temp: 10.0
+    salt: 0.0          # optional; default from defaults: block
+```
+
+Constant entries are rejected if they also carry `source:` (must be
+one or the other) or `scale:` (the value is already in physical
+units), or omit `flux:` (the only mandatory field).
+
+### Companion NML generator (`xfvcom-make-rivers-namelist`)
+
+`xfvcom-make-rivers-namelist` consumes the **same** `--river-map`
+YAML and emits the matching `RIVERS_NAMELIST*.nml` with one
+`&NML_RIVER` block per entry. Pairing the two CLIs lets the
+combined NC + NML pair be regenerated end-to-end from a single
+YAML, which is the pattern used by `TB-FVCOM/hydro/jobs/build_riv_sewer.sh`:
+
+```bash
+xfvcom-make-rivers-namelist \
+    --river-map  hydro/input/river_dl_map_goto2023.yaml \
+    --river-file tb18_riv_sewer_riverdl_2020.nc \
+    --output     input/goto2023/river/RIVERS_NAMELIST_sewer_new_bc.nml
+
+xfvcom-make-river-nc-from-river-dl \
+    --nml        input/goto2023/river/RIVERS_NAMELIST_sewer_new_bc.nml \
+    --river-map  hydro/input/river_dl_map_goto2023.yaml \
+    --start      2020-01-01T00:00:00 \
+    --end        2021-01-01T00:00:00 \
+    --output     input/goto2023/river/2020/tb18_riv_sewer_riverdl_2020.nc
+```
+
+The NML generator reads `node:` (RIVER_GRID_LOCATION) and `vertical:`
+(RIVER_VERTICAL_DISTRIBUTION) from each YAML row. For a partially
+migrated YAML that lacks `node:`, pass `--nml-fallback <existing.nml>`
+to source node ids from a reference NML keyed by `RIVER_NAME`.
+`RIVER_FLUX_SCALE_LOCAL` is hard-coded to `1.0`; per-river runtime
+calibration belongs in the run script, not in this generated file.
 
 ---
 
