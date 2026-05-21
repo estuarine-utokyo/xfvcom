@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+from numpy.typing import NDArray
 
 from xfvcom.cli.make_river_nc_from_river_dl import (
     _load_river_map,
@@ -285,7 +286,7 @@ def test_generator_air_regression_basic(tmp_path: Path, tiny_nml: Path) -> None:
     hours = pd.date_range("2020-01-01", periods=24, freq="1h").to_numpy()
     lats = np.array([35.0, 36.0])
     lons = np.array([139.0, 140.0])
-    t2 = np.zeros((24, 2, 2), dtype=np.float32)
+    t2: NDArray[np.float32] = np.zeros((24, 2, 2), dtype=np.float32)
     # Make (ilat=0, ilon=0) have a ramp 0..23 °C
     t2[:, 0, 0] = np.arange(24, dtype=np.float32)
     # Other cells stay at 100 (so we can detect if the wrong cell is read).
@@ -335,7 +336,7 @@ def test_generator_air_regression_clip(tmp_path: Path, tiny_nml: Path) -> None:
     hours = pd.date_range("2020-01-01", periods=24, freq="1h").to_numpy()
     lats = np.array([35.0])
     lons = np.array([139.0])
-    t2 = np.zeros((24, 1, 1), dtype=np.float32)
+    t2: NDArray[np.float32] = np.zeros((24, 1, 1), dtype=np.float32)
     t2[:, 0, 0] = np.arange(24, dtype=np.float32) - 10  # -10..13
     metforce_nc = tmp_path / "fvcom_forcing_2020.nc"
     _make_metforce_nc(metforce_nc, hours=hours, lats=lats, lons=lons, t2_field=t2)

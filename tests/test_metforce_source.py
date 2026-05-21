@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+from numpy.typing import NDArray
 
 from xfvcom.io.met_nc_generator import MetNetCDFGenerator
 from xfvcom.io.sources.metforce import MetforceGriddedSource
@@ -55,7 +56,7 @@ def _make_synthetic_metforce(
     constants = constants or {}
     nt, nlat, nlon = times.size, lats.size, lons.size
 
-    base = np.empty((nt, nlat, nlon), dtype=np.float32)
+    base: NDArray[np.float32] = np.empty((nt, nlat, nlon), dtype=np.float32)
     for j, la in enumerate(lats):
         for i, lo in enumerate(lons):
             base[:, j, i] = la + 10.0 * lo
@@ -211,7 +212,7 @@ def test_metforce_source_missing_variable_raises(tmp_path: Path) -> None:
     lats = np.array([0.0, 1.0])
     lons = np.array([0.0, 1.0])
     # Write only one variable instead of the full set → should error on init.
-    arr = np.zeros((1, 2, 2), dtype=np.float32)
+    arr: NDArray[np.float32] = np.zeros((1, 2, 2), dtype=np.float32)
     ds = xr.Dataset(
         {"U10": (("time", "lat", "lon"), arr)},
         coords={"time": times, "lat": lats, "lon": lons},
