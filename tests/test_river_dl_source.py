@@ -111,16 +111,16 @@ def test_river_dl_source_fills_internal_nan_by_default(tmp_path: Path) -> None:
     """river_dl Phase AN/AO leaves qc_flag=2 NaN holes; the source bridges
     them by default so FVCOM never sees NaN flux."""
     times = pd.date_range("2020-01-01", periods=8, freq="1h")
-    q = np.array(
-        [10.0, 20.0, np.nan, np.nan, 50.0, 60.0, 70.0, 80.0], dtype=np.float32
-    )
+    q = np.array([10.0, 20.0, np.nan, np.nan, 50.0, 60.0, 70.0, 80.0], dtype=np.float32)
     p = tmp_path / "gap.nc"
     _make_river_dl_nc(p, times=times, discharge=q)
     src = RiverDLNetCDFSource(p)
     out = src.get_series("flux", times)
     # Endpoints unchanged; the two NaN samples are linearly bridged
     # between (10, 20) at t=1 and (50, 60) at t=4 → values 30, 40.
-    np.testing.assert_allclose(out, [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0], rtol=1e-5)
+    np.testing.assert_allclose(
+        out, [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0], rtol=1e-5
+    )
     assert np.isfinite(out).all()
 
 
@@ -172,12 +172,8 @@ def test_river_dl_generator_smoke(tmp_path: Path, tiny_nml: Path) -> None:
     t_full = pd.date_range("2020-01-01", periods=49, freq="1h")  # 0..48
     f_a = tmp_path / "A.nc"
     f_b = tmp_path / "B.nc"
-    _make_river_dl_nc(
-        f_a, times=t_full, discharge=np.full(49, 25.0, dtype=np.float32)
-    )
-    _make_river_dl_nc(
-        f_b, times=t_full, discharge=np.full(49, 50.0, dtype=np.float32)
-    )
+    _make_river_dl_nc(f_a, times=t_full, discharge=np.full(49, 25.0, dtype=np.float32))
+    _make_river_dl_nc(f_b, times=t_full, discharge=np.full(49, 50.0, dtype=np.float32))
 
     out_nc = tmp_path / "river_out.nc"
     gen = RiverNetCDFGenerator(
@@ -197,10 +193,7 @@ def test_river_dl_generator_smoke(tmp_path: Path, tiny_nml: Path) -> None:
         rnames = ds.variables["river_names"][:, :].tobytes().decode().split()
         # river_names are 80-char left-padded; reconstruct via rows
         raw_names = ds.variables["river_names"][:, :]
-        cleaned = [
-            "".join(c.decode() for c in row).strip()
-            for row in raw_names
-        ]
+        cleaned = ["".join(c.decode() for c in row).strip() for row in raw_names]
         assert cleaned == ["RiverA", "RiverB"]
 
         flux = ds.variables["river_flux"][:, :]

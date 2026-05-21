@@ -135,8 +135,7 @@ class RiverDLNetCDFSource(BaseForcingSource):
         if var_name == "salt":
             return np.full(n, self._salt_const, dtype=np.float32)
         raise KeyError(
-            f"Unsupported variable {var_name!r}; expected one of "
-            f"{self.variables}"
+            f"Unsupported variable {var_name!r}; expected one of " f"{self.variables}"
         )
 
     # ------------------------------------------------------------------
