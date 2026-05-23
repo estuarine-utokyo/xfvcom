@@ -15,7 +15,7 @@ def _sample_grib() -> Path | None:
     data_dir = os.environ.get("DATA_DIR")
     if not data_dir:
         return None
-    p = Path(data_dir) / "ERA5/lat34-36_lon139-141/grib/2020_01.grib"
+    p = Path(data_dir) / "met/ERA5/lat34-36_lon139-141/grib/2020_01.grib"
     return p if p.is_file() else None
 
 
