@@ -6,7 +6,7 @@ mapping that pins each FVCOM river name (as it appears in
 ``RIVERS_NAMELIST*.nml``) to a per-river ``discharge_hourly.nc`` produced by
 ``river_dl``. The same mechanism handles sewers (which FVCOM models as
 zero-bathymetry rivers); just point them at
-``$DATA_DIR/river_dl/sewage/<Plant>/discharge_hourly.nc``.
+``$DATA_DIR/wastewater/<Plant>/discharge_hourly.nc``.
 
 See ``TB-FVCOM/hydro/docs/bc_construction_protocol.md`` §5.2 for the spec.
 
@@ -17,10 +17,10 @@ YAML map schema (example)::
       salt: 0.0           # always 0 for both rivers and sewers
     rivers:
       - name: EastArakawa
-        source: ${DATA_DIR}/river_dl/discharge/Arakawa/Iwabuchi/discharge_hourly.nc
+        source: ${DATA_DIR}/river/discharge/Arakawa/Iwabuchi/discharge_hourly.nc
         scale: 1.0        # optional; default 1.0 (leave at 1 for runtime tuning)
       - name: Shibaura
-        source: ${DATA_DIR}/river_dl/sewage/Shibaura/discharge_hourly.nc
+        source: ${DATA_DIR}/wastewater/Shibaura/discharge_hourly.nc
         temp: 20.0
       # kind: constant — for sources with no upstream river_dl NetCDF.
       # The (flux, temp, salt) tuple is broadcast across the time axis.

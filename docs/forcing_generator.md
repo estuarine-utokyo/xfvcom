@@ -299,10 +299,10 @@ defaults:
   salt: 0.0
 rivers:
   - name: EastArakawa
-    source: ${DATA_DIR}/river_dl/discharge/Arakawa/Iwabuchi/discharge_hourly.nc
+    source: ${DATA_DIR}/river/discharge/Arakawa/Iwabuchi/discharge_hourly.nc
     scale: 0.25
   - name: Shibaura
-    source: ${DATA_DIR}/river_dl/sewage/Shibaura/discharge_hourly.nc
+    source: ${DATA_DIR}/wastewater/Shibaura/discharge_hourly.nc
     temp: 20.0
 ```
 

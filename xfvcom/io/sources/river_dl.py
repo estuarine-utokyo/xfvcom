@@ -1,8 +1,8 @@
 """river_dl-based discharge source for FVCOM river/sewer forcing.
 
 Reads a per-river or per-plant ``discharge_hourly.nc`` produced by the
-``river_dl`` toolkit (e.g. ``$DATA_DIR/river_dl/discharge/<River>/<Station>/``
-or ``$DATA_DIR/river_dl/sewage/<Plant>/``) and supplies the ``flux`` series
+``river_dl`` toolkit (e.g. ``$DATA_DIR/river/discharge/<River>/<Station>/``
+or ``$DATA_DIR/wastewater/<Plant>/``) and supplies the ``flux`` series
 to :class:`xfvcom.io.river_nc_generator.RiverNetCDFGenerator`.
 
 Expected NetCDF schema (river_dl Phase AM/AN/AO+, 2026-04-21):
