@@ -56,11 +56,46 @@ from typing import Any
 import yaml  # type: ignore[import-untyped]
 
 from xfvcom.io.river_nc_generator import RiverNetCDFGenerator
+from xfvcom.io.sources.archive import ArchiveCatalog
 
 
 def _expand(path: str) -> str:
     """Expand environment variables and ``~`` in a path string."""
     return os.path.expanduser(os.path.expandvars(path))
+
+
+_CATALOG_CACHE: dict[str, ArchiveCatalog] = {}
+
+
+def _resolve_logical_source(name: str, spec: dict[str, Any]) -> Path:
+    """Resolve a logical ``source`` mapping to a path via the archive catalog.
+
+    Schema v4 (2026-05-24 archive reorg): a river-map entry's ``source``
+    may be a mapping ``{domain, entity, station, group, freq}`` resolved
+    against ``$DATA_DIR/<domain>/_catalog.csv`` instead of a hard-coded
+    path. This decouples the map from the archive's on-disk layout — a
+    future restructure updates the catalog, not this YAML. A plain string
+    ``source`` (a path) remains supported for backward compatibility.
+    """
+    dom = spec.get("domain")
+    if dom not in ("river", "wastewater"):
+        raise ValueError(
+            f"river-map entry {name!r}: source.domain={dom!r} must be "
+            f"'river' or 'wastewater'"
+        )
+    if "entity" not in spec:
+        raise ValueError(
+            f"river-map entry {name!r}: logical source missing 'entity'"
+        )
+    cat = _CATALOG_CACHE.get(dom)
+    if cat is None:
+        cat = _CATALOG_CACHE[dom] = ArchiveCatalog(dom)
+    return cat.resolve(
+        str(spec["entity"]),
+        station=(str(spec["station"]) if spec.get("station") not in (None, "") else None),
+        variable_group=str(spec.get("group", "discharge")),
+        freq=str(spec.get("freq", "hourly")),
+    )
 
 
 _VALID_TEMP_SOURCE_KINDS = {"air_regression", "monthly_climatology"}
@@ -213,7 +248,12 @@ def _load_river_map(
                     f"river-map entry {name!r} missing required key "
                     f"'source' (kind: river_dl): {rv!r}"
                 )
-            entry["source"] = Path(_expand(str(src)))
+            if isinstance(src, dict):
+                # Schema v4: logical source resolved via the archive catalog.
+                entry["source"] = _resolve_logical_source(name, src)
+            else:
+                # Backward-compatible: explicit path string.
+                entry["source"] = Path(_expand(str(src)))
             if "scale" in rv:
                 entry["scale"] = float(rv["scale"])
             entry["salt"] = float(rv.get("salt", defaults["salt"]))
