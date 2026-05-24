@@ -18,6 +18,10 @@ from .dye_contour import (
     plot_dye_contour,
 )
 from .dye_timeseries import plot_dye_timeseries_stacked
+from .freshwater_map import (
+    plot_freshwater_node_map,
+    source_nodes_from_river_map,
+)
 from .markers import make_node_marker_post
 from .source_contribution import (
     compute_time_averaged_contribution,
@@ -89,6 +93,9 @@ __all__: list[str] = [
     "get_source_coordinates",
     "load_grid_coordinates",
     "plot_source_map",
+    # Freshwater-supply node map (river-map-YAML + CSV driven)
+    "source_nodes_from_river_map",
+    "plot_freshwater_node_map",
     # Dye contour maps
     "create_dye_contour_maps",
     "load_dye_time_avg",
