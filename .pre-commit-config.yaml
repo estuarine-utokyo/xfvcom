@@ -1,28 +1,61 @@
+# Pre-commit hooks for xfvcom.
+#
+# WHY language: system (and not pinned remote repos)
+# --------------------------------------------------
+# These hooks invoke the black / isort / mypy that are ALREADY installed
+# in the active project environment, instead of pinning separate tool
+# versions here. That keeps the local commit-time guard byte-for-byte in
+# sync with CI, which is the whole point:
+#
+#   * CI installs the tools via `pip install -e .[dev]` with floating
+#     lower bounds (black>=…, isort>=…, mypy>=…) -> always the latest.
+#     See .github/workflows/ci.yml.
+#   * The conda `xfvcom` env installs the same unpinned tools via
+#     environment.yml -> also the latest.
+#
+# A previous version of this file hard-pinned black==24.2.0 (etc.). Those
+# pins silently drifted ~2 years behind CI's latest black, so even after
+# running the hook locally, `black --check .` still failed on GitHub. With
+# `language: system` there are no pins to drift.
+#
+# Tool configuration is read from the repo, exactly as CI does it:
+#   * black  -> [tool.black]  in pyproject.toml (line-length = 88)
+#   * isort  -> [tool.isort]  in pyproject.toml (profile = "black")
+#   * mypy   -> mypy.ini
+# so the hooks below pass NO extra args that could diverge from CI.
+#
+# One-time setup on a fresh clone:
+#   conda activate xfvcom    # tools must be importable / on PATH
+#   pre-commit install       # writes .git/hooks/pre-commit
+#
+# The hooks resolve tools from PATH, so the `xfvcom` env must be active
+# when committing (or prepend its bin/ to PATH for non-interactive use,
+# e.g. agents: `PATH="$HOME/mambaforge/envs/xfvcom/bin:$PATH" git commit`).
 repos:
-  # --- code formatter -------------------------------------------------
-  - repo: https://github.com/psf/black
-    rev: 24.2.0          # pinned tag
+  - repo: local
     hooks:
+      # --- code formatter (auto-fixes staged files) -------------------
       - id: black
-        args: ["--line-length=88"]
+        name: black
+        entry: black
+        language: system
+        types: [python]
+        require_serial: true
 
-  # --- import sorter --------------------------------------------------
-  - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
-    hooks:
+      # --- import sorter (auto-fixes staged files) --------------------
       - id: isort
-        args: ["--profile", "black"]
+        name: isort
+        entry: isort
+        language: system
+        types: [python]
+        require_serial: true
 
-  # --- static type checker -------------------------------------------
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0
-    hooks:
+      # --- static type checker (whole tree; mirrors CI `mypy .`) ------
       - id: mypy
-        # Stub packages required during the hook run
-        additional_dependencies:
-          - types-tqdm     # already present
-          - types-PyYAML   # added to satisfy import for `yaml`
-          - types-pytz     # added for pytz timezone support
-        args:
-          - "--explicit-package-bases"
-          - "--config-file=mypy.ini"
+        name: mypy
+        entry: mypy
+        language: system
+        args: ["."]
+        pass_filenames: false
+        always_run: true
+        require_serial: true

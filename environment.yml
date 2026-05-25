@@ -80,6 +80,7 @@ dependencies:
   - black
   - isort
   - ruff
+  - pre-commit  # Git commit-time guard; runs the above (see .pre-commit-config.yaml)
   - ipykernel
   - jupyterlab
 

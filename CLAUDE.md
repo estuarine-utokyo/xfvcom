@@ -68,6 +68,33 @@ python -m black --check . && python -m isort --check-only . && python -m mypy .
 python -m black . && python -m isort . && python -m mypy .
 ```
 
+### Pre-commit guard (MANDATORY — prevents recurring CI format failures)
+
+CI (`.github/workflows/ci.yml`) runs `black --check .`, `isort --check-only .`
+and `mypy .`. Committing un-formatted code therefore fails CI every time.
+This used to recur, so the repo ships a **commit-time guard** that runs those
+exact checks before each commit. **Enable it once per clone:**
+
+```bash
+conda activate xfvcom    # the tools must be on PATH
+pre-commit install       # writes .git/hooks/pre-commit
+```
+
+After that, every `git commit` auto-runs black + isort (auto-fixing staged
+files) and `mypy .`. If black/isort reformat anything the commit aborts —
+re-`git add` the changed files and commit again.
+
+- **Never bypass with `git commit --no-verify`** to dodge a formatting/type
+  failure; that is exactly what pushes the error to GitHub.
+- **Non-interactive / agent commits** (env not activated): prepend the env
+  to `PATH` so the hook can find the tools, e.g.
+  `PATH="$HOME/mambaforge/envs/xfvcom/bin:$PATH" git commit -m "…"`.
+- **No version pinning here on purpose.** `.pre-commit-config.yaml` uses
+  `language: system`, so it runs the *same* black/isort/mypy that CI and the
+  conda env install (all unpinned → latest). A prior pinned config drifted
+  ~2 years behind CI and silently let mis-formatted commits through; do not
+  reintroduce hard-pinned `rev:` versions.
+
 ### Common mypy fixes
 - Add type annotations to variables: `count: NDArray = np.zeros(...)`
 - Use `| None` for optional types: `self.input_dir: Path | None = None`
