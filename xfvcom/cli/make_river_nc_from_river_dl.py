@@ -84,15 +84,15 @@ def _resolve_logical_source(name: str, spec: dict[str, Any]) -> Path:
             f"'river' or 'wastewater'"
         )
     if "entity" not in spec:
-        raise ValueError(
-            f"river-map entry {name!r}: logical source missing 'entity'"
-        )
+        raise ValueError(f"river-map entry {name!r}: logical source missing 'entity'")
     cat = _CATALOG_CACHE.get(dom)
     if cat is None:
         cat = _CATALOG_CACHE[dom] = ArchiveCatalog(dom)
     return cat.resolve(
         str(spec["entity"]),
-        station=(str(spec["station"]) if spec.get("station") not in (None, "") else None),
+        station=(
+            str(spec["station"]) if spec.get("station") not in (None, "") else None
+        ),
         variable_group=str(spec.get("group", "discharge")),
         freq=str(spec.get("freq", "hourly")),
     )

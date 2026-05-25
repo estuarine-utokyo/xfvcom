@@ -42,11 +42,17 @@ from typing import Final
 
 CATALOG_NAME: Final[str] = "_catalog.csv"
 CATALOG_FIELDS: Final[tuple[str, ...]] = (
-    "domain", "entity", "station", "variable_group", "freq", "relpath",
+    "domain",
+    "entity",
+    "station",
+    "variable_group",
+    "freq",
+    "relpath",
 )
 _FREQS: Final[tuple[str, ...]] = ("hourly", "daily")
 _SKIP_DIRS: Final[frozenset[str]] = frozenset(
-    {"figs", "raw", "validation", "concentration", "discharge"})
+    {"figs", "raw", "validation", "concentration", "discharge"}
+)
 
 
 def data_dir() -> Path:
@@ -88,11 +94,16 @@ def _scan_river(root: Path) -> list[dict]:
         for station_dir in sorted(p for p in river_dir.iterdir() if p.is_dir()):
             for nc in sorted(station_dir.glob("*.nc")):
                 vg, fq = _parse_variant(nc.name)
-                rows.append({
-                    "domain": "river", "entity": river_dir.name,
-                    "station": station_dir.name, "variable_group": vg,
-                    "freq": fq, "relpath": str(nc.relative_to(root)),
-                })
+                rows.append(
+                    {
+                        "domain": "river",
+                        "entity": river_dir.name,
+                        "station": station_dir.name,
+                        "variable_group": vg,
+                        "freq": fq,
+                        "relpath": str(nc.relative_to(root)),
+                    }
+                )
     return rows
 
 
@@ -104,11 +115,16 @@ def _scan_water_quality(root: Path) -> list[dict]:
         if not d.is_dir():
             continue
         for nc in sorted(d.glob("*.nc")):
-            rows.append({
-                "domain": "water_quality", "entity": nc.stem, "station": "",
-                "variable_group": group, "freq": "",
-                "relpath": str(nc.relative_to(root)),
-            })
+            rows.append(
+                {
+                    "domain": "water_quality",
+                    "entity": nc.stem,
+                    "station": "",
+                    "variable_group": group,
+                    "freq": "",
+                    "relpath": str(nc.relative_to(root)),
+                }
+            )
     return rows
 
 
@@ -119,11 +135,16 @@ def _scan_wastewater(root: Path) -> list[dict]:
             continue
         for nc in sorted(plant_dir.glob("*.nc")):
             vg, fq = _parse_variant(nc.name)
-            rows.append({
-                "domain": "wastewater", "entity": plant_dir.name, "station": "",
-                "variable_group": vg, "freq": fq,
-                "relpath": str(nc.relative_to(root)),
-            })
+            rows.append(
+                {
+                    "domain": "wastewater",
+                    "entity": plant_dir.name,
+                    "station": "",
+                    "variable_group": vg,
+                    "freq": fq,
+                    "relpath": str(nc.relative_to(root)),
+                }
+            )
     return rows
 
 
@@ -138,7 +159,8 @@ def scan_domain(root: Path, domain: str | None = None) -> list[dict]:
     if domain == "water_quality":
         return _scan_water_quality(root)
     raise ValueError(
-        f"unknown domain {domain!r} (expected river|wastewater|water_quality)")
+        f"unknown domain {domain!r} (expected river|wastewater|water_quality)"
+    )
 
 
 def write_catalog(root: Path, domain: str | None = None) -> Path:
@@ -193,9 +215,12 @@ class ArchiveCatalog:
         """
         st = "" if station is None else station
         hits = [
-            r for r in self._rows
-            if r["entity"] == entity and r["station"] == st
-            and r["variable_group"] == variable_group and r["freq"] == freq
+            r
+            for r in self._rows
+            if r["entity"] == entity
+            and r["station"] == st
+            and r["variable_group"] == variable_group
+            and r["freq"] == freq
         ]
         if not hits:
             raise KeyError(
@@ -217,9 +242,15 @@ class ArchiveCatalog:
 # CLI
 # --------------------------------------------------------------------------
 def _cmd_build(args: argparse.Namespace) -> int:
-    roots = ([Path(args.root)] if args.root
-             else [archive_root("river"), archive_root("wastewater"),
-                   archive_root("water_quality")])
+    roots = (
+        [Path(args.root)]
+        if args.root
+        else [
+            archive_root("river"),
+            archive_root("wastewater"),
+            archive_root("water_quality"),
+        ]
+    )
     for root in roots:
         if not root.is_dir():
             print(f"[skip] {root} not a directory", file=sys.stderr)
@@ -232,8 +263,9 @@ def _cmd_build(args: argparse.Namespace) -> int:
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
     cat = ArchiveCatalog(args.domain)
-    print(cat.resolve(args.entity, args.station or None,
-                      args.variable_group, args.freq))
+    print(
+        cat.resolve(args.entity, args.station or None, args.variable_group, args.freq)
+    )
     return 0
 
 

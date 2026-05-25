@@ -47,8 +47,15 @@ from .source_map import (
     order_boundary_nodes,
 )
 
-CSV_FIELDS = ["entity", "label", "label_lon", "label_lat",
-              "node_lon", "node_lat", "leader"]
+CSV_FIELDS = [
+    "entity",
+    "label",
+    "label_lon",
+    "label_lat",
+    "node_lon",
+    "node_lat",
+    "leader",
+]
 
 PositionFn = Callable[[dict], dict]
 
@@ -92,7 +99,10 @@ def _build_info(coords: dict, entity_nodes: dict, new_entities) -> dict:
         info[ent] = dict(
             clon=float(np.mean([lon[i] for i in idx0])),
             clat=float(np.mean([lat[i] for i in idx0])),
-            kind=d["kind"], is_new=ent in set(new_entities), idx0=idx0)
+            kind=d["kind"],
+            is_new=ent in set(new_entities),
+            idx0=idx0,
+        )
     return info
 
 
@@ -107,13 +117,15 @@ def _generic_default_positions(info: dict) -> dict:
     pos = {}
     for e, d in info.items():
         dlon, dlat = d["clon"] - bc_lon, d["clat"] - bc_lat
-        norm = max((dlon ** 2 + dlat ** 2) ** 0.5, 1e-6)
+        norm = max((dlon**2 + dlat**2) ** 0.5, 1e-6)
         pos[e] = (d["clon"] + off * dlon / norm, d["clat"] + off * dlat / norm)
     return pos
 
 
 def load_or_init_label_csv(
-    csv_path: str | Path, info: dict, new_entities,
+    csv_path: str | Path,
+    info: dict,
+    new_entities,
     default_position_fn: PositionFn | None = None,
 ) -> dict:
     """Load label text/positions from *csv_path*, initialising defaults.
@@ -136,17 +148,22 @@ def load_or_init_label_csv(
             r = existing[e]
             out[e] = dict(
                 label=r.get("label", e),
-                label_lon=float(r["label_lon"]), label_lat=float(r["label_lat"]),
+                label_lon=float(r["label_lon"]),
+                label_lat=float(r["label_lat"]),
                 node_lon=float(r.get("node_lon") or d["clon"]),
                 node_lat=float(r.get("node_lat") or d["clat"]),
-                leader=int(float(r.get("leader", 1))))
+                leader=int(float(r.get("leader", 1))),
+            )
         else:
             llon, llat = defaults[e]
             out[e] = dict(
                 label=e + (" *" if d["is_new"] else ""),
-                label_lon=round(float(llon), 4), label_lat=round(float(llat), 4),
-                node_lon=round(d["clon"], 4), node_lat=round(d["clat"], 4),
-                leader=1)
+                label_lon=round(float(llon), 4),
+                label_lat=round(float(llat), 4),
+                node_lon=round(d["clon"], 4),
+                node_lat=round(d["clat"], 4),
+                leader=1,
+            )
             dirty = True
     if dirty:
         csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -203,49 +220,81 @@ def plot_freshwater_node_map(
     """
     coords = load_grid_coordinates(nc_file)
     lon, lat, nv = coords["lon"], coords["lat"], coords["nv"]
-    paths = sorted(order_boundary_nodes(extract_boundary_edges(nv)),
-                   key=len, reverse=True)
+    paths = sorted(
+        order_boundary_nodes(extract_boundary_edges(nv)), key=len, reverse=True
+    )
     info = _build_info(coords, entity_nodes, new_entities)
 
     if label_csv is not None:
-        labels = load_or_init_label_csv(label_csv, info, new_entities,
-                                        default_position_fn)
+        labels = load_or_init_label_csv(
+            label_csv, info, new_entities, default_position_fn
+        )
     else:
         dpos = (default_position_fn or _generic_default_positions)(info)
-        labels = {e: dict(label=e + (" *" if info[e]["is_new"] else ""),
-                          label_lon=dpos[e][0], label_lat=dpos[e][1],
-                          node_lon=info[e]["clon"], node_lat=info[e]["clat"],
-                          leader=1) for e in info}
+        labels = {
+            e: dict(
+                label=e + (" *" if info[e]["is_new"] else ""),
+                label_lon=dpos[e][0],
+                label_lat=dpos[e][1],
+                node_lon=info[e]["clon"],
+                node_lat=info[e]["clat"],
+                leader=1,
+            )
+            for e in info
+        }
 
     fig, ax = plt.subplots(figsize=figsize)
     ax.set_facecolor(ocean_color)
     if paths:
         ext = paths[0]
-        ax.add_patch(MplPolygon(np.column_stack([lon[ext], lat[ext]]),
-                                closed=True, facecolor=land_color,
-                                edgecolor="none", zorder=0))
+        ax.add_patch(
+            MplPolygon(
+                np.column_stack([lon[ext], lat[ext]]),
+                closed=True,
+                facecolor=land_color,
+                edgecolor="none",
+                zorder=0,
+            )
+        )
     for p in paths:
         ax.plot(lon[p], lat[p], color="#555555", lw=0.8, zorder=1)
 
     for ent, d in info.items():
-        mk, col = (("^", river_color) if d["kind"] == "River"
-                   else ("s", sewer_color))
+        mk, col = ("^", river_color) if d["kind"] == "River" else ("s", sewer_color)
         for i in d["idx0"]:
-            ax.scatter(lon[i], lat[i], marker=mk, s=70, c=col,
-                       edgecolors=("black" if d["is_new"] else "white"),
-                       linewidths=(1.6 if d["is_new"] else 0.5), zorder=4)
+            ax.scatter(
+                lon[i],
+                lat[i],
+                marker=mk,
+                s=70,
+                c=col,
+                edgecolors=("black" if d["is_new"] else "white"),
+                linewidths=(1.6 if d["is_new"] else 0.5),
+                zorder=4,
+            )
 
     for ent, d in info.items():
         L = labels[ent]
         col = river_color if d["kind"] == "River" else sewer_color
-        kw = dict(fontsize=8.5, fontweight=("bold" if d["is_new"] else "normal"),
-                  color=col, ha="center", va="center", zorder=5,
-                  path_effects=[pe.withStroke(linewidth=2.2, foreground="white")])
+        kw = dict(
+            fontsize=8.5,
+            fontweight=("bold" if d["is_new"] else "normal"),
+            color=col,
+            ha="center",
+            va="center",
+            zorder=5,
+            path_effects=[pe.withStroke(linewidth=2.2, foreground="white")],
+        )
         if int(L["leader"]):
-            ax.annotate(L["label"], xy=(L["node_lon"], L["node_lat"]),
-                        xytext=(L["label_lon"], L["label_lat"]),
-                        arrowprops=dict(arrowstyle="-", color=col, lw=0.6,
-                                        alpha=0.85, shrinkA=1, shrinkB=3), **kw)
+            ax.annotate(
+                L["label"],
+                xy=(L["node_lon"], L["node_lat"]),
+                xytext=(L["label_lon"], L["label_lat"]),
+                arrowprops=dict(
+                    arrowstyle="-", color=col, lw=0.6, alpha=0.85, shrinkA=1, shrinkB=3
+                ),
+                **kw,
+            )
         else:
             ax.text(L["label_lon"], L["label_lat"], L["label"], **kw)
 
@@ -262,13 +311,37 @@ def plot_freshwater_node_map(
         ax.set_title(title, fontsize=11)
 
     handles = [
-        Line2D([0], [0], marker="^", color="none", markerfacecolor=river_color,
-               markeredgecolor="white", markersize=11, label="River mouth"),
-        Line2D([0], [0], marker="s", color="none", markerfacecolor=sewer_color,
-               markeredgecolor="white", markersize=11, label="STP (sewer) outfall"),
-        Line2D([0], [0], marker="o", color="none", markerfacecolor="none",
-               markeredgecolor="black", markeredgewidth=1.6, markersize=12,
-               label="Newly added"),
+        Line2D(
+            [0],
+            [0],
+            marker="^",
+            color="none",
+            markerfacecolor=river_color,
+            markeredgecolor="white",
+            markersize=11,
+            label="River mouth",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="s",
+            color="none",
+            markerfacecolor=sewer_color,
+            markeredgecolor="white",
+            markersize=11,
+            label="STP (sewer) outfall",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="none",
+            markerfacecolor="none",
+            markeredgecolor="black",
+            markeredgewidth=1.6,
+            markersize=12,
+            label="Newly added",
+        ),
     ]
     ax.legend(handles=handles, loc="lower right", fontsize=9, framealpha=0.9)
 
