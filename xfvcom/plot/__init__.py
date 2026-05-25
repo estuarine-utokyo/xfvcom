@@ -23,6 +23,24 @@ from .freshwater_map import (
     source_nodes_from_river_map,
 )
 from .markers import make_node_marker_post
+from .met_forcing import (
+    MET_VARIABLES,
+    MetVar,
+    plot_met_map_annual,
+    plot_met_map_monthly,
+    plot_met_station_timeseries,
+    resolve_var,
+)
+from .river_forcing import (
+    RiverForcing,
+    aggregate_entities,
+    classify_outflows,
+    load_river_forcing,
+    parse_river_scales,
+    plot_river_forcing,
+    plot_river_forcing_grid,
+    river_annual_summary,
+)
 from .source_contribution import (
     compute_time_averaged_contribution,
     create_source_contribution_bar_plot,
@@ -96,6 +114,22 @@ __all__: list[str] = [
     # Freshwater-supply node map (river-map-YAML + CSV driven)
     "source_nodes_from_river_map",
     "plot_freshwater_node_map",
+    # River / sewer forcing time series (input-NC driven)
+    "RiverForcing",
+    "load_river_forcing",
+    "parse_river_scales",
+    "classify_outflows",
+    "aggregate_entities",
+    "river_annual_summary",
+    "plot_river_forcing",
+    "plot_river_forcing_grid",
+    # Meteorological forcing (input-NC driven): station TS + spatial maps
+    "MetVar",
+    "MET_VARIABLES",
+    "resolve_var",
+    "plot_met_station_timeseries",
+    "plot_met_map_monthly",
+    "plot_met_map_annual",
     # Dye contour maps
     "create_dye_contour_maps",
     "load_dye_time_avg",
