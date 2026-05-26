@@ -333,8 +333,15 @@ Each entry's water temperature is set by a required `temp_source`
 mapping (schema v3 — a bare `temp:` scalar is rejected for annual
 runs). Two kinds are supported:
 
-- `monthly_climatology`: a 12-element `monthly_means` list (Jan..Dec),
-  broadcast as a month-of-year step function.
+- `monthly_climatology`: a 12-element `monthly_means` list (Jan..Dec).
+  An optional `interpolation` selects how the 12 values map onto the time
+  axis: `step` (default; month-of-year step function), `harmonic` (a
+  smooth least-squares annual Fourier fit — optional integer
+  `harmonic_modes` 1..6, default 2; preserves the annual mean exactly),
+  or `spline` (a periodic cubic spline through the month-centre values).
+  The smooth modes give a continuous seasonal cycle with no
+  month-boundary jumps — used e.g. for buffered STP-effluent temperature
+  (see `wasterwater_dl/docs/effluent_water_temperature.md`).
 - `air_regression`: `T_water = slope * T_air + intercept`, where
   `T_air` is read from a metforce NC (`air_nc_template`, `air_var`) at
   the nearest cell to (`air_lat`, `air_lon`). Optional `min_temp` /

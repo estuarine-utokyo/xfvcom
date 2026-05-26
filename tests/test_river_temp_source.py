@@ -689,3 +689,189 @@ def test_smoothing_exponential_runs(tmp_path: Path, tiny_nml: Path) -> None:
     )
     assert not np.isnan(sm).any()
     assert sm.var() < raw.var()
+
+
+# ------------------------------------------------------------------
+# 7. monthly_climatology smooth interpolation (step|harmonic|spline)
+#    (wasterwater_dl/docs/effluent_water_temperature.md)
+# ------------------------------------------------------------------
+KANDA = [18, 17, 18, 20, 23, 25, 28, 29, 28, 25, 23, 20]
+
+
+def _build_monthly_gen(tiny_nml, tmp_path, start, end, spec, dt=3600):
+    # monthly_climatology ignores the discharge source; it only needs to
+    # exist for the generator entry.  Unique name per spec object.
+    f_src = tmp_path / f"src_m_{id(spec):x}.nc"
+    _make_river_dl_nc(
+        f_src,
+        times=pd.date_range("2020-01-01", periods=24, freq="1h"),
+        discharge=np.full(24, 10.0, dtype=np.float32),
+    )
+    return RiverNetCDFGenerator(
+        tiny_nml,
+        start,
+        end,
+        dt,
+        river_dl_map={"RA": {"kind": "river_dl", "source": f_src, "temp_source": spec}},
+    )
+
+
+# --- 7a. schema validation -----------------------------------------
+def test_validate_monthly_interpolation_default_step() -> None:
+    out = _validate_temp_source(
+        "R", {"kind": "monthly_climatology", "monthly_means": KANDA}
+    )
+    assert out["interpolation"] == "step"
+
+
+def test_validate_monthly_interpolation_smooth_modes() -> None:
+    for interp in ("harmonic", "spline"):
+        out = _validate_temp_source(
+            "R",
+            {
+                "kind": "monthly_climatology",
+                "monthly_means": KANDA,
+                "interpolation": interp,
+            },
+        )
+        assert out["interpolation"] == interp
+
+
+def test_validate_monthly_interpolation_unknown() -> None:
+    with pytest.raises(ValueError, match="interpolation"):
+        _validate_temp_source(
+            "R",
+            {
+                "kind": "monthly_climatology",
+                "monthly_means": KANDA,
+                "interpolation": "bogus",
+            },
+        )
+
+
+def test_validate_harmonic_modes_ok() -> None:
+    out = _validate_temp_source(
+        "R",
+        {
+            "kind": "monthly_climatology",
+            "monthly_means": KANDA,
+            "interpolation": "harmonic",
+            "harmonic_modes": 3,
+        },
+    )
+    assert out["harmonic_modes"] == 3
+
+
+def test_validate_harmonic_modes_requires_harmonic() -> None:
+    with pytest.raises(ValueError, match="only valid with interpolation: harmonic"):
+        _validate_temp_source(
+            "R",
+            {
+                "kind": "monthly_climatology",
+                "monthly_means": KANDA,
+                "interpolation": "spline",
+                "harmonic_modes": 3,
+            },
+        )
+
+
+@pytest.mark.parametrize("bad", [0, 7, "x"])
+def test_validate_harmonic_modes_invalid(bad) -> None:
+    with pytest.raises(ValueError, match="harmonic_modes"):
+        _validate_temp_source(
+            "R",
+            {
+                "kind": "monthly_climatology",
+                "monthly_means": KANDA,
+                "interpolation": "harmonic",
+                "harmonic_modes": bad,
+            },
+        )
+
+
+# --- 7b. interpolation helpers -------------------------------------
+def test_spline_periodic_exact_at_month_centres() -> None:
+    centres = (np.arange(12, dtype=np.float64) + 0.5) / 12.0
+    y = np.asarray(KANDA, dtype=np.float64)
+    out = RiverNetCDFGenerator._spline_periodic(centres, y, centres)
+    np.testing.assert_allclose(out, y, atol=1e-9)
+
+
+def test_harmonic_periodic_preserves_annual_mean() -> None:
+    centres = (np.arange(12, dtype=np.float64) + 0.5) / 12.0
+    y = np.asarray(KANDA, dtype=np.float64)
+    out = RiverNetCDFGenerator._harmonic_periodic(centres, y, centres, 2)
+    assert abs(float(out.mean()) - float(y.mean())) < 1e-9  # a0 == sample mean
+    assert np.max(np.abs(out - y)) < 1.0  # within ~0.6 degC for Kanda (K=2)
+
+
+# --- 7c. generator integration -------------------------------------
+def test_monthly_harmonic_is_smooth_and_mean_preserving(
+    tmp_path: Path, tiny_nml: Path
+) -> None:
+    spec = {
+        "kind": "monthly_climatology",
+        "monthly_means": KANDA,
+        "interpolation": "harmonic",
+    }
+    gen = _build_monthly_gen(
+        tiny_nml, tmp_path, "2020-01-01T00:00:00Z", "2020-12-31T23:00:00Z", spec
+    )
+    arr = gen._evaluate_temp_source("RA", spec)
+    assert not np.isnan(arr).any()
+    # smooth: no month-boundary jumps (hourly increments are tiny)
+    assert np.abs(np.diff(arr)).max() < 0.05
+    # annual mean preserved
+    assert abs(float(arr.mean()) - float(np.mean(KANDA))) < 0.3
+    # stays within the seasonal envelope
+    assert arr.min() > min(KANDA) - 1.5
+    assert arr.max() < max(KANDA) + 1.5
+
+
+def test_monthly_step_has_boundary_jumps(tmp_path: Path, tiny_nml: Path) -> None:
+    """Control: the legacy step mode does have discrete month jumps."""
+    spec = {
+        "kind": "monthly_climatology",
+        "monthly_means": KANDA,
+        "interpolation": "step",
+    }
+    gen = _build_monthly_gen(
+        tiny_nml, tmp_path, "2020-01-01T00:00:00Z", "2020-12-31T23:00:00Z", spec
+    )
+    arr = gen._evaluate_temp_source("RA", spec)
+    assert np.abs(np.diff(arr)).max() >= 1.0
+
+
+def test_monthly_spline_continuous_across_year_boundary(
+    tmp_path: Path, tiny_nml: Path
+) -> None:
+    spec = {
+        "kind": "monthly_climatology",
+        "monthly_means": KANDA,
+        "interpolation": "spline",
+    }
+    gen = _build_monthly_gen(
+        tiny_nml, tmp_path, "2020-12-20T00:00:00Z", "2021-01-10T00:00:00Z", spec
+    )
+    arr = gen._evaluate_temp_source("RA", spec)
+    assert not np.isnan(arr).any()
+    # periodic spline: smooth across the Dec -> Jan wrap (no jump)
+    assert np.abs(np.diff(arr)).max() < 0.05
+
+
+def test_monthly_default_is_step_byte_identical(tmp_path: Path, tiny_nml: Path) -> None:
+    """No interpolation key -> identical to explicit step (backward compat)."""
+    spec_default = {"kind": "monthly_climatology", "monthly_means": KANDA}
+    spec_step = {
+        "kind": "monthly_climatology",
+        "monthly_means": KANDA,
+        "interpolation": "step",
+    }
+    start, end = "2020-01-15T00:00:00Z", "2020-03-15T00:00:00Z"
+    a = _build_monthly_gen(
+        tiny_nml, tmp_path, start, end, spec_default
+    )._evaluate_temp_source("RA", spec_default)
+    b = _build_monthly_gen(
+        tiny_nml, tmp_path, start, end, spec_step
+    )._evaluate_temp_source("RA", spec_step)
+    np.testing.assert_array_equal(a, b)

@@ -421,14 +421,98 @@ class RiverNetCDFGenerator(BaseGenerator):
         """
         kind = str(spec["kind"])
         if kind == "monthly_climatology":
-            means = np.asarray(spec["monthly_means"], dtype=np.float32)
-            months = np.asarray(self.timeline.month, dtype=np.int32) - 1
-            return means[months].astype(np.float32)
+            return self._evaluate_monthly_climatology(spec)
         if kind == "air_regression":
             return self._evaluate_air_regression(river_name, spec)
         raise ValueError(
             f"river {river_name!r}: temp_source.kind={kind!r} not supported"
         )
+
+    def _evaluate_monthly_climatology(
+        self, spec: dict[str, Any]
+    ) -> NDArray[np.float32]:
+        """Map 12 monthly means onto the timeline.
+
+        ``interpolation`` (default ``step``) selects the mapping:
+          * ``step``: month-of-year step function (legacy; discrete jumps
+            at month boundaries).
+          * ``harmonic``: a smooth least-squares annual Fourier fit
+            (``harmonic_modes`` modes, default 2); the annual mean is
+            preserved exactly.
+          * ``spline``: a periodic cubic spline through the month-centre
+            values (passes through the monthly means exactly, C2-smooth).
+
+        The smooth modes place each monthly mean at its month centre and
+        evaluate a continuous, periodic seasonal cycle on a fractional
+        12-month phase, so there are no month-boundary jumps.
+        """
+        means = np.asarray(spec["monthly_means"], dtype=np.float64)
+        interp = str(spec.get("interpolation", "step"))
+        if interp == "step":
+            months = np.asarray(self.timeline.month, dtype=np.int32) - 1
+            return means[months].astype(np.float32)
+
+        frac = self._fractional_year(self.timeline)  # (nt,) in [0, 1)
+        centres = (np.arange(12, dtype=np.float64) + 0.5) / 12.0
+        if interp == "harmonic":
+            modes = int(spec.get("harmonic_modes", 2))
+            vals = self._harmonic_periodic(centres, means, frac, modes)
+        elif interp == "spline":
+            vals = self._spline_periodic(centres, means, frac)
+        else:
+            raise ValueError(f"temp_source.interpolation={interp!r} not supported")
+        return vals.astype(np.float32)
+
+    @staticmethod
+    def _fractional_year(timeline: pd.DatetimeIndex) -> NDArray[np.float64]:
+        """Position within the year as an equal-fractional-month phase in
+        [0, 1), so a timestamp at a month's centre maps to ``(m-0.5)/12``."""
+        month = np.asarray(timeline.month, dtype=np.float64)
+        day = np.asarray(timeline.day, dtype=np.float64)
+        dim = np.asarray(timeline.daysinmonth, dtype=np.float64)
+        secs = (
+            np.asarray(timeline.hour, dtype=np.float64) * 3600.0
+            + np.asarray(timeline.minute, dtype=np.float64) * 60.0
+            + np.asarray(timeline.second, dtype=np.float64)
+        )
+        pos = (month - 1.0) + (day - 1.0 + secs / 86400.0) / dim  # [0, 12)
+        return pos / 12.0
+
+    @staticmethod
+    def _harmonic_periodic(
+        x: NDArray[np.float64],
+        y: NDArray[np.float64],
+        xq: NDArray[np.float64],
+        modes: int,
+    ) -> NDArray[np.float64]:
+        """Least-squares periodic Fourier fit of ``y`` sampled at phases
+        ``x`` (in [0, 1)), evaluated at query phases ``xq``."""
+
+        def design(t: NDArray[np.float64]) -> NDArray[np.float64]:
+            th = 2.0 * np.pi * t
+            cols = [np.ones_like(th)]
+            for k in range(1, modes + 1):
+                cols += [np.cos(k * th), np.sin(k * th)]
+            return np.column_stack(cols)
+
+        coef, *_ = np.linalg.lstsq(design(x), y, rcond=None)
+        return np.asarray(design(xq) @ coef, dtype=np.float64)
+
+    @staticmethod
+    def _spline_periodic(
+        x: NDArray[np.float64],
+        y: NDArray[np.float64],
+        xq: NDArray[np.float64],
+    ) -> NDArray[np.float64]:
+        """Periodic cubic spline through (``x``, ``y``) (phases in [0, 1)),
+        evaluated at ``xq`` (wrapped into one period)."""
+        from scipy.interpolate import CubicSpline
+
+        # Append one period so the spline closes smoothly (y wraps to y[0]).
+        xx = np.concatenate([x, [x[0] + 1.0]])
+        yy = np.concatenate([y, [y[0]]])
+        cs = CubicSpline(xx, yy, bc_type="periodic")
+        return np.asarray(cs(np.mod(xq, 1.0)), dtype=np.float64)
 
     def _evaluate_air_regression(
         self, river_name: str, spec: dict[str, Any]

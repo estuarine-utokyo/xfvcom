@@ -100,6 +100,7 @@ def _resolve_logical_source(name: str, spec: dict[str, Any]) -> Path:
 
 _VALID_TEMP_SOURCE_KINDS = {"air_regression", "monthly_climatology"}
 _VALID_SMOOTHING_METHODS = {"simple", "exponential"}
+_VALID_MONTHLY_INTERPOLATIONS = {"step", "harmonic", "spline"}
 
 
 def _validate_temp_source(name: str, spec: Any) -> dict[str, Any]:
@@ -186,6 +187,38 @@ def _validate_temp_source(name: str, spec: Any) -> dict[str, Any]:
                 f"requires monthly_means as a 12-element list (Jan..Dec)"
             )
         out["monthly_means"] = [float(m) for m in means]
+        # Optional smooth periodic interpolation of the 12 monthly values.
+        # ``step`` (default) keeps the legacy month-of-year step function;
+        # ``harmonic`` / ``spline`` render a continuous, smooth seasonal
+        # cycle.  Values come from the YAML map; nothing is hard-coded.
+        interp = str(spec.get("interpolation", "step"))
+        if interp not in _VALID_MONTHLY_INTERPOLATIONS:
+            raise ValueError(
+                f"river-map entry {name!r}: temp_source.interpolation="
+                f"{interp!r} not supported (expected one of "
+                f"{sorted(_VALID_MONTHLY_INTERPOLATIONS)})"
+            )
+        out["interpolation"] = interp
+        if "harmonic_modes" in spec:
+            try:
+                hm = int(spec["harmonic_modes"])
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"river-map entry {name!r}: temp_source.harmonic_modes "
+                    f"must be an integer in 1..6 (got "
+                    f"{spec['harmonic_modes']!r})"
+                ) from None
+            if interp != "harmonic":
+                raise ValueError(
+                    f"river-map entry {name!r}: temp_source.harmonic_modes is "
+                    f"only valid with interpolation: harmonic"
+                )
+            if not 1 <= hm <= 6:
+                raise ValueError(
+                    f"river-map entry {name!r}: temp_source.harmonic_modes "
+                    f"must be in 1..6 (got {hm})"
+                )
+            out["harmonic_modes"] = hm
     return out
 
 
@@ -218,8 +251,15 @@ def _load_river_map(
           selects ``simple`` (default) or ``exponential`` weighting; it
           is only valid together with ``smoothing_days``.
         - ``monthly_climatology``: T_water taken from a 12-element
-          ``monthly_means`` list, broadcast on the time axis as a
-          month-of-year step function.
+          ``monthly_means`` list.  Optional ``interpolation`` selects how
+          the 12 values are mapped onto the time axis: ``step`` (default;
+          month-of-year step function, backward-compatible), ``harmonic``
+          (a smooth least-squares annual Fourier fit; optional integer
+          ``harmonic_modes`` 1..6, default 2), or ``spline`` (a periodic
+          cubic spline through the month-centre values).  The smooth modes
+          give a continuous seasonal cycle with no month-boundary jumps —
+          recommended e.g. for buffered STP-effluent temperature; see
+          ``wasterwater_dl/docs/effluent_water_temperature.md``.
 
     See ``~/Github/TB-FVCOM/hydro/docs/directions/20260517_xfvcom_river_temp_seasonal.md``
     for the full design.
