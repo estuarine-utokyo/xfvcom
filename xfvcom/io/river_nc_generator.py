@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import warnings
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -438,6 +439,15 @@ class RiverNetCDFGenerator(BaseGenerator):
         The template ``spec["air_nc_template"]`` substitutes ``{year}``
         from the time axis; multi-year ranges open each year's NC and
         concatenate on time.
+
+        Optional antecedent-air-temperature smoothing (``smoothing_days``,
+        ``smoothing_method``) applies a trailing (causal) filter to the
+        air series *before* the regression and *before* the temperature
+        clip, so the river responds to an integrated, lagged air signal
+        rather than the instantaneous value.  See
+        ``docs/directions/20260526_river_temp_antecedent_air_smoothing.md``.
+        Absent ``smoothing_days`` the same-timestep path below is taken
+        unchanged.
         """
         import netCDF4 as nc4
 
@@ -448,16 +458,35 @@ class RiverNetCDFGenerator(BaseGenerator):
         slope = float(spec["slope"])
         intercept = float(spec["intercept"])
 
-        years = sorted(set(self.timeline.year))
+        smoothing_days = spec.get("smoothing_days")
+        smoothing_method = str(spec.get("smoothing_method", "simple"))
+        step = pd.Timedelta(seconds=self.dt)
+
+        # A trailing window needs ``smoothing_days`` of air data *before*
+        # timeline[0]; read that earlier span too (it may cross a calendar
+        # year boundary into the prior year's NC).  Years present in the
+        # timeline are mandatory; a lead-in-only year is best-effort.
+        required_years = set(self.timeline.year)
+        if smoothing_days:
+            read_start = self.timeline[0] - pd.Timedelta(days=float(smoothing_days))
+            years = sorted({read_start.year, *required_years})
+        else:
+            years = sorted(required_years)
+
         # Per-year segment: open NC, find nearest cell, build a pd.Series.
         series_parts: list[pd.Series] = []
+        lead_in_truncated = False
         for year in years:
             path = Path(template.format(year=year))
             if not path.exists():
-                raise FileNotFoundError(
-                    f"river {river_name!r} air_regression: metforce NC "
-                    f"not found for year {year}: {path}"
-                )
+                if year in required_years:
+                    raise FileNotFoundError(
+                        f"river {river_name!r} air_regression: metforce NC "
+                        f"not found for year {year}: {path}"
+                    )
+                # Missing lead-in-only year: tolerate, ramp up instead.
+                lead_in_truncated = True
+                continue
             ds = nc4.Dataset(path)
             try:
                 lats = ds.variables["lat"][:].astype(float)
@@ -482,12 +511,70 @@ class RiverNetCDFGenerator(BaseGenerator):
                 f"river {river_name!r}: no metforce NC opened for " f"years={years}"
             )
         air_series = pd.concat(series_parts).sort_index()
-        # Reindex onto the timeline; linear interp where needed (the
-        # metforce hourly axis is the same hourly cadence we use here,
-        # so this is mostly a no-op except at endpoints).
-        air_on_timeline = air_series.reindex(self.timeline).interpolate(
-            method="time", limit_direction="both"
-        )
+
+        if not smoothing_days:
+            # --- Same-timestep path (unchanged; byte-identical output) ---
+            # Reindex onto the timeline; linear interp where needed (the
+            # metforce hourly axis is the same hourly cadence we use here,
+            # so this is mostly a no-op except at endpoints).
+            air_on_timeline = air_series.reindex(self.timeline).interpolate(
+                method="time", limit_direction="both"
+            )
+        else:
+            # --- Antecedent-air-temperature smoothing path ---------------
+            win = float(smoothing_days) * 86400.0 / float(self.dt)  # timesteps
+            n_steps = max(1, int(round(win)))
+            # e-folding time constant -> AR(1)/EWMA alpha (one step = self.dt).
+            alpha = 1.0 - float(np.exp(-1.0 / win))
+            have_lead = (
+                not lead_in_truncated
+                and air_series.index.min() <= self.timeline[0] - step * (n_steps - 1)
+            )
+            if have_lead:
+                # Prepend exactly ``n_steps - 1`` lead-in steps so the first
+                # timeline point already sees a full trailing window.
+                lead_index = pd.date_range(
+                    end=self.timeline[0] - step,
+                    periods=max(0, n_steps - 1),
+                    freq=f"{self.dt}s",
+                )
+                ext_index = lead_index.append(self.timeline)
+                air_ext = air_series.reindex(ext_index).interpolate(
+                    method="time", limit_direction="both"
+                )
+                if air_ext.isna().any():
+                    raise RuntimeError(
+                        f"river {river_name!r}: metforce {var} has NaN on the "
+                        f"smoothing lead-in timeline; refusing to silently fill"
+                    )
+                if smoothing_method == "exponential":
+                    smoothed = air_ext.ewm(alpha=alpha, adjust=False).mean()
+                else:
+                    smoothed = air_ext.rolling(n_steps, min_periods=n_steps).mean()
+                air_on_timeline = smoothed.reindex(self.timeline)
+            else:
+                # No usable lead-in (archive start): warn and ramp up over
+                # the first window rather than fabricate prior data.
+                warnings.warn(
+                    f"river {river_name!r} air_regression: no "
+                    f"{smoothing_days}-day lead-in available before "
+                    f"{self.timeline[0]}; smoothing ramps up over the first "
+                    f"window (min_periods=1)",
+                    stacklevel=2,
+                )
+                air_base = air_series.reindex(self.timeline).interpolate(
+                    method="time", limit_direction="both"
+                )
+                if air_base.isna().any():
+                    raise RuntimeError(
+                        f"river {river_name!r}: metforce {var} has NaN on the "
+                        f"requested timeline; refusing to silently fill"
+                    )
+                if smoothing_method == "exponential":
+                    air_on_timeline = air_base.ewm(alpha=alpha, adjust=False).mean()
+                else:
+                    air_on_timeline = air_base.rolling(n_steps, min_periods=1).mean()
+
         if air_on_timeline.isna().any():
             raise RuntimeError(
                 f"river {river_name!r}: metforce {var} has NaN on the "

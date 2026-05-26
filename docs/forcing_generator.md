@@ -327,6 +327,53 @@ Constant entries are rejected if they also carry `source:` (must be
 one or the other) or `scale:` (the value is already in physical
 units), or omit `flux:` (the only mandatory field).
 
+#### River temperature (`temp_source`)
+
+Each entry's water temperature is set by a required `temp_source`
+mapping (schema v3 — a bare `temp:` scalar is rejected for annual
+runs). Two kinds are supported:
+
+- `monthly_climatology`: a 12-element `monthly_means` list (Jan..Dec),
+  broadcast as a month-of-year step function.
+- `air_regression`: `T_water = slope * T_air + intercept`, where
+  `T_air` is read from a metforce NC (`air_nc_template`, `air_var`) at
+  the nearest cell to (`air_lat`, `air_lon`). Optional `min_temp` /
+  `max_temp` clip the result.
+
+`air_regression` accepts two optional keys that smooth the air driver
+so the river responds to an **antecedent** (time-integrated) air
+temperature rather than the instantaneous value — rivers damp the
+diurnal/synoptic air-temperature swings because of their thermal
+inertia:
+
+- `smoothing_days`: width of a trailing (causal) moving average applied
+  to the air series before the regression. A 7-day window is the
+  recommended default (5–10 days depending on river depth).
+- `smoothing_method`: `simple` (default) or `exponential` (an EWMA
+  whose e-folding time equals `smoothing_days`). Only valid together
+  with `smoothing_days`.
+
+```yaml
+rivers:
+  - name: EastArakawa
+    source: ${DATA_DIR}/river/discharge/Arakawa/Iwabuchi/discharge_hourly.nc
+    temp_source:
+      kind: air_regression
+      air_nc_template: ${DATA_DIR}/metforce/fvcom_forcing_{year}.nc
+      air_var: T2
+      air_lat: 35.79
+      air_lon: 139.78
+      slope: 0.8073
+      intercept: 3.9063
+      smoothing_days: 7        # trailing moving average (days)
+      smoothing_method: simple # or: exponential
+```
+
+Absent `smoothing_days`, the regression uses the instantaneous air
+temperature (unchanged behaviour). The methodology and literature
+basis are recorded in the river_dl findings doc
+`docs/water_temperature_observed_2026_05_17.md` (river_dl repo).
+
 ### Companion NML generator (`xfvcom-make-rivers-namelist`)
 
 `xfvcom-make-rivers-namelist` consumes the **same** `--river-map`

@@ -99,6 +99,7 @@ def _resolve_logical_source(name: str, spec: dict[str, Any]) -> Path:
 
 
 _VALID_TEMP_SOURCE_KINDS = {"air_regression", "monthly_climatology"}
+_VALID_SMOOTHING_METHODS = {"simple", "exponential"}
 
 
 def _validate_temp_source(name: str, spec: Any) -> dict[str, Any]:
@@ -145,6 +146,38 @@ def _validate_temp_source(name: str, spec: Any) -> dict[str, Any]:
             out["min_temp"] = float(spec["min_temp"])
         if "max_temp" in spec:
             out["max_temp"] = float(spec["max_temp"])
+        # Optional antecedent-air-temperature smoothing.  Values come
+        # from the YAML map (never hard-coded here); see
+        # docs/directions/20260526_river_temp_antecedent_air_smoothing.md.
+        if "smoothing_days" in spec:
+            try:
+                sd = float(spec["smoothing_days"])
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"river-map entry {name!r}: temp_source.smoothing_days "
+                    f"must be a positive number (got "
+                    f"{spec['smoothing_days']!r})"
+                ) from None
+            if not sd > 0.0:
+                raise ValueError(
+                    f"river-map entry {name!r}: temp_source.smoothing_days "
+                    f"must be > 0 (got {sd!r})"
+                )
+            out["smoothing_days"] = sd
+        if "smoothing_method" in spec:
+            method = str(spec["smoothing_method"])
+            if method not in _VALID_SMOOTHING_METHODS:
+                raise ValueError(
+                    f"river-map entry {name!r}: temp_source.smoothing_method="
+                    f"{method!r} not supported (expected one of "
+                    f"{sorted(_VALID_SMOOTHING_METHODS)})"
+                )
+            if "smoothing_days" not in out:
+                raise ValueError(
+                    f"river-map entry {name!r}: temp_source.smoothing_method "
+                    f"given without smoothing_days; nothing to smooth"
+                )
+            out["smoothing_method"] = method
     elif kind == "monthly_climatology":
         means = spec.get("monthly_means")
         if not isinstance(means, list) or len(means) != 12:
@@ -176,7 +209,14 @@ def _load_river_map(
           (lat, lon).  Required subfields:
           ``air_nc_template``, ``air_var``, ``air_lat``, ``air_lon``,
           ``slope``, ``intercept``.  Optional ``min_temp`` / ``max_temp``
-          clip.
+          clip.  Optional ``smoothing_days`` (a positive number) applies
+          a trailing (causal) moving average to the air series before
+          the regression, so the river temperature responds to an
+          *antecedent* air temperature rather than the instantaneous
+          value (recommended default 7 days; see the river_dl
+          water-temperature findings doc).  Optional ``smoothing_method``
+          selects ``simple`` (default) or ``exponential`` weighting; it
+          is only valid together with ``smoothing_days``.
         - ``monthly_climatology``: T_water taken from a 12-element
           ``monthly_means`` list, broadcast on the time axis as a
           month-of-year step function.

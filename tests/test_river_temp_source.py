@@ -410,3 +410,282 @@ def test_render_river_temp_from_temp_source(tmp_path: Path, tiny_nml: Path) -> N
         temp = ds.variables["river_temp"][:, 0]
         # All January at 42 °C (overrides the river_dl temp_const default).
         np.testing.assert_allclose(temp, 42.0, rtol=1e-4)
+
+
+# ------------------------------------------------------------------
+# 6. air_regression antecedent-air-temperature smoothing
+#    (docs/directions/20260526_river_temp_antecedent_air_smoothing.md)
+# ------------------------------------------------------------------
+def _make_metforce_single_cell(path: Path, *, t2_1d, start: str = "2020-01-01"):
+    """Write a 1-cell metforce NC whose T2 series is ``t2_1d`` (hourly)."""
+    nh = len(t2_1d)
+    hours = pd.date_range(start, periods=nh, freq="1h")
+    lats = np.array([35.0])
+    lons = np.array([139.0])
+    t2: NDArray[np.float32] = np.zeros((nh, 1, 1), dtype=np.float32)
+    t2[:, 0, 0] = np.asarray(t2_1d, dtype=np.float32)
+    _make_metforce_nc(path, hours=hours.to_numpy(), lats=lats, lons=lons, t2_field=t2)
+    return hours
+
+
+def _air_spec(tmp_path: Path, *, slope, intercept, smoothing_days=None, method=None):
+    spec: dict = {
+        "kind": "air_regression",
+        "air_nc_template": str(tmp_path / "fvcom_forcing_{year}.nc"),
+        "air_var": "T2",
+        "air_lat": 35.0,
+        "air_lon": 139.0,
+        "slope": slope,
+        "intercept": intercept,
+    }
+    if smoothing_days is not None:
+        spec["smoothing_days"] = smoothing_days
+    if method is not None:
+        spec["smoothing_method"] = method
+    return spec
+
+
+def _build_gen(tiny_nml, tmp_path, start, end, spec, src_hours):
+    # Unique src filename per spec object: tests that build two generators
+    # must not overwrite a discharge NC still held open by the first one.
+    f_src = tmp_path / f"src_{id(spec):x}.nc"
+    _make_river_dl_nc(
+        f_src,
+        times=src_hours,
+        discharge=np.full(len(src_hours), 10.0, dtype=np.float32),
+    )
+    return RiverNetCDFGenerator(
+        tiny_nml,
+        start,
+        end,
+        3600,
+        river_dl_map={"RA": {"kind": "river_dl", "source": f_src, "temp_source": spec}},
+    )
+
+
+# --- 6a. schema validation of the new optional keys -----------------
+def test_validate_smoothing_days_basic() -> None:
+    spec = {
+        "kind": "air_regression",
+        "air_nc_template": "/tmp/f_{year}.nc",
+        "air_var": "T2",
+        "air_lat": 35.0,
+        "air_lon": 139.0,
+        "slope": 0.8,
+        "intercept": 3.0,
+        "smoothing_days": 7,
+    }
+    out = _validate_temp_source("R", spec)
+    assert out["smoothing_days"] == 7.0
+    assert "smoothing_method" not in out  # method defaulted downstream, not here
+
+
+def test_validate_smoothing_method_exponential() -> None:
+    spec = {
+        "kind": "air_regression",
+        "air_nc_template": "/tmp/f_{year}.nc",
+        "air_var": "T2",
+        "air_lat": 35.0,
+        "air_lon": 139.0,
+        "slope": 0.8,
+        "intercept": 3.0,
+        "smoothing_days": 5.0,
+        "smoothing_method": "exponential",
+    }
+    out = _validate_temp_source("R", spec)
+    assert out["smoothing_method"] == "exponential"
+
+
+@pytest.mark.parametrize("bad", [0, -1, "abc"])
+def test_validate_smoothing_days_invalid(bad) -> None:
+    spec = {
+        "kind": "air_regression",
+        "air_nc_template": "/tmp/f_{year}.nc",
+        "air_var": "T2",
+        "air_lat": 35.0,
+        "air_lon": 139.0,
+        "slope": 0.8,
+        "intercept": 3.0,
+        "smoothing_days": bad,
+    }
+    with pytest.raises(ValueError, match="smoothing_days"):
+        _validate_temp_source("R", spec)
+
+
+def test_validate_smoothing_method_unknown() -> None:
+    spec = {
+        "kind": "air_regression",
+        "air_nc_template": "/tmp/f_{year}.nc",
+        "air_var": "T2",
+        "air_lat": 35.0,
+        "air_lon": 139.0,
+        "slope": 0.8,
+        "intercept": 3.0,
+        "smoothing_days": 7.0,
+        "smoothing_method": "bogus",
+    }
+    with pytest.raises(ValueError, match="smoothing_method"):
+        _validate_temp_source("R", spec)
+
+
+def test_validate_smoothing_method_without_days() -> None:
+    spec = {
+        "kind": "air_regression",
+        "air_nc_template": "/tmp/f_{year}.nc",
+        "air_var": "T2",
+        "air_lat": 35.0,
+        "air_lon": 139.0,
+        "slope": 0.8,
+        "intercept": 3.0,
+        "smoothing_method": "simple",
+    }
+    with pytest.raises(ValueError, match="without smoothing_days"):
+        _validate_temp_source("R", spec)
+
+
+# --- 6b. generator behaviour ----------------------------------------
+def test_smoothing_absent_is_unchanged(tmp_path: Path, tiny_nml: Path) -> None:
+    """No smoothing_days -> identical to the existing same-timestep path."""
+    hours = _make_metforce_single_cell(
+        tmp_path / "fvcom_forcing_2020.nc",
+        t2_1d=np.arange(24, dtype=np.float64),
+    )
+    gen = _build_gen(
+        tiny_nml,
+        tmp_path,
+        "2020-01-01T00:00:00Z",
+        "2020-01-01T23:00:00Z",
+        _air_spec(tmp_path, slope=0.5, intercept=2.0),
+        hours,
+    )
+    arr = gen._evaluate_temp_source("RA", gen._temp_sources["RA"])
+    np.testing.assert_allclose(arr, 0.5 * np.arange(24) + 2.0, rtol=1e-4)
+
+
+def test_smoothing_reduces_variance_preserves_mean(
+    tmp_path: Path, tiny_nml: Path
+) -> None:
+    """A 7-day trailing mean of a pure diurnal sinusoid flattens to the
+    daily mean: variance drops, time-mean is preserved."""
+    nh = 24 * 40
+    hour_of_day: NDArray[np.float64] = np.arange(nh, dtype=np.float64) % 24
+    t2 = 10.0 + 5.0 * np.sin(2 * np.pi * hour_of_day / 24.0)
+    hours = _make_metforce_single_cell(tmp_path / "fvcom_forcing_2020.nc", t2_1d=t2)
+
+    start, end = "2020-01-08T00:00:00Z", "2020-02-07T00:00:00Z"
+    gen_raw = _build_gen(
+        tiny_nml,
+        tmp_path,
+        start,
+        end,
+        _air_spec(tmp_path, slope=1.0, intercept=0.0),
+        hours,
+    )
+    raw = gen_raw._evaluate_temp_source("RA", gen_raw._temp_sources["RA"])
+    gen_s = _build_gen(
+        tiny_nml,
+        tmp_path,
+        start,
+        end,
+        _air_spec(tmp_path, slope=1.0, intercept=0.0, smoothing_days=7.0),
+        hours,
+    )
+    sm = gen_s._evaluate_temp_source("RA", gen_s._temp_sources["RA"])
+
+    assert not np.isnan(sm).any()
+    assert sm.var() < 0.01 * raw.var()  # diurnal swing collapses
+    assert abs(float(sm.mean()) - float(raw.mean())) < 0.02  # mean preserved
+    np.testing.assert_allclose(sm, 10.0, atol=0.05)  # flat at the daily mean
+
+
+def test_smoothing_commutes_with_regression(tmp_path: Path, tiny_nml: Path) -> None:
+    """Smoothing the air input then regressing == regressing then smoothing
+    the output (the model is linear), in the interior where the window is
+    fully populated."""
+    nh = 24 * 40
+    idx: NDArray[np.float64] = np.arange(nh, dtype=np.float64)
+    t2 = 5.0 + 0.05 * idx + 3.0 * np.sin(2 * np.pi * (idx % 24) / 24.0)
+    hours = _make_metforce_single_cell(tmp_path / "fvcom_forcing_2020.nc", t2_1d=t2)
+
+    start, end = "2020-01-08T00:00:00Z", "2020-02-07T00:00:00Z"
+    slope, intercept = 0.8, 3.0
+    raw_spec = _air_spec(tmp_path, slope=slope, intercept=intercept)
+    raw = _build_gen(
+        tiny_nml, tmp_path, start, end, raw_spec, hours
+    )._evaluate_temp_source("RA", raw_spec)
+    sm_spec = _air_spec(tmp_path, slope=slope, intercept=intercept, smoothing_days=5.0)
+    sm = _build_gen(
+        tiny_nml, tmp_path, start, end, sm_spec, hours
+    )._evaluate_temp_source("RA", sm_spec)
+
+    n = 5 * 24
+    rolled = pd.Series(raw).rolling(n, min_periods=n).mean().to_numpy()
+    # Compare only where raw's own trailing window is full.
+    np.testing.assert_allclose(sm[n - 1 :], rolled[n - 1 :], rtol=1e-4, atol=1e-3)
+
+
+def test_smoothing_leadin_full_window(tmp_path: Path, tiny_nml: Path) -> None:
+    """With a lead-in available, the first output point uses a *full*
+    trailing window (not a ramp-up)."""
+    nh = 24 * 40
+    idx: NDArray[np.float64] = np.arange(nh, dtype=np.float64)
+    t2 = 5.0 + 0.1 * idx  # monotone trend so window-mean != instantaneous
+    hours = _make_metforce_single_cell(tmp_path / "fvcom_forcing_2020.nc", t2_1d=t2)
+
+    start, end = "2020-01-08T00:00:00Z", "2020-02-07T00:00:00Z"
+    spec = _air_spec(tmp_path, slope=1.0, intercept=0.0, smoothing_days=7.0)
+    gen = _build_gen(tiny_nml, tmp_path, start, end, spec, hours)
+    sm = gen._evaluate_temp_source("RA", spec)
+
+    n = 7 * 24
+    idx_t0 = 7 * 24  # 2020-01-08 is 7 days (168 h) after the 2020-01-01 start
+    expected0 = float(np.mean(t2[idx_t0 - (n - 1) : idx_t0 + 1]))
+    assert not np.isnan(sm).any()
+    np.testing.assert_allclose(sm[0], expected0, rtol=1e-4)
+    # A ramp-up would have given the instantaneous value t2[idx_t0]; ensure
+    # the full-window mean is clearly different from it.
+    assert abs(expected0 - t2[idx_t0]) > 5.0
+
+
+def test_smoothing_no_leadin_warns_and_ramps(tmp_path: Path, tiny_nml: Path) -> None:
+    """Starting at the archive's first year (no prior NC) warns and ramps
+    up over the first window without producing NaN."""
+    nh = 24 * 40
+    idx: NDArray[np.float64] = np.arange(nh, dtype=np.float64)
+    t2 = 5.0 + 0.1 * idx
+    hours = _make_metforce_single_cell(tmp_path / "fvcom_forcing_2020.nc", t2_1d=t2)
+
+    start, end = "2020-01-01T00:00:00Z", "2020-01-31T00:00:00Z"
+    spec = _air_spec(tmp_path, slope=1.0, intercept=0.0, smoothing_days=7.0)
+    gen = _build_gen(tiny_nml, tmp_path, start, end, spec, hours)
+    with pytest.warns(UserWarning, match="lead-in"):
+        sm = gen._evaluate_temp_source("RA", spec)
+    assert not np.isnan(sm).any()
+    # min_periods=1 -> first point is just the instantaneous value.
+    np.testing.assert_allclose(sm[0], t2[0], rtol=1e-5)
+
+
+def test_smoothing_exponential_runs(tmp_path: Path, tiny_nml: Path) -> None:
+    """The exponential method produces a finite, variance-reduced series."""
+    nh = 24 * 40
+    hour_of_day: NDArray[np.float64] = np.arange(nh, dtype=np.float64) % 24
+    t2 = 10.0 + 5.0 * np.sin(2 * np.pi * hour_of_day / 24.0)
+    hours = _make_metforce_single_cell(tmp_path / "fvcom_forcing_2020.nc", t2_1d=t2)
+
+    start, end = "2020-01-08T00:00:00Z", "2020-02-07T00:00:00Z"
+    raw = _build_gen(
+        tiny_nml,
+        tmp_path,
+        start,
+        end,
+        _air_spec(tmp_path, slope=1.0, intercept=0.0),
+        hours,
+    )._evaluate_temp_source("RA", _air_spec(tmp_path, slope=1.0, intercept=0.0))
+    spec = _air_spec(
+        tmp_path, slope=1.0, intercept=0.0, smoothing_days=5.0, method="exponential"
+    )
+    sm = _build_gen(tiny_nml, tmp_path, start, end, spec, hours)._evaluate_temp_source(
+        "RA", spec
+    )
+    assert not np.isnan(sm).any()
+    assert sm.var() < raw.var()
