@@ -97,6 +97,7 @@ def place_labels(
     pad_px: float = 3.0,
     seed_boxes=None,
     return_boxes: bool = False,
+    marker_pad_px: float = 8.0,
 ):
     """Annotate ``rows`` (each a dict with 'lon','lat') with ``get_label(row)``
     so that label text boxes do not overlap one another or any marker point.
@@ -128,6 +129,11 @@ def place_labels(
     return_boxes : bool
         If True, return the list of placed (x0, y0, x1, y1) boxes instead of
         the placed-count int (feed into a later call's ``seed_boxes``).
+    marker_pad_px : float
+        Minimum clear gap (display pixels) between a marker and its label:
+        added to every candidate offset radius so the label never sits ON
+        the marker. Use a larger value for big markers (e.g. ~14 for the
+        MPOS stars, ~8 for small obs markers).
     """
     import numpy as np  # noqa: F401  (kept for parity with module imports)
 
@@ -189,7 +195,12 @@ def place_labels(
     import math
 
     units = [(math.cos(a), math.sin(a)) for a in [i * math.pi / 8.0 for i in range(16)]]
-    radii = [8.0, 20.0, 34.0, 52.0, 74.0, 100.0, 130.0, 165.0, 205.0]
+    # marker_pad_px shifts the whole candidate ring outward so the nearest
+    # label edge always clears the marker by at least that gap.
+    radii = [
+        marker_pad_px + r
+        for r in (6.0, 18.0, 32.0, 50.0, 72.0, 98.0, 128.0, 163.0, 203.0)
+    ]
     placed = list(seed_boxes) if seed_boxes else []
     new_boxes = []
     n_ok = 0
