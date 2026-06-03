@@ -3,40 +3,60 @@
 from __future__ import annotations
 
 from ._timeseries_utils import get_member_color, get_member_colors
+
 # ------------------------------------------------------------------
 # Re-export core plotting classes / helpers
 # ------------------------------------------------------------------
 from .config import FvcomPlotConfig
 from .core import FvcomPlotter  # ← 追加すると便利
-from .dye_contour import (create_dye_contour_maps, load_dye_time_avg,
-                          plot_dye_contour)
+from .dye_contour import create_dye_contour_maps, load_dye_time_avg, plot_dye_contour
 from .dye_timeseries import plot_dye_timeseries_stacked
-from .freshwater_map import (plot_freshwater_node_map,
-                             source_nodes_from_river_map)
+from .freshwater_map import plot_freshwater_node_map, source_nodes_from_river_map
 from .markers import make_node_marker_post
-from .met_forcing import (MET_VARIABLES, MetVar, plot_met_map_annual,
-                          plot_met_map_monthly, plot_met_station_timeseries,
-                          resolve_var)
+from .met_forcing import (
+    MET_VARIABLES,
+    MetVar,
+    plot_met_map_annual,
+    plot_met_map_monthly,
+    plot_met_station_timeseries,
+    resolve_var,
+)
+
 # Generic figure/panel helpers (fixed plot-box stacks, geo-axis decoration).
-from .panels import (figsize_for_extent, fixed_stack, geoaxes_decorate,
-                     place_labels)
-from .river_forcing import (RiverForcing, aggregate_entities,
-                            classify_outflows, load_river_forcing,
-                            parse_river_scales, plot_river_forcing,
-                            plot_river_forcing_grid, river_annual_summary)
-from .source_contribution import (compute_time_averaged_contribution,
-                                  create_source_contribution_bar_plot,
-                                  create_source_contribution_plot,
-                                  load_dye_timeseries_multi_source,
-                                  plot_source_contribution_bar,
-                                  plot_source_contribution_stack)
-from .source_map import (SOURCE_NODES, SOURCE_TYPES, get_source_coordinates,
-                         load_grid_coordinates, plot_source_map)
-from .timeseries import (apply_smart_time_ticks, plot_ensemble_statistics,
-                         plot_ensemble_timeseries, plot_timeseries,
-                         plot_timeseries_multi)
-from .variable_meta import (VARIABLE_REGISTRY, VariableMeta, get_label,
-                            get_variable_meta)
+from .panels import figsize_for_extent, fixed_stack, geoaxes_decorate, place_labels
+from .river_forcing import (
+    RiverForcing,
+    aggregate_entities,
+    classify_outflows,
+    load_river_forcing,
+    parse_river_scales,
+    plot_river_forcing,
+    plot_river_forcing_grid,
+    river_annual_summary,
+)
+from .source_contribution import (
+    compute_time_averaged_contribution,
+    create_source_contribution_bar_plot,
+    create_source_contribution_plot,
+    load_dye_timeseries_multi_source,
+    plot_source_contribution_bar,
+    plot_source_contribution_stack,
+)
+from .source_map import (
+    SOURCE_NODES,
+    SOURCE_TYPES,
+    get_source_coordinates,
+    load_grid_coordinates,
+    plot_source_map,
+)
+from .timeseries import (
+    apply_smart_time_ticks,
+    plot_ensemble_statistics,
+    plot_ensemble_timeseries,
+    plot_timeseries,
+    plot_timeseries_multi,
+)
+from .variable_meta import VARIABLE_REGISTRY, VariableMeta, get_label, get_variable_meta
 
 # Plotly utilities (optional, only if plotly is installed)
 try:

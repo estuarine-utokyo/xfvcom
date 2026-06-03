@@ -15,6 +15,7 @@ Kept in xfvcom so per-project plotting scripts stay short:
 
 See the common panel spec in the TB-FVCOM memory ``feedback_plot_panel_spec``.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -25,6 +26,7 @@ def fixed_stack(n_panels: int, geom: dict):
     inch plot box with fixed margins. Save with ``savefig(dpi=...)`` and do NOT
     use ``tight_layout`` / ``bbox_inches='tight'`` (they break the fixed box)."""
     import matplotlib.pyplot as plt
+
     aw = float(geom.get("axes_w_in", 12.0))
     ah = float(geom.get("axes_h_in", 1.8))
     L = float(geom.get("left_in", 1.3))
@@ -38,8 +40,7 @@ def fixed_stack(n_panels: int, geom: dict):
     axes = []
     for i in range(n_panels):
         bottom = fig_h - (i + 1) * slab + B
-        axes.append(fig.add_axes([L / fig_w, bottom / fig_h,
-                                  aw / fig_w, ah / fig_h]))
+        axes.append(fig.add_axes([L / fig_w, bottom / fig_h, aw / fig_w, ah / fig_h]))
     return fig, axes
 
 
@@ -49,7 +50,7 @@ def figsize_for_extent(extent, height_in: float = 10.0, max_w: float = 16.0):
     lon0, lon1, lat0, lat1 = extent
     latm = 0.5 * (lat0 + lat1)
     w = (lon1 - lon0) * np.cos(np.radians(latm))
-    h = (lat1 - lat0)
+    h = lat1 - lat0
     aspect = (w / h) if h > 0 else 1.0
     width = min(max_w, height_in * aspect)
     return (width, width / aspect)
@@ -59,11 +60,18 @@ def geoaxes_decorate(ax, extent, data_crs, fs: int = 12, nbins: int = 5):
     """Axis ticks + Longitude/Latitude labels (NO graticule); font ``fs``; map
     frame raised ABOVE filled land (so the border is not hidden)."""
     import matplotlib.ticker as mticker
-    from cartopy.mpl.gridliner import LongitudeFormatter, LatitudeFormatter
-    lon_t = [x for x in mticker.MaxNLocator(nbins).tick_values(extent[0], extent[1])
-             if extent[0] <= x <= extent[1]]
-    lat_t = [y for y in mticker.MaxNLocator(nbins).tick_values(extent[2], extent[3])
-             if extent[2] <= y <= extent[3]]
+    from cartopy.mpl.gridliner import LatitudeFormatter, LongitudeFormatter
+
+    lon_t = [
+        x
+        for x in mticker.MaxNLocator(nbins).tick_values(extent[0], extent[1])
+        if extent[0] <= x <= extent[1]
+    ]
+    lat_t = [
+        y
+        for y in mticker.MaxNLocator(nbins).tick_values(extent[2], extent[3])
+        if extent[2] <= y <= extent[3]
+    ]
     ax.set_xticks(lon_t, crs=data_crs)
     ax.set_yticks(lat_t, crs=data_crs)
     ax.xaxis.set_major_formatter(LongitudeFormatter())
@@ -71,15 +79,25 @@ def geoaxes_decorate(ax, extent, data_crs, fs: int = 12, nbins: int = 5):
     ax.tick_params(axis="both", labelsize=fs, pad=2.0)
     ax.set_xlabel("Longitude", fontsize=fs)
     ax.set_ylabel("Latitude", fontsize=fs)
-    for sp in ax.spines.values():           # frame above land (zorder 4)
+    for sp in ax.spines.values():  # frame above land (zorder 4)
         sp.set_zorder(30)
         sp.set_linewidth(0.8)
 
 
-def place_labels(ax, rows, get_label, data_crs, fontsize: int = 12,
-                 min_sep_px: float = 30.0, avoid_xy=None, leader: bool = True,
-                 overrides=None, pad_px: float = 3.0, seed_boxes=None,
-                 return_boxes: bool = False):
+def place_labels(
+    ax,
+    rows,
+    get_label,
+    data_crs,
+    fontsize: int = 12,
+    min_sep_px: float = 30.0,
+    avoid_xy=None,
+    leader: bool = True,
+    overrides=None,
+    pad_px: float = 3.0,
+    seed_boxes=None,
+    return_boxes: bool = False,
+):
     """Annotate ``rows`` (each a dict with 'lon','lat') with ``get_label(row)``
     so that label text boxes do not overlap one another or any marker point.
 
@@ -114,22 +132,23 @@ def place_labels(ax, rows, get_label, data_crs, fontsize: int = 12,
     import numpy as np  # noqa: F401  (kept for parity with module imports)
 
     fig = ax.figure
-    fig.canvas.draw()                       # finalise transforms + extent
-    p2x = fig.dpi / 72.0                     # points -> pixels
+    fig.canvas.draw()  # finalise transforms + extent
+    p2x = fig.dpi / 72.0  # points -> pixels
     bbox = ax.get_window_extent()
     transform = data_crs._as_mpl_transform(ax)
     overrides = overrides or {}
 
     def to_px(lon, lat):
         return ax.transData.transform(
-            ax.projection.transform_point(lon, lat, src_crs=data_crs))
+            ax.projection.transform_point(lon, lat, src_crs=data_crs)
+        )
 
     avoid = [to_px(r["lon"], r["lat"]) for r in rows]
     if avoid_xy:
         for lon, lat in avoid_xy:
             avoid.append(to_px(lon, lat))
 
-    def sgn(v):                              # quantise a direction component
+    def sgn(v):  # quantise a direction component
         return 1 if v > 0.35 else -1 if v < -0.35 else 0
 
     def box_for(cx, cy, sx, sy, w, h):
@@ -149,15 +168,18 @@ def place_labels(ax, rows, get_label, data_crs, fontsize: int = 12,
 
     def overlaps(b, others, pad):
         for o in others:
-            if (b[0] - pad < o[2] and b[2] + pad > o[0]
-                    and b[1] - pad < o[3] and b[3] + pad > o[1]):
+            if (
+                b[0] - pad < o[2]
+                and b[2] + pad > o[0]
+                and b[1] - pad < o[3]
+                and b[3] + pad > o[1]
+            ):
                 return True
         return False
 
     def hits_marker(b, pad):
         for px, py in avoid:
-            if (b[0] - pad < px < b[2] + pad
-                    and b[1] - pad < py < b[3] + pad):
+            if b[0] - pad < px < b[2] + pad and b[1] - pad < py < b[3] + pad:
                 return True
         return False
 
@@ -165,8 +187,8 @@ def place_labels(ax, rows, get_label, data_crs, fontsize: int = 12,
     # even tight marker clusters get distinct, non-overlapping label slots
     # (labels that land far out are connected by a leader line below).
     import math
-    units = [(math.cos(a), math.sin(a))
-             for a in [i * math.pi / 8.0 for i in range(16)]]
+
+    units = [(math.cos(a), math.sin(a)) for a in [i * math.pi / 8.0 for i in range(16)]]
     radii = [8.0, 20.0, 34.0, 52.0, 74.0, 100.0, 130.0, 165.0, 205.0]
     placed = list(seed_boxes) if seed_boxes else []
     new_boxes = []
@@ -189,13 +211,20 @@ def place_labels(ax, rows, get_label, data_crs, fontsize: int = 12,
         chosen = None
         for ox, oy, sx, sy in cands:
             b = box_for(x_px + ox, y_px + oy, sx, sy, w, h)
-            inside = (b[0] > bbox.x0 + 2 and b[2] < bbox.x1 - 2
-                      and b[1] > bbox.y0 + 2 and b[3] < bbox.y1 - 2)
-            if inside and not overlaps(b, placed, pad_px) \
-                    and not hits_marker(b, pad_px):
+            inside = (
+                b[0] > bbox.x0 + 2
+                and b[2] < bbox.x1 - 2
+                and b[1] > bbox.y0 + 2
+                and b[3] < bbox.y1 - 2
+            )
+            if (
+                inside
+                and not overlaps(b, placed, pad_px)
+                and not hits_marker(b, pad_px)
+            ):
                 chosen = (ox, oy, sx, sy, b)
                 break
-        if chosen is None:                   # last resort: near-NE, accept it
+        if chosen is None:  # last resort: near-NE, accept it
             b = box_for(x_px + 8, y_px + 8, 1, 1, w, h)
             chosen = (8.0, 8.0, 1, 1, b)
 
@@ -206,12 +235,26 @@ def place_labels(ax, rows, get_label, data_crs, fontsize: int = 12,
         va = "bottom" if sy > 0 else "top" if sy < 0 else "center"
         arrow = {}
         if leader and (ox * ox + oy * oy) ** 0.5 > 24.0:
-            arrow = dict(arrowprops=dict(arrowstyle="-", lw=0.5,
-                                         color="0.45", shrinkA=0, shrinkB=2))
-        ax.annotate(text, xy=(r["lon"], r["lat"]), xycoords=transform,
-                    xytext=(ox / p2x, oy / p2x), textcoords="offset points",
-                    fontsize=fontsize, fontweight="bold", color="black",
-                    ha=ha, va=va, zorder=12,
-                    annotation_clip=True, clip_on=True, **arrow)
+            arrow = dict(
+                arrowprops=dict(
+                    arrowstyle="-", lw=0.5, color="0.45", shrinkA=0, shrinkB=2
+                )
+            )
+        ax.annotate(
+            text,
+            xy=(r["lon"], r["lat"]),
+            xycoords=transform,
+            xytext=(ox / p2x, oy / p2x),
+            textcoords="offset points",
+            fontsize=fontsize,
+            fontweight="bold",
+            color="black",
+            ha=ha,
+            va=va,
+            zorder=12,
+            annotation_clip=True,
+            clip_on=True,
+            **arrow,
+        )
         n_ok += 1
     return new_boxes if return_boxes else n_ok
