@@ -77,35 +77,141 @@ def geoaxes_decorate(ax, extent, data_crs, fs: int = 12, nbins: int = 5):
 
 
 def place_labels(ax, rows, get_label, data_crs, fontsize: int = 12,
-                 min_sep_px: float = 30.0):
-    """Annotate ``rows`` (each a dict with 'lon','lat') with ``get_label(row)``,
-    trying 4 cardinal offsets to avoid overlap, biased to keep labels INSIDE
-    the axes; all labels are clipped to the axes so none draws outside."""
-    transform = data_crs._as_mpl_transform(ax)
+                 min_sep_px: float = 30.0, avoid_xy=None, leader: bool = True,
+                 overrides=None, pad_px: float = 3.0, seed_boxes=None,
+                 return_boxes: bool = False):
+    """Annotate ``rows`` (each a dict with 'lon','lat') with ``get_label(row)``
+    so that label text boxes do not overlap one another or any marker point.
+
+    For every row an estimated text bounding box (from line count + longest
+    line at ``fontsize``) is tested against the already-placed boxes and the
+    marker points; the first of many candidate offsets (8 compass directions
+    x several radii) that is free AND inside the axes frame is used. When only
+    a far candidate fits, a thin leader line connects the marker to the label
+    (matplotlib annotate arrowprops) — the project convention for crowded
+    maps. All labels are clipped to the axes so none draws outside the frame.
+
+    Parameters
+    ----------
+    avoid_xy : optional iterable of (lon, lat)
+        Extra marker points (e.g. MPOS stars) that labels must not cover, in
+        addition to every row's own point.
+    leader : bool
+        Draw a leader line for far placements (radius beyond the near ring).
+    overrides : optional dict {label_text: (dx_pt, dy_pt)}
+        A PREFERRED first offset for a specific label (still validated; falls
+        back to the automatic candidates if it would collide). Use for the
+        few labels that need a hand-picked direction.
+    seed_boxes : optional list of (x0, y0, x1, y1) display-pixel boxes
+        Pre-occupied regions (e.g. labels drawn by a PRIOR place_labels call,
+        such as MPOS station names at a larger font) that this call must avoid.
+        Pass the previous call's ``return_boxes=True`` result here so two label
+        layers with different fonts do not collide.
+    return_boxes : bool
+        If True, return the list of placed (x0, y0, x1, y1) boxes instead of
+        the placed-count int (feed into a later call's ``seed_boxes``).
+    """
+    import numpy as np  # noqa: F401  (kept for parity with module imports)
+
+    fig = ax.figure
+    fig.canvas.draw()                       # finalise transforms + extent
+    p2x = fig.dpi / 72.0                     # points -> pixels
     bbox = ax.get_window_extent()
-    placed = []
-    offsets = [(6, 6), (-6, 6), (6, -6), (-6, -6)]
+    transform = data_crs._as_mpl_transform(ax)
+    overrides = overrides or {}
+
+    def to_px(lon, lat):
+        return ax.transData.transform(
+            ax.projection.transform_point(lon, lat, src_crs=data_crs))
+
+    avoid = [to_px(r["lon"], r["lat"]) for r in rows]
+    if avoid_xy:
+        for lon, lat in avoid_xy:
+            avoid.append(to_px(lon, lat))
+
+    def sgn(v):                              # quantise a direction component
+        return 1 if v > 0.35 else -1 if v < -0.35 else 0
+
+    def box_for(cx, cy, sx, sy, w, h):
+        if sx > 0:
+            x0, x1 = cx, cx + w
+        elif sx < 0:
+            x0, x1 = cx - w, cx
+        else:
+            x0, x1 = cx - w / 2, cx + w / 2
+        if sy > 0:
+            y0, y1 = cy, cy + h
+        elif sy < 0:
+            y0, y1 = cy - h, cy
+        else:
+            y0, y1 = cy - h / 2, cy + h / 2
+        return (x0, y0, x1, y1)
+
+    def overlaps(b, others, pad):
+        for o in others:
+            if (b[0] - pad < o[2] and b[2] + pad > o[0]
+                    and b[1] - pad < o[3] and b[3] + pad > o[1]):
+                return True
+        return False
+
+    def hits_marker(b, pad):
+        for px, py in avoid:
+            if (b[0] - pad < px < b[2] + pad
+                    and b[1] - pad < py < b[3] + pad):
+                return True
+        return False
+
+    # 16 compass directions x several radii -> a dense candidate grid so that
+    # even tight marker clusters get distinct, non-overlapping label slots
+    # (labels that land far out are connected by a leader line below).
+    import math
+    units = [(math.cos(a), math.sin(a))
+             for a in [i * math.pi / 8.0 for i in range(16)]]
+    radii = [8.0, 20.0, 34.0, 52.0, 74.0, 100.0, 130.0, 165.0, 205.0]
+    placed = list(seed_boxes) if seed_boxes else []
+    new_boxes = []
     n_ok = 0
     for r in rows:
-        x_px, y_px = ax.transData.transform(
-            ax.projection.transform_point(r["lon"], r["lat"], src_crs=data_crs))
+        text = get_label(r)
+        lines = text.split("\n")
+        w = max((len(ln) for ln in lines), default=1) * fontsize * 0.60 * p2x
+        h = len(lines) * fontsize * 1.30 * p2x
+        x_px, y_px = to_px(r["lon"], r["lat"])
+
+        cands = []
+        if text in overrides:
+            dx_pt, dy_pt = overrides[text]
+            cands.append((dx_pt * p2x, dy_pt * p2x, sgn(dx_pt), sgn(dy_pt)))
+        for rad in radii:
+            for ux, uy in units:
+                cands.append((ux * rad, uy * rad, sgn(ux), sgn(uy)))
+
         chosen = None
-        for ox, oy in offsets:
-            cx, cy = x_px + ox * 6, y_px + oy * 6   # rough label centre
-            inside = (bbox.x0 + 6 < cx < bbox.x1 - 60
-                      and bbox.y0 + 6 < cy < bbox.y1 - 6)
-            far = all((cx - px) ** 2 + (cy - py) ** 2 > min_sep_px ** 2
-                      for px, py in placed)
-            if inside and far:
-                chosen = (ox, oy, cx, cy)
+        for ox, oy, sx, sy in cands:
+            b = box_for(x_px + ox, y_px + oy, sx, sy, w, h)
+            inside = (b[0] > bbox.x0 + 2 and b[2] < bbox.x1 - 2
+                      and b[1] > bbox.y0 + 2 and b[3] < bbox.y1 - 2)
+            if inside and not overlaps(b, placed, pad_px) \
+                    and not hits_marker(b, pad_px):
+                chosen = (ox, oy, sx, sy, b)
                 break
-        if chosen is None:
-            ox, oy = offsets[0]
-            chosen = (ox, oy, x_px + ox * 6, y_px + oy * 6)
-        placed.append((chosen[2], chosen[3]))
-        ax.annotate(get_label(r), xy=(r["lon"], r["lat"]), xycoords=transform,
-                    xytext=(chosen[0], chosen[1]), textcoords="offset points",
+        if chosen is None:                   # last resort: near-NE, accept it
+            b = box_for(x_px + 8, y_px + 8, 1, 1, w, h)
+            chosen = (8.0, 8.0, 1, 1, b)
+
+        ox, oy, sx, sy, b = chosen
+        placed.append(b)
+        new_boxes.append(b)
+        ha = "left" if sx > 0 else "right" if sx < 0 else "center"
+        va = "bottom" if sy > 0 else "top" if sy < 0 else "center"
+        arrow = {}
+        if leader and (ox * ox + oy * oy) ** 0.5 > 24.0:
+            arrow = dict(arrowprops=dict(arrowstyle="-", lw=0.5,
+                                         color="0.45", shrinkA=0, shrinkB=2))
+        ax.annotate(text, xy=(r["lon"], r["lat"]), xycoords=transform,
+                    xytext=(ox / p2x, oy / p2x), textcoords="offset points",
                     fontsize=fontsize, fontweight="bold", color="black",
-                    zorder=12, annotation_clip=True, clip_on=True)
+                    ha=ha, va=va, zorder=12,
+                    annotation_clip=True, clip_on=True, **arrow)
         n_ok += 1
-    return n_ok
+    return new_boxes if return_boxes else n_ok
