@@ -22,6 +22,9 @@ from .met_forcing import (
     resolve_var,
 )
 
+# Panel-grid map of an unstructured node field (consolidated dye-map renderer).
+from .panel_grid import log_contour_levels, plot_field_panels
+
 # Generic figure/panel helpers (fixed plot-box stacks, geo-axis decoration).
 from .panels import figsize_for_extent, fixed_stack, geoaxes_decorate, place_labels
 from .river_forcing import (
