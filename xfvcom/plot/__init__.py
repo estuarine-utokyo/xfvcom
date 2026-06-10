@@ -23,7 +23,11 @@ from .met_forcing import (
 )
 
 # Panel-grid map of an unstructured node field (consolidated dye-map renderer).
-from .panel_grid import log_contour_levels, plot_field_panels
+from .panel_grid import (
+    log_colorbar_ticks,
+    log_contour_levels,
+    plot_field_panels,
+)
 
 # Generic figure/panel helpers (fixed plot-box stacks, geo-axis decoration).
 from .panels import figsize_for_extent, fixed_stack, geoaxes_decorate, place_labels
@@ -130,6 +134,10 @@ __all__: list[str] = [
     "create_dye_contour_maps",
     "load_dye_time_avg",
     "plot_dye_contour",
+    # Panel-grid node-field map (dye source-attribution renderer)
+    "plot_field_panels",
+    "log_contour_levels",
+    "log_colorbar_ticks",
     # Variable metadata
     "VariableMeta",
     "get_variable_meta",

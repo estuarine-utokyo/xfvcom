@@ -29,7 +29,7 @@ from matplotlib.tri import Triangulation
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
-__all__ = ["plot_field_panels", "log_contour_levels"]
+__all__ = ["plot_field_panels", "log_contour_levels", "log_colorbar_ticks"]
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +104,35 @@ def log_contour_levels(vmin: float, vmax: float) -> np.ndarray:
     return np.array(levels)
 
 
+def _fmt_tick(t: float) -> str:
+    return str(int(t)) if t >= 1 else str(t)
+
+
+def log_colorbar_ticks(
+    vmin: float, vmax: float
+) -> tuple[list[float], list[str], list[float]]:
+    """Decade ticks (labeled) + intermediate ticks (unlabeled minor) for a log
+    colorbar.
+
+    Returns ``(major_ticks, major_labels, minor_ticks)``. Only the decade ticks
+    (``..., 0.1, 1, 10, 100, ...``) plus the ``vmin``/``vmax`` endpoints are
+    labeled; the intermediate band ticks (``0.2, 0.5, 2, 5, ...``) are returned
+    separately so callers can draw them as unlabeled minor ticks -- this keeps
+    the band structure visible without colliding tick text (e.g. ``1`` & ``2``,
+    ``100`` & ``200``).
+    """
+    candidates = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
+    in_range = [t for t in candidates if vmin <= t <= vmax]
+    majors = [t for t in in_range if float(np.log10(t)).is_integer()]
+    for end in (vmin, vmax):
+        if end in in_range and end not in majors:
+            majors.append(end)
+    majors = sorted(set(majors))
+    labels = [_fmt_tick(t) for t in majors]
+    minors = [t for t in in_range if t not in majors]
+    return majors, labels, minors
+
+
 def _linear_levels(vmin: float, vmax: float, n: int = 20) -> Any:
     if vmin == 0 and vmax == 20:
         return list(range(0, 21, 1))
@@ -145,6 +174,7 @@ def plot_field_panels(
     figsize: tuple[float, float] | None = None,
     fontsize_label: float = 16,
     fontsize_tick: float = 14,
+    info_fontsize: float = 14,
     marker_size: float = 40,
     dpi: int = 300,
     output: str | Path | None = None,
@@ -170,6 +200,10 @@ def plot_field_panels(
         (xcoast OSM real land overlay), or ``"none"``.
     osm_region
         xcoast preset name or ``(w, s, e, n)`` bbox when ``land="osm"``.
+    info_fontsize
+        Font size of the per-panel info-text box (river name / period /
+        vertical-level lines). Defaults to ``14`` (panel-relative, larger than
+        the axis ticks so the box matches the published maps).
 
     Returns
     -------
@@ -259,6 +293,7 @@ def plot_field_panels(
                 show_y=(col_idx == 0),
                 fontsize_label=fontsize_label,
                 fontsize_tick=fontsize_tick,
+                info_fontsize=info_fontsize,
                 marker_size=marker_size,
                 xlim=xlim,
                 ylim=ylim,
@@ -309,6 +344,7 @@ def _draw_panel(
     show_y: bool,
     fontsize_label: float,
     fontsize_tick: float,
+    info_fontsize: float,
     marker_size: float,
     xlim: tuple[float, float] | None,
     ylim: tuple[float, float] | None,
@@ -370,7 +406,7 @@ def _draw_panel(
             0.02,
             label,
             transform=ax.transAxes,
-            fontsize=12,
+            fontsize=info_fontsize,
             fontweight="bold",
             va="bottom",
             ha="right",
@@ -420,13 +456,12 @@ def _add_row_colorbars(
         cb.set_label(cbar_label, fontsize=fontsize_label)
         cb.ax.tick_params(labelsize=fontsize_tick)
         if log_scale:
-            ticks = [
-                t
-                for t in [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
-                if vmin <= t <= vmax
-            ]
-            cb.set_ticks(ticks)
-            cb.set_ticklabels([str(int(t)) if t >= 1 else str(t) for t in ticks])
+            majors, mlabels, minors = log_colorbar_ticks(vmin, vmax)
+            cb.set_ticks(majors)
+            cb.set_ticklabels(mlabels)
+            if minors:
+                cb.ax.minorticks_on()
+                cb.set_ticks(minors, minor=True)
         elif vmin == 0 and vmax == 100:
             cb.set_ticks([0, 20, 40, 60, 80, 100])
         elif vmin == 0 and vmax == 20:
