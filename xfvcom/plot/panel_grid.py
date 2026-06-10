@@ -419,6 +419,9 @@ def _draw_panel(
         ax.tick_params(labelleft=False)
     ax.tick_params(axis="both", labelsize=fontsize_tick)
     if label:
+        # Bold text, NO background box (matches the published spec). The single
+        # source of truth for the info-text style lives here, so static /
+        # animation / single / multi panels are always identical.
         ax.text(
             0.98,
             0.02,
@@ -429,12 +432,6 @@ def _draw_panel(
             va="bottom",
             ha="right",
             zorder=101,
-            bbox=dict(
-                boxstyle="round,pad=0.2",
-                facecolor="lightgray",
-                edgecolor="none",
-                alpha=0.9,
-            ),
         )
     if xlim:
         ax.set_xlim(xlim)
