@@ -31,6 +31,12 @@ if TYPE_CHECKING:
 
 __all__ = ["plot_field_panels", "log_contour_levels", "log_colorbar_ticks"]
 
+# Per-panel inch size. FIXED across every layout (1, 3, 6, 12 panels ...) so the
+# panel-size : font-size ratio is constant -- the 2x6 grid is the reference and
+# all other panel counts match it. Do not reintroduce a width floor.
+PANEL_W_INCH = 4.0
+PANEL_H_INCH = 6.0
+
 
 # ---------------------------------------------------------------------------
 # mesh-boundary helpers (ported from the legacy dye renderer)
@@ -177,6 +183,8 @@ def plot_field_panels(
     info_fontsize: float = 14,
     marker_size: float = 40,
     dpi: int = 300,
+    boundary_paths: list[list[int]] | None = None,
+    bbox_inches: str | None = "tight",
     output: str | Path | None = None,
 ) -> dict[str, Any]:
     """Render node fields as a 2xN panel grid (one field per panel).
@@ -204,6 +212,14 @@ def plot_field_panels(
         Font size of the per-panel info-text box (river name / period /
         vertical-level lines). Defaults to ``14`` (panel-relative, larger than
         the axis ticks so the box matches the published maps).
+    boundary_paths
+        Precomputed ordered mesh-boundary node paths (as returned internally for
+        ``land="mesh"``). Pass this to skip the O(nele) re-extraction on every
+        call -- e.g. an animation loop that renders one frame per timestep.
+    bbox_inches
+        Forwarded to ``fig.savefig``. Defaults to ``"tight"``; pass ``None`` for
+        a fixed canvas size (required when assembling frames into a video, so
+        every frame has identical pixel dimensions).
 
     Returns
     -------
@@ -221,18 +237,20 @@ def plot_field_panels(
     n_rows = len(layout)
     max_cols = max(layout)
     if figsize is None:
-        figsize = (max(4 * max_cols, 5), 6 * n_rows)
+        figsize = (PANEL_W_INCH * max_cols, PANEL_H_INCH * n_rows)
 
     fig, axes_2d = plt.subplots(n_rows, max_cols, figsize=figsize)
     axes_arr = np.atleast_2d(axes_2d)
     if max_cols == 1 and n_rows > 1:
         axes_arr = axes_arr.reshape(n_rows, 1)
 
-    # land geometry
-    boundary_paths: list[list[int]] = []
-    if land == "mesh":
+    # land geometry (callers may pass precomputed boundary_paths to avoid the
+    # O(nele) re-extraction per frame in an animation loop)
+    if land == "mesh" and boundary_paths is None:
         boundary_paths = _order_boundary_nodes(_extract_boundary_edges(nv0))
         boundary_paths.sort(key=len, reverse=True)
+    elif boundary_paths is None:
+        boundary_paths = []
     osm_mask = None
     if land == "osm":
         import xcoast  # lazy: keep geospatial stack optional
@@ -320,7 +338,7 @@ def plot_field_panels(
     if output is not None:
         out_path = Path(output)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+        fig.savefig(out_path, dpi=dpi, bbox_inches=bbox_inches)
     return {"fig": fig, "axes": axes_arr, "output_path": out_path}
 
 
