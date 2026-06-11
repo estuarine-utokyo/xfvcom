@@ -12,13 +12,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Union
 
-import netCDF4 as nc
 import numpy as np
+
+import netCDF4 as nc
+from xfvcom.grid import FvcomGrid
 
 # Add parent directory to use xfvcom
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from xfvcom.grid import FvcomGrid
 
 
 def create_groundwater_netcdf(
@@ -245,24 +246,24 @@ def create_groundwater_netcdf(
         times_var[:] = times_char
 
         # Create groundwater forcing variables
-        flux_var = ds.createVariable("groundwater_flux", "f4", ("time", "node"))
+        flux_var = ds.createVariable("groundwater_flux", "f8", ("time", "node"))
         flux_var.long_name = "Ground Water Flux"
         flux_var.units = "m s-1"
         flux_var[:] = flux_array
 
-        temp_var = ds.createVariable("groundwater_temp", "f4", ("time", "node"))
+        temp_var = ds.createVariable("groundwater_temp", "f8", ("time", "node"))
         temp_var.long_name = "Ground Water Temperature"
         temp_var.units = "degree C"
         temp_var[:] = temp_array
 
-        salt_var = ds.createVariable("groundwater_salt", "f4", ("time", "node"))
+        salt_var = ds.createVariable("groundwater_salt", "f8", ("time", "node"))
         salt_var.long_name = "Ground Water Salinity"
         salt_var.units = "psu"
         salt_var[:] = salt_array
 
         # Create dye variable if requested
         if dye_value is not None:
-            dye_var = ds.createVariable("groundwater_dye", "f4", ("time", "node"))
+            dye_var = ds.createVariable("groundwater_dye", "f8", ("time", "node"))
             dye_var.long_name = "Ground Water Dye Concentration"
             dye_var.units = "concentration units"
             dye_var[:] = dye_array

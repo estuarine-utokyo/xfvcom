@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import numpy as np
+
+import netCDF4 as nc
+
+
 """
 Add dye concentration to an existing groundwater NetCDF file.
 """
 
-import netCDF4 as nc
-import numpy as np
 
 
 def add_dye_to_groundwater(
@@ -52,7 +55,7 @@ def add_dye_to_groundwater(
         # Create dye variable if it doesn't exist
         if "groundwater_dye" not in ds.variables:
             dye_var = ds.createVariable(
-                "groundwater_dye", "f4", ("node", "time"), zlib=True, complevel=4
+                "groundwater_dye", "f8", ("node", "time"), zlib=True, complevel=4
             )
             dye_var.long_name = "groundwater dye concentration"
             dye_var.units = "tracer units"
@@ -62,7 +65,7 @@ def add_dye_to_groundwater(
             dye_var = ds.variables["groundwater_dye"]
 
         # Initialize with zeros
-        dye_data: np.ndarray = np.zeros((node_dim, time_dim), dtype=np.float32)
+        dye_data: np.ndarray = np.zeros((node_dim, time_dim), dtype=np.float64)
 
         if dye_csv:
             # Read time-varying dye from CSV

@@ -6,10 +6,11 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-import netCDF4 as nc
 import numpy as np
-import pandas as pd
 from numpy.typing import NDArray
+
+import netCDF4 as nc
+import pandas as pd
 
 from ..grid.grid_obj import FvcomGrid
 from .base_generator import BaseGenerator
@@ -338,21 +339,27 @@ class GroundwaterNetCDFGenerator(BaseGenerator):
             # ---------------------------------------------------------
             # Groundwater forcing variables
             # ---------------------------------------------------------
-            v_flux = ds_out.createVariable("groundwater_flux", "f4", ("time", "node"))
+            # Stored as double ("f8"): FVCOM reads these into REAL(SP) (double in
+            # a -DDOUBLE_PRECISION build), and the forcing values are arbitrary
+            # (flux ~1e-7, dye/temp/salt user-set). float32 storage would round a
+            # non-power-of-2 value to ~7 significant digits before FVCOM ever sees
+            # it; f8 keeps the on-disk value exact. (Coordinates/time keep the
+            # f4/i4 FVCOM-forcing convention.) The internal data is already float64.
+            v_flux = ds_out.createVariable("groundwater_flux", "f8", ("time", "node"))
             v_flux.long_name = "Ground Water Flux Velocity"
             v_flux.units = "m s-1"
 
-            v_temp = ds_out.createVariable("groundwater_temp", "f4", ("time", "node"))
+            v_temp = ds_out.createVariable("groundwater_temp", "f8", ("time", "node"))
             v_temp.long_name = "Ground Water Temperature"
             v_temp.units = "degree C"
 
-            v_salt = ds_out.createVariable("groundwater_salt", "f4", ("time", "node"))
+            v_salt = ds_out.createVariable("groundwater_salt", "f8", ("time", "node"))
             v_salt.long_name = "Ground Water Salinity"
             v_salt.units = "psu"
 
             # Optional dye variable
             if dye_array is not None:
-                v_dye = ds_out.createVariable("groundwater_dye", "f4", ("time", "node"))
+                v_dye = ds_out.createVariable("groundwater_dye", "f8", ("time", "node"))
                 v_dye.long_name = "Ground Water Dye Concentration"
                 v_dye.units = "tracer units"
 
