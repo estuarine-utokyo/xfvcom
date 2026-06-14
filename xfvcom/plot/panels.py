@@ -98,6 +98,7 @@ def place_labels(
     seed_boxes=None,
     return_boxes: bool = False,
     marker_pad_px: float = 8.0,
+    return_offsets: bool = False,
 ):
     """Annotate ``rows`` (each a dict with 'lon','lat') with ``get_label(row)``
     so that label text boxes do not overlap one another or any marker point.
@@ -203,6 +204,7 @@ def place_labels(
     ]
     placed = list(seed_boxes) if seed_boxes else []
     new_boxes = []
+    offsets_out = []
     n_ok = 0
     for r in rows:
         text = get_label(r)
@@ -251,6 +253,16 @@ def place_labels(
                     arrowstyle="-", lw=0.5, color="0.45", shrinkA=0, shrinkB=2
                 )
             )
+        # Record the chosen offset (in POINTS) + whether a leader was drawn, so a
+        # caller can freeze the auto layout into a manual table (return_offsets).
+        offsets_out.append(
+            {
+                "label": text,
+                "dx": round(ox / p2x, 1),
+                "dy": round(oy / p2x, 1),
+                "leader": bool(arrow),
+            }
+        )
         ax.annotate(
             text,
             xy=(r["lon"], r["lat"]),
@@ -268,4 +280,6 @@ def place_labels(
             **arrow,
         )
         n_ok += 1
+    if return_offsets:
+        return offsets_out
     return new_boxes if return_boxes else n_ok
