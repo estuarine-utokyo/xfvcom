@@ -6,11 +6,10 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-import numpy as np
-from numpy.typing import NDArray
-
 import netCDF4 as nc
+import numpy as np
 import pandas as pd
+from numpy.typing import NDArray
 
 from ..grid.grid_obj import FvcomGrid
 from .base_generator import BaseGenerator
