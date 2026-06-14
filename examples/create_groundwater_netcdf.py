@@ -12,14 +12,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Union
 
+import netCDF4 as nc
 import numpy as np
 
-import netCDF4 as nc
 from xfvcom.grid import FvcomGrid
 
 # Add parent directory to use xfvcom
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
 
 
 def create_groundwater_netcdf(

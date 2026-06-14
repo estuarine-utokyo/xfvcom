@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import numpy as np
-
 import netCDF4 as nc
-
+import numpy as np
 
 """
 Add dye concentration to an existing groundwater NetCDF file.
 """
-
 
 
 def add_dye_to_groundwater(
