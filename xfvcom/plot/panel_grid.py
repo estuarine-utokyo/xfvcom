@@ -185,6 +185,9 @@ def plot_field_panels(
     dpi: int = 300,
     boundary_paths: list[list[int]] | None = None,
     bbox_inches: str | None = "tight",
+    n_levels: int | None = None,
+    cbar_ticks: Any = None,
+    cbar_ticklabels: Any = None,
     output: str | Path | None = None,
 ) -> dict[str, Any]:
     """Render node fields as a 2xN panel grid (one field per panel).
@@ -216,6 +219,16 @@ def plot_field_panels(
         Precomputed ordered mesh-boundary node paths (as returned internally for
         ``land="mesh"``). Pass this to skip the O(nele) re-extraction on every
         call -- e.g. an animation loop that renders one frame per timestep.
+    n_levels
+        Linear mode only: number of evenly spaced contour levels between
+        ``vmin`` and ``vmax``. Use a large value (e.g. 41) for a smooth,
+        near-continuous gradient instead of the default coarse bands. Ignored in
+        log mode. Default ``None`` keeps the original linear levels.
+    cbar_ticks, cbar_ticklabels
+        Caller-supplied colorbar tick positions (in data units) and optional
+        labels, overriding the automatic ticks. Useful for a diverging field
+        plotted in a transformed unit whose colorbar should read in the original
+        unit (e.g. a log2 ratio field labelled with the actual ratio values).
     bbox_inches
         Forwarded to ``fig.savefig``. Defaults to ``"tight"``; pass ``None`` for
         a fixed canvas size (required when assembling frames into a video, so
@@ -274,7 +287,13 @@ def plot_field_panels(
         extend = "both"
         tcf_kw: dict[str, Any] = {"levels": levels, "cmap": cmap_obj, "norm": norm}
     else:
-        levels = _linear_levels(vmin, vmax)
+        # n_levels (when set) gives a fine, near-continuous gradient instead of
+        # the default coarse linear bands (caller request for smooth shading).
+        levels = (
+            list(np.linspace(vmin, vmax, n_levels))
+            if n_levels
+            else _linear_levels(vmin, vmax)
+        )
         norm = Normalize(vmin=vmin, vmax=vmax)
         cmap_obj = plt.get_cmap(cmap)
         extend = "max" if vmin == 0 else "both"
@@ -332,6 +351,8 @@ def plot_field_panels(
         log_scale,
         fontsize_label,
         fontsize_tick,
+        cbar_ticks=cbar_ticks,
+        cbar_ticklabels=cbar_ticklabels,
     )
 
     out_path = None
@@ -454,6 +475,8 @@ def _add_row_colorbars(
     log_scale: bool,
     fontsize_label: float,
     fontsize_tick: float,
+    cbar_ticks: Any = None,
+    cbar_ticklabels: Any = None,
 ) -> None:
     fig_w = fig.get_size_inches()[0]
     fig.tight_layout(rect=(0, 0, 1 - 1.0 / fig_w, 1))
@@ -470,7 +493,11 @@ def _add_row_colorbars(
         cb = fig.colorbar(sm, cax=cax, extend=extend)
         cb.set_label(cbar_label, fontsize=fontsize_label)
         cb.ax.tick_params(labelsize=fontsize_tick)
-        if log_scale:
+        if cbar_ticks is not None:  # caller-supplied ticks (e.g. ratio values)
+            cb.set_ticks(list(cbar_ticks))
+            if cbar_ticklabels is not None:
+                cb.set_ticklabels(list(cbar_ticklabels))
+        elif log_scale:
             majors, mlabels, minors = log_colorbar_ticks(vmin, vmax)
             cb.set_ticks(majors)
             cb.set_ticklabels(mlabels)
