@@ -36,6 +36,12 @@ __all__ = ["plot_field_panels", "log_contour_levels", "log_colorbar_ticks"]
 # all other panel counts match it. Do not reintroduce a width floor.
 PANEL_W_INCH = 4.0
 PANEL_H_INCH = 6.0
+# Inches reserved on the right for the per-row colorbar (cax + gap + tick/label
+# text). ADDED to the figure width rather than carved out of the panels, so each
+# panel keeps its full PANEL_W_INCH for ANY panel count -- otherwise a 1-panel
+# figure loses ~25% of its width to the colorbar and its fixed fonts then look
+# oversized (the panel-size:font-size ratio must stay constant across layouts).
+CBAR_RESERVE_INCH = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +256,7 @@ def plot_field_panels(
     n_rows = len(layout)
     max_cols = max(layout)
     if figsize is None:
-        figsize = (PANEL_W_INCH * max_cols, PANEL_H_INCH * n_rows)
+        figsize = (PANEL_W_INCH * max_cols + CBAR_RESERVE_INCH, PANEL_H_INCH * n_rows)
 
     fig, axes_2d = plt.subplots(n_rows, max_cols, figsize=figsize)
     axes_arr = np.atleast_2d(axes_2d)
@@ -479,7 +485,9 @@ def _add_row_colorbars(
     cbar_ticklabels: Any = None,
 ) -> None:
     fig_w = fig.get_size_inches()[0]
-    fig.tight_layout(rect=(0, 0, 1 - 1.0 / fig_w, 1))
+    # Carve out exactly the ADDED colorbar reserve, so the panels keep their full
+    # PANEL_W_INCH each (constant panel:font ratio for any panel count).
+    fig.tight_layout(rect=(0, 0, 1 - CBAR_RESERVE_INCH / fig_w, 1))
     fig.canvas.draw()
     gap, width = 0.15 / fig_w, 0.18 / fig_w
     sm = ScalarMappable(norm=norm, cmap=cmap_obj)
