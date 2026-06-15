@@ -11,6 +11,9 @@ from .config import FvcomPlotConfig
 from .core import FvcomPlotter  # ← 追加すると便利
 from .dye_contour import create_dye_contour_maps, load_dye_time_avg, plot_dye_contour
 from .dye_timeseries import plot_dye_timeseries_stacked
+
+# Frame-by-frame animation of panel-grid maps (shared dye / ERSEM animator).
+from .field_animation import animate_field_panels
 from .freshwater_map import plot_freshwater_node_map, source_nodes_from_river_map
 from .markers import make_node_marker_post
 from .met_forcing import (
@@ -138,6 +141,7 @@ __all__: list[str] = [
     "plot_field_panels",
     "log_contour_levels",
     "log_colorbar_ticks",
+    "animate_field_panels",
     # Variable metadata
     "VariableMeta",
     "get_variable_meta",
