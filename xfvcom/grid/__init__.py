@@ -113,6 +113,35 @@ else:
         )
 
 
+# FVCOM sigma-z (GTSZ) vertical-coordinate generation (no lazy loading needed)
+from .gtsz import (
+    GtszCoordinate,
+    GtszSpec,
+    base_sigma,
+    build_column_base,
+    build_column_sadapt,
+    build_coordinate,
+    compute_kbp,
+    sband_reshape,
+)
+from .gtsz_builder import (
+    MeshInputs,
+    active_zlev_count,
+    auto_kb,
+    build_gtsz,
+    grassfire_href,
+    load_mesh,
+    suggest_zlev,
+)
+from .gtsz_diagnostics import (
+    coordinate_summary,
+    linear_density,
+    offline_sigma_pge,
+    plot_maps,
+    plot_transect,
+    rx0,
+)
+
 # Import interpolation functions directly (no lazy loading needed)
 from .interpolation import elems2nodes, nodes2elems
 from .sigma import sigma_from_z, vertical_interp, z_from_sigma
@@ -128,4 +157,26 @@ __all__ = [
     "sigma_from_z",
     "vertical_interp",
     "z_from_sigma",
+    # sigma-z (GTSZ)
+    "GtszSpec",
+    "GtszCoordinate",
+    "base_sigma",
+    "sband_reshape",
+    "build_column_base",
+    "build_column_sadapt",
+    "build_coordinate",
+    "compute_kbp",
+    "MeshInputs",
+    "load_mesh",
+    "grassfire_href",
+    "build_gtsz",
+    "active_zlev_count",
+    "auto_kb",
+    "suggest_zlev",
+    "rx0",
+    "coordinate_summary",
+    "offline_sigma_pge",
+    "linear_density",
+    "plot_transect",
+    "plot_maps",
 ]

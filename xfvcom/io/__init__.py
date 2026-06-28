@@ -113,3 +113,22 @@ from .mpos import MposLoader, MposStationConfig  # noqa: F401
 
 __all__.append("MposLoader")
 __all__.append("MposStationConfig")
+
+# ---------------------------------------------------------------------
+# FVCOM ascii vertical-coordinate / bathymetry I/O (sigma-z grid tool)
+# ---------------------------------------------------------------------
+from .dep_reader import DepData, read_dep, write_dep  # noqa: F401
+from .sigma_dat import (  # noqa: F401
+    SigmaFile,
+    gtsz_to_lines,
+    read_sigma_dat,
+    write_sigma_dat,
+)
+
+__all__.append("DepData")
+__all__.append("read_dep")
+__all__.append("write_dep")
+__all__.append("SigmaFile")
+__all__.append("read_sigma_dat")
+__all__.append("write_sigma_dat")
+__all__.append("gtsz_to_lines")
