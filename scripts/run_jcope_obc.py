@@ -30,12 +30,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from xfvcom.grid.grid_obj import FvcomGrid
-from xfvcom.io import (
-    JcopeGrid,
-    JcopeObcGenerator,
-    write_elevation_nc,
-    write_tsobc_nc,
-)
+from xfvcom.io import JcopeGrid, JcopeObcGenerator, write_elevation_nc, write_tsobc_nc
 
 
 def parse_year_spec(spec: str) -> list[int]:
@@ -145,6 +140,15 @@ def main() -> int:
         default=30,
         help="number of FVCOM sigma layers (uniform, default 30)",
     )
+    parser.add_argument(
+        "--sigma-dat",
+        type=Path,
+        default=None,
+        help="SADAPT / sigma-z sigma.dat. When given, build a PER-NODE OBC "
+        "vertical coordinate from it (overrides --n-siglay) so the OBC lands on "
+        "the model's actual sigma-z layer depths. Requires --fvcom-grid + "
+        "--fvcom-dep to match the grid the sigma.dat was built for.",
+    )
     parser.add_argument("--tag", default="jcope", help="filename tag (default: jcope)")
     year_group = parser.add_mutually_exclusive_group(required=True)
     year_group.add_argument(
@@ -217,6 +221,40 @@ def main() -> int:
     obc_lon = np.asarray(mesh.lon)[idx0]
     obc_h_fvcom = h_all[idx0]
 
+    # ---- optional SADAPT / sigma-z per-node vertical coordinate ----
+    # Without --sigma-dat the OBC uses the uniform --n-siglay grid (default).
+    # With it, build the FVCOM sigma-z coordinate from the SADAPT sigma.dat and
+    # take each OBC node's actual layer depths (coord.Z) so the OBC values land on
+    # the model's per-node sigma-z column (FVCOM does NO vertical re-interpolation
+    # of the OBC file). The grid/dep MUST be the ones the sigma.dat was built for.
+    siglay_per_node = None
+    siglev_per_node = None
+    if args.sigma_dat is not None:
+        from xfvcom.grid.gtsz_builder import build_gtsz, load_mesh
+        from xfvcom.io import read_sigma_dat
+
+        sf = read_sigma_dat(args.sigma_dat)
+        if sf.gtsz is None:
+            sys.exit(
+                f"--sigma-dat {args.sigma_dat} is not a SIGMAZ file "
+                f"(SIGMA COORDINATE TYPE = {sf.stype}); use --n-siglay for uniform σ"
+            )
+        gmesh = load_mesh(args.fvcom_grid, args.fvcom_dep)
+        if gmesh.h.shape[0] != n_nodes:
+            sys.exit(f"--sigma-dat mesh has {gmesh.h.shape[0]} nodes != grid {n_nodes}")
+        coord = build_gtsz(gmesh, sf.gtsz)
+        z_obc = np.asarray(coord.Z, dtype=np.float64)[idx0]  # (n_obc, KB) siglev
+        siglev_per_node = z_obc.T  # (KB, n_obc)
+        siglay_per_node = 0.5 * (
+            siglev_per_node[:-1] + siglev_per_node[1:]
+        )  # (KBM1, n_obc)
+        print(
+            f"[sigma-z] SADAPT per-node OBC coordinate from {args.sigma_dat.name}: "
+            f"KB={sf.gtsz.kb} KBM1={siglay_per_node.shape[0]} "
+            f"(uniform --n-siglay={args.n_siglay} IGNORED); "
+            f"KBP range {int(coord.kbp[idx0].min())}-{int(coord.kbp[idx0].max())}"
+        )
+
     print(f"[jcope] opening basic.nc at {args.basic_nc}")
     grid = JcopeGrid(args.basic_nc)
     print(
@@ -242,6 +280,8 @@ def main() -> int:
             obc_lon=obc_lon,
             obc_h_fvcom=obc_h_fvcom,
             n_siglay=args.n_siglay,
+            siglay_per_node=siglay_per_node,
+            siglev_per_node=siglev_per_node,
         )
         if siglev is None:
             siglev = gen.siglev

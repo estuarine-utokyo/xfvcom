@@ -419,3 +419,170 @@ class TestMultiYearAssembly:
                 assert ds["elevation"].shape == (7, 3)
         finally:
             grid.close()
+
+
+# ---------------------------------------------------------------------------
+# Per-node vertical coordinate (sigma-z / SADAPT)
+# ---------------------------------------------------------------------------
+
+
+class TestPerNodeSigmaZ:
+    """The siglay_per_node / siglev_per_node path used for a sigma-z grid,
+    where the vertical coordinate varies node to node (and the active-layer
+    count differs per node). The OBC values must land on each node's own
+    layer depths, since FVCOM does no vertical re-interpolation of the OBC."""
+
+    def _make(self, basic_path, region_path, *, siglay_pn, siglev_pn):
+        grid = JcopeGrid(basic_path)
+        obc_nodes = [101, 102, 103]
+        lats = [LAT_ORIGIN + 3 * DY] * 3
+        lons = [LON_ORIGIN + 6 * DX, LON_ORIGIN + 8 * DX, LON_ORIGIN + 5 * DX]
+        obc_h_fvcom = np.array([100.0, 200.0, 60.0], dtype=np.float32)
+        gen = JcopeObcGenerator(
+            grid=grid,
+            region_nc=region_path,
+            obc_nodes=obc_nodes,
+            obc_lat=lats,
+            obc_lon=lons,
+            obc_h_fvcom=obc_h_fvcom,
+            siglay_per_node=siglay_pn,
+            siglev_per_node=siglev_pn,
+        )
+        return grid, gen
+
+    @staticmethod
+    def _uniform_pn(n_siglay, n_obc):
+        sv = -np.arange(n_siglay + 1, dtype=np.float64) / n_siglay
+        sl = -(np.arange(n_siglay, dtype=np.float64) + 0.5) / n_siglay
+        return (
+            np.broadcast_to(sl[:, None], (n_siglay, n_obc)).copy(),
+            np.broadcast_to(sv[:, None], (n_siglay + 1, n_obc)).copy(),
+        )
+
+    def test_uniform_broadcast_matches_1d_path(self, synthetic_archive):
+        """Feeding the per-node path a broadcast of the SAME uniform σ must
+        reproduce the 1-D uniform result bit-for-bit (the 2-D code is a strict
+        generalisation)."""
+        basic_path, region_path = synthetic_archive
+        n_obc = 3
+        sl_pn, sv_pn = self._uniform_pn(10, n_obc)
+
+        grid_u = JcopeGrid(basic_path)
+        try:
+            uni = JcopeObcGenerator(
+                grid=grid_u,
+                region_nc=region_path,
+                obc_nodes=[101, 102, 103],
+                obc_lat=[LAT_ORIGIN + 3 * DY] * 3,
+                obc_lon=[LON_ORIGIN + 6 * DX, LON_ORIGIN + 8 * DX, LON_ORIGIN + 5 * DX],
+                obc_h_fvcom=np.array([100.0, 200.0, 60.0], dtype=np.float32),
+                n_siglay=10,
+            )
+            uni_fields = uni.build_tsobc_arrays()
+            uni.close()
+        finally:
+            grid_u.close()
+
+        grid, gen = self._make(
+            basic_path, region_path, siglay_pn=sl_pn, siglev_pn=sv_pn
+        )
+        try:
+            assert gen.siglay.shape == (10, n_obc)
+            assert gen.siglev.shape == (11, n_obc)
+            pn_fields = gen.build_tsobc_arrays()
+        finally:
+            gen.close()
+            grid.close()
+
+        for v in ("temp", "salt"):
+            np.testing.assert_allclose(pn_fields[v], uni_fields[v], rtol=0, atol=0)
+
+    def test_per_node_profiles_use_own_column(self, synthetic_archive, tmp_path):
+        """Distinct per-node σ → distinct stored siglay/siglev and the linear
+        source is sampled on each node's own depths."""
+        basic_path, region_path = synthetic_archive
+        n_obc = 3
+        # Node 0: uniform 8; node 1: surface-clustered; node 2: bottom-clustered.
+        sv = np.empty((9, n_obc))
+        sv[:, 0] = -np.arange(9) / 8.0
+        sv[:, 1] = -((np.arange(9) / 8.0) ** 2)  # fine near surface
+        sv[:, 2] = -(1.0 - (1.0 - np.arange(9) / 8.0) ** 2)  # fine near bed
+        sl = 0.5 * (sv[:-1] + sv[1:])
+
+        grid, gen = self._make(basic_path, region_path, siglay_pn=sl, siglev_pn=sv)
+        try:
+            out = tmp_path / "tsobc_sz.nc"
+            gen.write_tsobc(out, variables=["temp"])
+        finally:
+            gen.close()
+            grid.close()
+
+        with nc.Dataset(out) as ds:
+            assert ds.dimensions["siglay"].size == 8
+            assert ds.dimensions["siglev"].size == 9
+            sv_w = ds["siglev"][:]
+            sl_w = ds["siglay"][:]
+            assert sv_w.shape == (9, n_obc) and sl_w.shape == (8, n_obc)
+            # per-node (NOT broadcast): the three columns differ
+            assert not np.allclose(sv_w[:, 0], sv_w[:, 1])
+            assert not np.allclose(sv_w[:, 1], sv_w[:, 2])
+            np.testing.assert_allclose(sv_w, sv.astype(np.float32), atol=1e-5)
+            T = ds["obc_temp"][:]
+            assert np.isfinite(T).all()
+            # source decreases with depth → every node's profile non-increasing
+            assert np.all(np.diff(T[0], axis=0) <= 1e-5)
+
+    def test_mismatched_shapes_raise(self, synthetic_archive):
+        basic_path, region_path = synthetic_archive
+        grid = JcopeGrid(basic_path)
+        try:
+            sl_pn, sv_pn = self._uniform_pn(10, 3)
+            # siglev must be siglay + 1 row
+            with pytest.raises(ValueError, match="siglev rows"):
+                JcopeObcGenerator(
+                    grid=grid,
+                    region_nc=region_path,
+                    obc_nodes=[101, 102, 103],
+                    obc_lat=[LAT_ORIGIN + 3 * DY] * 3,
+                    obc_lon=[
+                        LON_ORIGIN + 6 * DX,
+                        LON_ORIGIN + 8 * DX,
+                        LON_ORIGIN + 5 * DX,
+                    ],
+                    obc_h_fvcom=np.array([100.0, 200.0, 60.0], dtype=np.float32),
+                    siglay_per_node=sl_pn,
+                    siglev_per_node=sl_pn,  # wrong: same rows
+                )
+            # wrong n_obc
+            with pytest.raises(ValueError, match="second dim must be n_obc"):
+                JcopeObcGenerator(
+                    grid=grid,
+                    region_nc=region_path,
+                    obc_nodes=[101, 102, 103],
+                    obc_lat=[LAT_ORIGIN + 3 * DY] * 3,
+                    obc_lon=[
+                        LON_ORIGIN + 6 * DX,
+                        LON_ORIGIN + 8 * DX,
+                        LON_ORIGIN + 5 * DX,
+                    ],
+                    obc_h_fvcom=np.array([100.0, 200.0, 60.0], dtype=np.float32),
+                    siglay_per_node=sl_pn[:, :2],
+                    siglev_per_node=sv_pn[:, :2],
+                )
+            # only one of the pair given
+            with pytest.raises(ValueError, match="must be given together"):
+                JcopeObcGenerator(
+                    grid=grid,
+                    region_nc=region_path,
+                    obc_nodes=[101, 102, 103],
+                    obc_lat=[LAT_ORIGIN + 3 * DY] * 3,
+                    obc_lon=[
+                        LON_ORIGIN + 6 * DX,
+                        LON_ORIGIN + 8 * DX,
+                        LON_ORIGIN + 5 * DX,
+                    ],
+                    obc_h_fvcom=np.array([100.0, 200.0, 60.0], dtype=np.float32),
+                    siglay_per_node=sl_pn,
+                )
+        finally:
+            grid.close()

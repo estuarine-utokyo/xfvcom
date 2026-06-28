@@ -84,7 +84,21 @@ class JcopeObcGenerator:
         internal z-coordinate.
     n_siglay
         Number of FVCOM σ-layers (uniform spacing). Default 30 matches
-        the current TB-FVCOM baseline.
+        the current TB-FVCOM baseline. Ignored when ``siglay_per_node`` /
+        ``siglev_per_node`` are given.
+    siglay_per_node, siglev_per_node
+        Optional per-node vertical coordinate for a **sigma-z / SADAPT** grid:
+        ``siglay_per_node`` is ``(n_siglay, n_obc)`` and ``siglev_per_node``
+        ``(n_siglay + 1, n_obc)``, both negative (0 surface → −1 bed). When
+        given they override the uniform σ above so the JCOPE field is
+        interpolated onto each OBC node's ACTUAL layer depths. Required for a
+        sigma-z run: FVCOM's OBC T/S nudging copies the file's
+        ``temp(time, siglay, nobc)`` straight into model layer ``K`` with no
+        vertical re-interpolation (``mod_force.F::UPDATE_OBC_TEMP``), so the
+        file must already be on the model's per-node coordinate. Build these
+        from the SADAPT ``sigma.dat`` via :func:`xfvcom.io.read_sigma_dat` +
+        :func:`xfvcom.grid.gtsz_builder.build_gtsz` (``coord.Z`` at the OBC
+        nodes = per-node siglev; layer midpoints = siglay).
 
     Notes
     -----
@@ -104,6 +118,8 @@ class JcopeObcGenerator:
         obc_lon: ArrayLike,
         obc_h_fvcom: ArrayLike,
         n_siglay: int = 30,
+        siglay_per_node: ArrayLike | None = None,
+        siglev_per_node: ArrayLike | None = None,
     ) -> None:
         self.grid = grid
         self.region_nc_path = Path(region_nc).expanduser().resolve()
@@ -127,18 +143,55 @@ class JcopeObcGenerator:
             )
         self.n_obc = n_obc
 
-        if n_siglay < 2:
-            raise ValueError(f"n_siglay must be ≥ 2 (got {n_siglay})")
-        self.n_siglay = int(n_siglay)
-        self.n_siglev = self.n_siglay + 1
+        if siglay_per_node is not None or siglev_per_node is not None:
+            # Per-node vertical coordinate (a SADAPT / sigma-z grid where the
+            # sigma-layer depths vary node to node). siglay_per_node is
+            # (n_siglay, n_obc), siglev_per_node (n_siglev, n_obc); both negative,
+            # 0 at the surface to -1 at the bed. These are used directly as the
+            # FVCOM target z = sigma * h per OBC node, so the OBC values land on
+            # the model's ACTUAL layer depths. (Uniform sigma * h is WRONG for a
+            # sigma-z grid, whose deep z-levels sit at fixed absolute depths and
+            # whose active-layer count varies per node — see the design doc
+            # docs/sigmaz_estuary_circulation_design.md §9.) FVCOM's OBC T/S
+            # nudging reads the file's temp(time, siglay, nobc) DIRECTLY into the
+            # model layer K (mod_force.F::UPDATE_OBC_TEMP does time interpolation
+            # only, no vertical re-interpolation), so the file must already be on
+            # the model coordinate.
+            if siglay_per_node is None or siglev_per_node is None:
+                raise ValueError(
+                    "siglay_per_node and siglev_per_node must be given together"
+                )
+            sl = np.asarray(siglay_per_node, dtype=np.float64)
+            sv = np.asarray(siglev_per_node, dtype=np.float64)
+            if sl.ndim != 2 or sv.ndim != 2:
+                raise ValueError("per-node siglay/siglev must be 2-D (n_sig, n_obc)")
+            if sl.shape[1] != n_obc or sv.shape[1] != n_obc:
+                raise ValueError(
+                    f"per-node siglay/siglev second dim must be n_obc={n_obc} "
+                    f"(got {sl.shape[1]}, {sv.shape[1]})"
+                )
+            if sv.shape[0] != sl.shape[0] + 1:
+                raise ValueError(
+                    f"siglev rows ({sv.shape[0]}) must be siglay rows "
+                    f"({sl.shape[0]}) + 1"
+                )
+            if sl.shape[0] < 1:
+                raise ValueError(f"n_siglay must be ≥ 1 (got {sl.shape[0]})")
+            self.n_siglay = int(sl.shape[0])
+            self.n_siglev = int(sv.shape[0])
+            self.siglay: NDArray[np.float64] = sl
+            self.siglev: NDArray[np.float64] = sv
+        else:
+            if n_siglay < 2:
+                raise ValueError(f"n_siglay must be ≥ 2 (got {n_siglay})")
+            self.n_siglay = int(n_siglay)
+            self.n_siglev = self.n_siglay + 1
 
-        # FVCOM uniform σ
-        self.siglev: NDArray[np.float64] = (
-            -np.arange(self.n_siglev, dtype=np.float64) / self.n_siglay
-        )
-        self.siglay: NDArray[np.float64] = (
-            -(np.arange(self.n_siglay, dtype=np.float64) + 0.5) / self.n_siglay
-        )
+            # FVCOM uniform σ
+            self.siglev = -np.arange(self.n_siglev, dtype=np.float64) / self.n_siglay
+            self.siglay = (
+                -(np.arange(self.n_siglay, dtype=np.float64) + 0.5) / self.n_siglay
+            )
 
         # Authoritative JCOPE depth and σ at the nearest ocean cell of each
         # OBC node. Both reads use basic.nc's mask, so they are consistent.
@@ -278,8 +331,13 @@ class JcopeObcGenerator:
             )
         out = np.empty((n_time, self.n_siglay, n_obc), dtype=np.float32)
         # FVCOM z columns are static (η=0 assumption) — precompute once.
-        # siglay is negative, h_fvcom positive, so z is negative.
-        z_fvcom = (self.siglay[:, None] * h_fvcom[None, :]).astype(np.float64)
+        # siglay is negative, h_fvcom positive, so z is negative. siglay is
+        # (n_siglay,) for a uniform grid or (n_siglay, n_obc) for a per-node
+        # (sigma-z) grid.
+        if self.siglay.ndim == 2:
+            z_fvcom = (self.siglay * h_fvcom[None, :]).astype(np.float64)
+        else:
+            z_fvcom = (self.siglay[:, None] * h_fvcom[None, :]).astype(np.float64)
         # JCOPE z columns are also static (per OBC node).
         z_jcope = self.obc_z_jcope.astype(np.float64)  # (n_obc, n_level)
 
@@ -395,8 +453,13 @@ def write_tsobc_nc(
     """
     n_time = int(time_mjd.size)
     n_obc = int(obc_nodes.size)
-    n_siglay = int(siglay.size)
-    n_siglev = int(siglev.size)
+    # siglay/siglev may be 1-D (uniform, broadcast across nodes) or 2-D
+    # (n_sig, n_obc) for a per-node sigma-z grid — take the layer count from
+    # the leading axis either way.
+    siglay_arr = np.asarray(siglay)
+    siglev_arr = np.asarray(siglev)
+    n_siglay = int(siglay_arr.shape[0])
+    n_siglev = int(siglev_arr.shape[0])
     for v, arr in fields.items():
         if v not in _TSOBC_VAR_MAP:
             raise ValueError(
@@ -438,15 +501,19 @@ def write_tsobc_nc(
         v_siglev = ds.createVariable("siglev", "f4", ("siglev", "nobc"))
         v_siglev.long_name = "ocean_sigma/general_coordinate"
         v_siglev.units = "-"
-        v_siglev[:] = np.broadcast_to(
-            np.asarray(siglev)[:, None], (n_siglev, n_obc)
+        v_siglev[:] = (
+            siglev_arr
+            if siglev_arr.ndim == 2
+            else np.broadcast_to(siglev_arr[:, None], (n_siglev, n_obc))
         ).astype(np.float32)
 
         v_siglay = ds.createVariable("siglay", "f4", ("siglay", "nobc"))
         v_siglay.long_name = "ocean_sigma/general_coordinate"
         v_siglay.units = "-"
-        v_siglay[:] = np.broadcast_to(
-            np.asarray(siglay)[:, None], (n_siglay, n_obc)
+        v_siglay[:] = (
+            siglay_arr
+            if siglay_arr.ndim == 2
+            else np.broadcast_to(siglay_arr[:, None], (n_siglay, n_obc))
         ).astype(np.float32)
 
         for v, arr in fields.items():
