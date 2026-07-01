@@ -350,9 +350,37 @@ class JcopeObcGenerator:
 
     # ---------- array builders ---------- #
 
+    def read_raw_profiles(
+        self,
+        variables: Iterable[str] = ("temp", "salt"),
+    ) -> dict[str, NDArray[np.float32]]:
+        """Extract the raw JCOPE profiles at the OBC cells — the EXPENSIVE step.
+
+        Returns ``{var: (n_time, N_JCOPE_ACTIVE_LEVELS, n_obc)}`` straight from
+        the region archive, BEFORE any vertical interpolation. These depend only
+        on the region archive and the OBC-node (lat, lon) — NOT on the FVCOM
+        depth / sigma — so they are IDENTICAL for every bathymetry variant of the
+        same mesh + OBC list, and can be cached once and reused (see
+        ``run_jcope_obc.py --profile-cache-dir``). Feed the result to
+        :meth:`build_tsobc_arrays` via ``raw_profiles=`` to skip the region read.
+        """
+        out: dict[str, NDArray[np.float32]] = {}
+        for v in variables:
+            if v not in _TSOBC_VAR_MAP:
+                raise ValueError(
+                    f"variable {v!r} is not supported "
+                    f"(allowed: {sorted(_TSOBC_VAR_MAP)})"
+                )
+            jcope_name = _TSOBC_VAR_MAP[v][0]
+            out[v] = self._read_variable_profile(jcope_name)[
+                :, :N_JCOPE_ACTIVE_LEVELS, :
+            ]
+        return out
+
     def build_tsobc_arrays(
         self,
         variables: Iterable[str] = ("temp", "salt"),
+        raw_profiles: dict[str, NDArray[np.float32]] | None = None,
     ) -> dict[str, NDArray[np.float32]]:
         """Return interpolated FVCOM-σ fields without writing a NetCDF.
 
@@ -360,6 +388,11 @@ class JcopeObcGenerator:
         year's arrays onto another's before writing a single combined
         output. Single-year callers should use :meth:`write_tsobc` which
         wraps this method.
+
+        If ``raw_profiles`` is given (e.g. loaded from a profile cache built by
+        :meth:`read_raw_profiles`), its arrays are used instead of reading the
+        region archive, so only the cheap depth-dependent vertical interpolation
+        runs. The result is bit-identical to reading the region archive directly.
         """
         vars_list = list(variables)
         for v in vars_list:
@@ -371,9 +404,12 @@ class JcopeObcGenerator:
         out: dict[str, NDArray[np.float32]] = {}
         for v in vars_list:
             jcope_name, _vname, _units, _long = _TSOBC_VAR_MAP[v]
-            jcope_field = self._read_variable_profile(jcope_name)[
-                :, :N_JCOPE_ACTIVE_LEVELS, :
-            ]
+            if raw_profiles is not None and v in raw_profiles:
+                jcope_field = np.asarray(raw_profiles[v], dtype=np.float32)
+            else:
+                jcope_field = self._read_variable_profile(jcope_name)[
+                    :, :N_JCOPE_ACTIVE_LEVELS, :
+                ]
             out[v] = self._interp_to_fvcom_sigma(
                 jcope_field, self.obc_h_jcope, self.obc_h_fvcom
             )

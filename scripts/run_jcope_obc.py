@@ -87,6 +87,123 @@ def parse_dep_dat(path: Path) -> np.ndarray:
     return np.asarray(depths, dtype=np.float32)
 
 
+# ---------------------------------------------------------------------------
+# Raw-profile cache. The EXPENSIVE step is extracting the JCOPE T/S profiles at
+# the OBC cells (reads the ~27 GB/year region archive). Those profiles depend
+# only on the region archive + OBC-node (lat, lon) — NOT on the FVCOM depth /
+# sigma — so they are identical for EVERY bathymetry variant of the same mesh +
+# OBC list. Cache them once per year (~50 MB) and every later variant rebuild
+# reads the cache + redoes only the cheap depth-dependent vertical interpolation.
+# ---------------------------------------------------------------------------
+def _profile_cache_path(cache_dir, year):
+    return Path(cache_dir) / f"obc_raw_profiles_{year}.npz"
+
+
+def _load_profile_cache(cache_dir, year, region_nc, obc_ids):
+    """Return the cached raw profiles dict if a valid cache exists, else None.
+
+    Invalidated when the OBC node list differs or the region archive's byte size
+    changed (i.e. the JCOPE data was regenerated).
+    """
+    if not cache_dir:
+        return None
+    p = _profile_cache_path(cache_dir, year)
+    if not p.exists():
+        return None
+    try:
+        d = np.load(p)
+    except Exception:
+        return None
+    if not np.array_equal(
+        np.asarray(d["obc_nodes"]), np.asarray(obc_ids, dtype=np.int32)
+    ):
+        return None
+    if int(d["region_size"]) != int(Path(region_nc).stat().st_size):
+        return None  # region archive changed -> cache stale
+    return {k[4:]: d[k] for k in d.files if k.startswith("var_")}
+
+
+def _save_profile_cache(cache_dir, year, region_nc, obc_ids, raw):
+    if not cache_dir:
+        return
+    p = _profile_cache_path(cache_dir, year)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    st = Path(region_nc).stat()
+    tmp = p.parent / (p.name + ".tmp")
+    with open(tmp, "wb") as fh:  # pass a handle so np.savez does NOT append '.npz'
+        np.savez(
+            fh,
+            obc_nodes=np.asarray(obc_ids, dtype=np.int32),
+            region_size=np.int64(st.st_size),
+            region_mtime=np.float64(st.st_mtime),
+            **{f"var_{k}": v for k, v in raw.items()},
+        )
+    tmp.replace(p)  # atomic swap (each year writes its own file)
+
+
+def _process_year(
+    year,
+    region_nc,
+    basic_nc,
+    obc_ids,
+    obc_lat,
+    obc_lon,
+    obc_h_fvcom,
+    n_siglay,
+    siglay_per_node,
+    siglev_per_node,
+    no_tsobc,
+    no_elevation,
+    profile_cache_dir=None,
+):
+    """Interpolate one year's OBC — the per-year loop body, extracted so it can
+    run as a joblib worker (``--jobs>1``) and share the profile-cache path. Each
+    worker opens its own JcopeGrid + region archive, so years are independent;
+    all args are picklable (numpy arrays / Path / scalars). Returns a plain dict
+    keyed for reassembly in the parent. With ``profile_cache_dir`` the raw JCOPE
+    profiles are loaded from / saved to the cache (skipping the 27 GB read on a
+    hit); the output is identical either way.
+    """
+    grid = JcopeGrid(basic_nc)
+    gen = JcopeObcGenerator(
+        grid=grid,
+        region_nc=region_nc,
+        obc_nodes=obc_ids,
+        obc_lat=obc_lat,
+        obc_lon=obc_lon,
+        obc_h_fvcom=obc_h_fvcom,
+        n_siglay=n_siglay,
+        siglay_per_node=siglay_per_node,
+        siglev_per_node=siglev_per_node,
+    )
+    tsobc = None
+    if not no_tsobc:
+        if profile_cache_dir:
+            raw = _load_profile_cache(profile_cache_dir, year, region_nc, obc_ids)
+            hit = raw is not None
+            if raw is None:
+                raw = gen.read_raw_profiles()
+                _save_profile_cache(profile_cache_dir, year, region_nc, obc_ids, raw)
+            print(
+                f"[cache] year {year}: profile cache {'HIT' if hit else 'MISS (built)'}",
+                flush=True,
+            )
+            tsobc = gen.build_tsobc_arrays(raw_profiles=raw)
+        else:
+            tsobc = gen.build_tsobc_arrays()
+    out = {
+        "year": year,
+        "mjd": gen.mjd.copy(),
+        "siglev": gen.siglev,
+        "siglay": gen.siglay,
+        "obc_h_jcope": gen.obc_h_jcope.copy(),
+        "tsobc": tsobc,
+        "elevation": None if no_elevation else gen.build_elevation_array(),
+    }
+    gen.close()
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -150,6 +267,26 @@ def main() -> int:
         "--fvcom-dep to match the grid the sigma.dat was built for.",
     )
     parser.add_argument("--tag", default="jcope", help="filename tag (default: jcope)")
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="parallel workers over years (joblib; default 1 = serial, "
+        "byte-identical to the original path). Each worker reads one year's "
+        "region NC independently; the deterministic time concatenation is "
+        "unchanged, so N>1 only speeds up a multi-year build.",
+    )
+    parser.add_argument(
+        "--profile-cache-dir",
+        type=Path,
+        default=None,
+        help="directory for the raw-profile cache (obc_raw_profiles_<year>.npz). "
+        "The JCOPE T/S profiles at the OBC cells are bathymetry-INDEPENDENT "
+        "(fixed OBC node lat/lon), so caching them once lets every later "
+        "depth-variant OBC rebuild skip the ~27 GB/year region read and redo "
+        "only the cheap vertical interpolation. Cache is invalidated if the OBC "
+        "node list or the region archive's byte size changes. Omit to disable.",
+    )
     year_group = parser.add_mutually_exclusive_group(required=True)
     year_group.add_argument(
         "--year", type=int, help="single year; use --region-nc for the archive"
@@ -270,30 +407,53 @@ def main() -> int:
     siglay: NDArray[np.float64] | None = None
     obc_h_jcope_first: NDArray[np.float32] | None = None
 
-    for year, region_nc in zip(years, region_paths):
-        print(f"[jcope] opening region archive for {year}: {region_nc}")
-        gen = JcopeObcGenerator(
-            grid=grid,
-            region_nc=region_nc,
-            obc_nodes=obc_ids,
-            obc_lat=obc_lat,
-            obc_lon=obc_lon,
-            obc_h_fvcom=obc_h_fvcom,
-            n_siglay=args.n_siglay,
-            siglay_per_node=siglay_per_node,
-            siglev_per_node=siglev_per_node,
+    # Years are independent — process each via _process_year (raw-profile read /
+    # cache + vertical interp). With --jobs>1 they run concurrently (joblib),
+    # otherwise serially; the deterministic per-year concatenation below is
+    # order-independent, so the output is identical either way.
+    def _args_for(year, region_nc):
+        return (
+            year,
+            region_nc,
+            args.basic_nc,
+            obc_ids,
+            obc_lat,
+            obc_lon,
+            obc_h_fvcom,
+            args.n_siglay,
+            siglay_per_node,
+            siglev_per_node,
+            args.no_tsobc,
+            args.no_elevation,
+            args.profile_cache_dir,
         )
-        if siglev is None:
-            siglev = gen.siglev
-            siglay = gen.siglay
-            obc_h_jcope_first = gen.obc_h_jcope.copy()
 
-        mjd_by_year[year] = gen.mjd.copy()
+    if args.jobs and args.jobs > 1 and len(years) > 1:
+        from joblib import Parallel, delayed
+
+        print(
+            f"[jcope] parallel over {len(years)} years with n_jobs={args.jobs} (joblib) ...",
+            flush=True,
+        )
+        results = Parallel(n_jobs=args.jobs)(
+            delayed(_process_year)(*_args_for(year, region_nc))
+            for year, region_nc in zip(years, region_paths)
+        )
+    else:
+        results = [
+            _process_year(*_args_for(year, region_nc))
+            for year, region_nc in zip(years, region_paths)
+        ]
+    for r in results:
+        y = r["year"]
+        mjd_by_year[y] = r["mjd"]
         if not args.no_tsobc:
-            tsobc_fields_by_year[year] = gen.build_tsobc_arrays()
+            tsobc_fields_by_year[y] = r["tsobc"]
         if not args.no_elevation:
-            elevation_by_year[year] = gen.build_elevation_array()
-        gen.close()
+            elevation_by_year[y] = r["elevation"]
+    siglev = results[0]["siglev"]
+    siglay = results[0]["siglay"]
+    obc_h_jcope_first = results[0]["obc_h_jcope"]
 
     # All three must be set after the loop runs at least once (years is
     # guaranteed non-empty above).
