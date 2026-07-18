@@ -266,6 +266,15 @@ def main() -> int:
         "the model's actual sigma-z layer depths. Requires --fvcom-grid + "
         "--fvcom-dep to match the grid the sigma.dat was built for.",
     )
+    parser.add_argument(
+        "--siglev-npz",
+        type=Path,
+        default=None,
+        help="npz with array 'siglev' of shape (n_obc, KB): an EXPLICIT per-node "
+        "OBC vertical coordinate (sigma levels, 0..-1) built externally -- e.g. "
+        "the LSC2 surface-aligned per-column grid, which has no sigma.dat. "
+        "Overrides --n-siglay; mutually exclusive with --sigma-dat.",
+    )
     parser.add_argument("--tag", default="jcope", help="filename tag (default: jcope)")
     parser.add_argument(
         "--jobs",
@@ -366,6 +375,21 @@ def main() -> int:
     # of the OBC file). The grid/dep MUST be the ones the sigma.dat was built for.
     siglay_per_node = None
     siglev_per_node = None
+    if args.siglev_npz is not None:
+        if args.sigma_dat is not None:
+            sys.exit("--siglev-npz and --sigma-dat are mutually exclusive")
+        z_obc = np.load(args.siglev_npz)["siglev"].astype(np.float64)  # (n_obc, KB)
+        if z_obc.shape[0] != obc_ids.shape[0]:
+            sys.exit(
+                f"--siglev-npz has {z_obc.shape[0]} nodes != OBC list {obc_ids.shape[0]}"
+            )
+        siglev_per_node = z_obc.T  # (KB, n_obc)
+        siglay_per_node = 0.5 * (siglev_per_node[:-1] + siglev_per_node[1:])
+        print(
+            f"[siglev-npz] explicit per-node OBC coordinate from {args.siglev_npz.name}: "
+            f"KB={siglev_per_node.shape[0]} KBM1={siglay_per_node.shape[0]} "
+            f"(uniform --n-siglay={args.n_siglay} IGNORED)"
+        )
     if args.sigma_dat is not None:
         from xfvcom.grid.gtsz_builder import build_gtsz, load_mesh
         from xfvcom.io import read_sigma_dat
