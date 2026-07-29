@@ -122,6 +122,7 @@ def read_sigma_dat(path: str | Path) -> SigmaFile:
             smooth=_as_float(_scan(pairs, "GTSZ SMOOTH") or "0.0"),
             mask=_as_bool(_scan(pairs, "GTSZ MASK") or "F"),
             sadapt=_as_bool(_scan(pairs, "GTSZ SADAPT") or "F"),
+            lowsig=_as_bool(_scan(pairs, "GTSZ LOWSIG") or "F"),
             smax=_as_float(_scan(pairs, "GTSZ SMAX") or "0.0"),
             dye_nowall=_as_bool(_scan(pairs, "GTSZ DYE_NOWALL") or "F"),
             bpg_ref_zlev=bpg,
@@ -156,6 +157,8 @@ def gtsz_to_lines(spec: GtszSpec, *, header_comment: str | None = None) -> list[
     lines.append(f"GTSZ MASK = {'T' if spec.mask else 'F'}")
     lines.append(f"GTSZ SADAPT = {'T' if spec.sadapt else 'F'}")
     lines.append(f"GTSZ SMAX = {spec.smax:.6f}")
+    if spec.lowsig:
+        lines.append("GTSZ LOWSIG = T")
     if spec.dye_nowall:
         lines.append("GTSZ DYE_NOWALL = T")
     if spec.bpg_ref_zlev:

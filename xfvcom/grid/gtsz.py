@@ -56,6 +56,7 @@ __all__ = [
     "sband_reshape",
     "build_column_base",
     "build_column_sadapt",
+    "build_column_lowsig",
     "build_coordinate",
     "compute_kbp",
     "element_average",
@@ -94,6 +95,7 @@ class GtszSpec:
     smax: float = (
         0.0  #: ``GTSZ SMAX`` max sigma-slope for H_ref [m/m]; <=0 => flat min(H)
     )
+    lowsig: bool = False  #: ``GTSZ LOWSIG`` two-band sigma: lower band = sigma to the local bed
     dye_nowall: bool = False  #: ``GTSZ DYE_NOWALL`` (diagnostic)
     bpg_ref_zlev: tuple[
         float, ...
@@ -148,13 +150,30 @@ class GtszSpec:
                     "GtszSpec: GTSZ NZ < (K2-K1-1): too few z-levels for the z-band "
                     f"(NZ={self.nz}, K2-K1-1={self.k2 - self.k1 - 1})"
                 )
+        if self.lowsig:
+            # mod_setup.F: the two-band sigma checks
+            if not self.sadapt:
+                raise ValueError(
+                    "GtszSpec: GTSZ LOWSIG=T requires GTSZ SADAPT=T (it needs H_ref)"
+                )
+            if self.mask:
+                raise ValueError(
+                    "GtszSpec: GTSZ LOWSIG=T requires GTSZ MASK=F "
+                    "(every column keeps every layer; there is no killed set to wall off)"
+                )
+            if self.k1 >= self.kb:
+                raise ValueError(
+                    "GtszSpec: GTSZ LOWSIG=T requires GTSZ K1 < KB "
+                    f"(K1={self.k1}, KB={self.kb}); the lower band needs a layer"
+                )
         if self.sadapt:
             # mod_setup.F:1143-1146
-            if not self.mask:
+            if not (self.mask or self.lowsig):
                 raise ValueError(
-                    "GtszSpec: GTSZ SADAPT=T requires GTSZ MASK=T (the z-region uses the wall)"
+                    "GtszSpec: GTSZ SADAPT=T requires GTSZ MASK=T (the z-region uses "
+                    "the wall) or GTSZ LOWSIG=T (the two-band sigma coordinate)"
                 )
-            if not self.have_zband:
+            if not (self.have_zband or self.lowsig):
                 raise ValueError(
                     "GtszSpec: GTSZ SADAPT=T requires a z-band (GTSZ NZ > 0)"
                 )
@@ -307,6 +326,39 @@ def build_column_sadapt(
     return z
 
 
+def build_column_lowsig(
+    H: float, href: float, spec: GtszSpec, *, eta0: float = 0.0
+) -> NDArray[np.float64]:
+    """Build one node's column for the **two-band sigma** path (``GTSZ LOWSIG``):
+    the base stretch over ``[0, -D_up]`` plus a uniform sigma band from there to
+    the local bed, where ``D_up = smooth-min(H_ref, BETA*H)`` and
+    ``BETA = (K1-1)/(KB-1)``.
+
+    Every layer is alive in every column: ``D_up < H`` strictly, so ``DZ > 0``
+    without any clamp or degenerate tail. Exact port of the ``GTSZ_LOWSIG``
+    branch of ``mod_setup.F::SIGMA_GTSZ``; design ``FVCOM/docs/sigma-sigma-coordinate.md``.
+    """
+    kb = spec.kb
+    k1 = spec.k1
+    sband = sband_reshape(kb, k1, spec.base, p1=spec.p1, l1=spec.l1, l2=spec.l2)
+    z: NDArray[np.float64] = np.empty(kb, dtype=np.float64)
+    beta_up = (k1 - 1) / (kb - 1)
+    dup = beta_up * H
+    if spec.smooth > 0.0:
+        w = 0.5 * (1.0 + np.tanh((dup - href) / spec.smooth))
+        dup = w * href + (1.0 - w) * dup
+    else:
+        dup = min(href, dup)
+    sigref = -(dup + eta0) / (H + eta0)
+    for k in range(1, k1 + 1):
+        z[k - 1] = sigref * sband[k - 1]  # upper band [0, sigref]
+    for k in range(k1 + 1, kb + 1):
+        z[k - 1] = sigref + (-1.0 - sigref) * (k - k1) / (kb - k1)  # lower band
+    z[0] = 0.0
+    z[kb - 1] = -1.0
+    return z
+
+
 # ===========================================================================
 #  Whole-grid coordinate
 # ===========================================================================
@@ -343,8 +395,9 @@ def build_coordinate(
             raise ValueError("build_coordinate: spec.sadapt=True requires href")
         href = np.asarray(href, dtype=np.float64)
         href = np.minimum(href, H)  # safety: H_ref <= H (mod_setup.F:1202)
+        column = build_column_lowsig if spec.lowsig else build_column_sadapt
         for i in range(M):
-            Z[i] = build_column_sadapt(H[i], href[i], spec, eta0=eta0)
+            Z[i] = column(H[i], href[i], spec, eta0=eta0)
     else:
         # the base / B-sandwich path is per-column independent; loop for a faithful
         # match to the Fortran (M ~ a few thousand -> sub-second).
