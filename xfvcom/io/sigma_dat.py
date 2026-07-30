@@ -162,7 +162,9 @@ def gtsz_to_lines(spec: GtszSpec, *, header_comment: str | None = None) -> list[
     if spec.lowsig:
         lines.append("GTSZ LOWSIG = T")
     if spec.dref > 0.0:
-        lines.append(f"GTSZ DREF = {spec.dref:g}")
+        # .6f, NOT :g -- FVCOM's SCAN_FILE type-detects "30" as integer and
+        # returns -3 against an FSCAL request, silently zeroing the cap
+        lines.append(f"GTSZ DREF = {spec.dref:.6f}")
     if spec.lowfrac:
         lines.append(f"GTSZ LOWFRAC = {' '.join(f'{f:.6f}' for f in spec.lowfrac)}")
     if spec.dye_nowall:
