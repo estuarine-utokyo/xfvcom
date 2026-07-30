@@ -124,6 +124,8 @@ def read_sigma_dat(path: str | Path) -> SigmaFile:
             sadapt=_as_bool(_scan(pairs, "GTSZ SADAPT") or "F"),
             lowsig=_as_bool(_scan(pairs, "GTSZ LOWSIG") or "F"),
             smax=_as_float(_scan(pairs, "GTSZ SMAX") or "0.0"),
+            dref=_as_float(_scan(pairs, "GTSZ DREF") or "0.0"),
+            lowfrac=_as_floats(_scan(pairs, "GTSZ LOWFRAC") or "") or (),
             dye_nowall=_as_bool(_scan(pairs, "GTSZ DYE_NOWALL") or "F"),
             bpg_ref_zlev=bpg,
         )
@@ -159,6 +161,10 @@ def gtsz_to_lines(spec: GtszSpec, *, header_comment: str | None = None) -> list[
     lines.append(f"GTSZ SMAX = {spec.smax:.6f}")
     if spec.lowsig:
         lines.append("GTSZ LOWSIG = T")
+    if spec.dref > 0.0:
+        lines.append(f"GTSZ DREF = {spec.dref:g}")
+    if spec.lowfrac:
+        lines.append(f"GTSZ LOWFRAC = {' '.join(f'{f:.6f}' for f in spec.lowfrac)}")
     if spec.dye_nowall:
         lines.append("GTSZ DYE_NOWALL = T")
     if spec.bpg_ref_zlev:

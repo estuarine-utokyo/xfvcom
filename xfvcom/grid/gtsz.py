@@ -95,7 +95,15 @@ class GtszSpec:
     smax: float = (
         0.0  #: ``GTSZ SMAX`` max sigma-slope for H_ref [m/m]; <=0 => flat min(H)
     )
-    lowsig: bool = False  #: ``GTSZ LOWSIG`` two-band sigma: lower band = sigma to the local bed
+    lowsig: bool = (
+        False  #: ``GTSZ LOWSIG`` two-band sigma: lower band = sigma to the local bed
+    )
+    dref: float = (
+        0.0  #: ``GTSZ DREF`` fixed reference-depth cap [m] for the LOWSIG interface; <=0 = off
+    )
+    lowfrac: tuple[
+        float, ...
+    ] = ()  #: ``GTSZ LOWFRAC`` lower-band thickness fractions (KB-K1 values, sum 1); () = uniform
     dye_nowall: bool = False  #: ``GTSZ DYE_NOWALL`` (diagnostic)
     bpg_ref_zlev: tuple[
         float, ...
@@ -105,6 +113,7 @@ class GtszSpec:
         if self.k2 is None:
             object.__setattr__(self, "k2", self.kb)
         object.__setattr__(self, "zlev", tuple(float(z) for z in self.zlev))
+        object.__setattr__(self, "lowfrac", tuple(float(f) for f in self.lowfrac))
         object.__setattr__(
             self, "bpg_ref_zlev", tuple(float(z) for z in self.bpg_ref_zlev)
         )
@@ -166,6 +175,19 @@ class GtszSpec:
                     "GtszSpec: GTSZ LOWSIG=T requires GTSZ K1 < KB "
                     f"(K1={self.k1}, KB={self.kb}); the lower band needs a layer"
                 )
+            if self.lowfrac:
+                # mod_input.F "GTSZ LOWFRAC" checks
+                if len(self.lowfrac) != self.kb - self.k1:
+                    raise ValueError(
+                        "GtszSpec: GTSZ LOWFRAC must carry exactly KB-K1 values "
+                        f"(got {len(self.lowfrac)}, need {self.kb - self.k1})"
+                    )
+                if any(f <= 0.0 for f in self.lowfrac):
+                    raise ValueError(
+                        "GtszSpec: all GTSZ LOWFRAC fractions must be positive"
+                    )
+                if abs(sum(self.lowfrac) - 1.0) > 1e-4:
+                    raise ValueError("GtszSpec: GTSZ LOWFRAC fractions must sum to 1")
         if self.sadapt:
             # mod_setup.F:1143-1146
             if not (self.mask or self.lowsig):
@@ -342,6 +364,10 @@ def build_column_lowsig(
     k1 = spec.k1
     sband = sband_reshape(kb, k1, spec.base, p1=spec.p1, l1=spec.l1, l2=spec.l2)
     z: NDArray[np.float64] = np.empty(kb, dtype=np.float64)
+    if spec.dref > 0.0:
+        # GTSZ DREF: fixed reference-depth cap (quasi-horizontal upper band
+        # down to DREF wherever BETA*H exceeds it)
+        href = min(href, spec.dref)
     beta_up = (k1 - 1) / (kb - 1)
     dup = beta_up * H
     if spec.smooth > 0.0:
@@ -352,8 +378,15 @@ def build_column_lowsig(
     sigref = -(dup + eta0) / (H + eta0)
     for k in range(1, k1 + 1):
         z[k - 1] = sigref * sband[k - 1]  # upper band [0, sigref]
-    for k in range(k1 + 1, kb + 1):
-        z[k - 1] = sigref + (-1.0 - sigref) * (k - k1) / (kb - k1)  # lower band
+    if spec.lowfrac:
+        # GTSZ LOWFRAC: shaped lower band (cumulative prescribed fractions)
+        frcum = 0.0
+        for k in range(k1 + 1, kb + 1):
+            frcum += spec.lowfrac[k - k1 - 1]
+            z[k - 1] = sigref + (-1.0 - sigref) * frcum
+    else:
+        for k in range(k1 + 1, kb + 1):
+            z[k - 1] = sigref + (-1.0 - sigref) * (k - k1) / (kb - k1)  # lower band
     z[0] = 0.0
     z[kb - 1] = -1.0
     return z
