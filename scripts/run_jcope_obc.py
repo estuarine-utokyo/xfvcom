@@ -30,7 +30,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from xfvcom.grid.grid_obj import FvcomGrid
-from xfvcom.io import JcopeGrid, JcopeObcGenerator, write_elevation_nc, write_tsobc_nc
+from xfvcom.io import (JcopeGrid, JcopeObcGenerator, write_elevation_nc,
+                       write_tsobc_nc)
 
 
 def parse_year_spec(spec: str) -> list[int]:
@@ -275,6 +276,17 @@ def main() -> int:
         "the LSC2 surface-aligned per-column grid, which has no sigma.dat. "
         "Overrides --n-siglay; mutually exclusive with --sigma-dat.",
     )
+    parser.add_argument(
+        "--obc-depth-control",
+        action="store_true",
+        help="sample at the depths FVCOM's OBC_DEPTH_CONTROL_ON=T actually "
+        "imposes the file at: substitute each OBC node's depth with its "
+        "NEXT_OBC inward neighbour's (a-priori port of mod_obcs.F SETUP_OBC; "
+        "boundary-string endpoints keep their own depth per observed runtime "
+        "behaviour). Uniform-sigma path only. ALWAYS contract-check the "
+        "assumed depths against a run's output h before production use "
+        "(see xfvcom.io.obc_depth_control).",
+    )
     parser.add_argument("--tag", default="jcope", help="filename tag (default: jcope)")
     parser.add_argument(
         "--jobs",
@@ -366,6 +378,29 @@ def main() -> int:
     obc_lat = np.asarray(mesh.lat)[idx0]
     obc_lon = np.asarray(mesh.lon)[idx0]
     obc_h_fvcom = h_all[idx0]
+
+    if args.obc_depth_control:
+        if args.sigma_dat is not None or args.siglev_npz is not None:
+            sys.exit(
+                "--obc-depth-control supports the uniform-sigma path only "
+                "(per-node coordinates run with OBC_DEPTH_CONTROL_ON=F instead)"
+            )
+        from xfvcom.io.obc_depth_control import substituted_obc_depths
+
+        h_sub, next_ids = substituted_obc_depths(
+            mesh.x, mesh.y, mesh.nv, obc_ids, h_all
+        )
+        print("[obc-depth-control] sampling at OBC_DEPTH_CONTROL_ON=T substituted "
+              "depths (a-priori NEXT_OBC; endpoints keep own depth):")
+        for i, n in enumerate(obc_ids):
+            mark = "" if next_ids[i] == n else \
+                f" <- NEXT_OBC {next_ids[i]}" + \
+                (f" (dH {h_sub[i] - obc_h_fvcom[i]:+.2f} m)"
+                 if abs(h_sub[i] - obc_h_fvcom[i]) > 0.005 else " (equal depth)")
+            print(f"  node {n:6d}: h {obc_h_fvcom[i]:8.2f} -> {h_sub[i]:8.2f}{mark}")
+        print("  NOTE: contract-check these depths against a run's output h "
+              "(build_dep_obcsub.py harvest) before production use.")
+        obc_h_fvcom = h_sub.astype(obc_h_fvcom.dtype)
 
     # ---- optional SADAPT / sigma-z per-node vertical coordinate ----
     # Without --sigma-dat the OBC uses the uniform --n-siglay grid (default).
