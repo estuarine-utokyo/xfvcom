@@ -311,3 +311,18 @@ def test_river_dl_year_end_hold_and_limit(tmp_path: Path) -> None:
     far = pd.date_range("2024-12-31 00:00", "2025-01-02 00:00", freq="1h", tz="UTC")
     with pytest.raises(ValueError, match="beyond the source coverage"):
         src.get_series("flux", far)
+
+
+def test_river_dl_daily_mean_centred_at_jst_noon(tmp_path: Path) -> None:
+    """A daily JST product: the value for day d sits at d 12:00 JST = d 03:00 UTC."""
+    days = pd.date_range("2021-07-01", periods=5, freq="1D")
+    p = tmp_path / "discharge_daily.nc"
+    _make_river_dl_nc(
+        p, times=days, discharge=np.array([0.0, 24.0, 48.0, 72.0, 96.0]), time_zone=None
+    )
+    utc = pd.DatetimeIndex(
+        ["2021-07-02 03:00", "2021-07-02 15:00", "2021-07-03 03:00"], tz="UTC"
+    )
+    np.testing.assert_allclose(
+        RiverDLNetCDFSource(p).get_series("flux", utc), [24.0, 36.0, 48.0]
+    )

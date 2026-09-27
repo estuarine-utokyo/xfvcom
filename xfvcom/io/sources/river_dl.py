@@ -19,7 +19,9 @@ Until this date the stamps were compared with the UTC FVCOM timeline as wall-clo
 discharge series entered FVCOM **9 h late**. The source zone is now resolved per file, in order: an explicit
 ``source_tz`` argument; a ``time_zone`` attribute on ``time`` or on the file; ``UTC`` for the ``LegacyF04v3``
 extracts (daily values decoded from an FVCOM forcing file, hence already UTC); otherwise ``Asia/Tokyo`` (the
-river_dl product contract). Source instants are converted to UTC before interpolation.
+river_dl product contract). Source instants are converted to UTC before interpolation. A DAILY product (one value
+per calendar day stamped 00:00, e.g. Tamagawa/Ishihara ``discharge_daily.nc``) is the mean over that source-zone day
+and is placed at its middle (12:00 source zone) before conversion.
 
 The source intentionally returns *raw* observed/estimated discharge — no
 Optuna #123 per-river scaling or Trial #16 seasonal modulation. Those are
@@ -111,6 +113,7 @@ class RiverDLNetCDFSource(BaseForcingSource):
         self._fill_nan = bool(fill_nan)
 
         self._source_tz = self._resolve_source_tz(source_tz)
+        self._daily_mean = self._is_daily_mean()
         # Source instants as NAIVE UTC (the generator's timeline is converted the same way in _interp_flux).
         self._src_time = self._to_naive_utc(pd.DatetimeIndex(self._ds["time"].values))
 
@@ -134,9 +137,20 @@ class RiverDLNetCDFSource(BaseForcingSource):
         return "Asia/Tokyo"
 
     def _to_naive_utc(self, idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
+        if self._daily_mean:
+            # A daily product holds the mean over the source-zone calendar day stamped at 00:00; its representative
+            # instant is the middle of that day (12:00 source zone = 03:00 UTC for JST).
+            idx = idx + pd.Timedelta(hours=12)
         if idx.tz is None:
             idx = idx.tz_localize(self._source_tz)
         return idx.tz_convert("UTC").tz_localize(None)
+
+    def _is_daily_mean(self) -> bool:
+        t = pd.DatetimeIndex(self._ds["time"].values)
+        if len(t) < 3:
+            return False
+        step = pd.Series(t[1:] - t[:-1]).median()
+        return bool(step == pd.Timedelta(days=1) and (t.normalize() == t).all())
 
     @property
     def source_tz(self) -> str:
