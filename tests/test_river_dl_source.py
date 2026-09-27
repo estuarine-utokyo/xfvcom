@@ -326,3 +326,66 @@ def test_river_dl_daily_mean_centred_at_jst_noon(tmp_path: Path) -> None:
     np.testing.assert_allclose(
         RiverDLNetCDFSource(p).get_series("flux", utc), [24.0, 36.0, 48.0]
     )
+
+
+def test_river_dl_zone_alias_and_encoded_offset(tmp_path: Path) -> None:
+    """``timezone`` is honoured like ``time_zone``; CF units with an offset are decoded to UTC once, never twice."""
+    t = pd.date_range("2021-07-03 00:00", periods=24, freq="1h")
+    a = tmp_path / "a"
+    a.mkdir()
+    _make_river_dl_nc(
+        a / "discharge_hourly.nc", times=t, discharge=np.arange(24.0), time_zone=None
+    )
+    with nc.Dataset(a / "discharge_hourly.nc", "a") as d:
+        d.timezone = "UTC"
+    assert RiverDLNetCDFSource(a / "discharge_hourly.nc").source_tz == "UTC"
+    b = tmp_path / "b"
+    b.mkdir()
+    ds = xr.Dataset(
+        {"discharge": (("time",), np.arange(24.0, dtype=np.float32))},
+        coords={
+            "time": (
+                "time",
+                np.arange(24),
+                {"units": "hours since 2021-07-03 00:00:00+09:00"},
+            )
+        },
+    )
+    ds.to_netcdf(b / "discharge_hourly.nc")
+    src = RiverDLNetCDFSource(b / "discharge_hourly.nc")
+    assert src.source_tz == "UTC"  # value 0 is 2021-07-02 15:00 UTC
+    f = src.get_series(
+        "flux", pd.DatetimeIndex(["2021-07-02 15:00", "2021-07-02 18:00"], tz="UTC")
+    )
+    np.testing.assert_array_equal(f, [0.0, 3.0])
+
+
+def test_river_dl_daily_support_rules(tmp_path: Path) -> None:
+    """Cadence alone centres only river_dl-contract (JST, unattributed) products; an attributed UTC daily axis is
+    instantaneous unless time_support says otherwise; a single record is never inferred.
+    """
+    days = pd.date_range("2021-07-01", periods=5, freq="1D")
+    q = np.array([0.0, 24.0, 48.0, 72.0, 96.0])
+    u = tmp_path / "u"
+    u.mkdir()
+    _make_river_dl_nc(
+        u / "discharge_daily.nc", times=days, discharge=q, time_zone="UTC"
+    )
+    at = pd.DatetimeIndex(["2021-07-02 00:00"], tz="UTC")
+    assert (
+        RiverDLNetCDFSource(u / "discharge_daily.nc").get_series("flux", at)[0] == 24.0
+    )
+    assert (
+        RiverDLNetCDFSource(
+            u / "discharge_daily.nc", time_support="daily_mean"
+        ).get_series("flux", pd.DatetimeIndex(["2021-07-02 12:00"], tz="UTC"))[0]
+        == 24.0
+    )
+    one = tmp_path / "one"
+    one.mkdir()
+    _make_river_dl_nc(
+        one / "discharge_daily.nc", times=days[:1], discharge=q[:1], time_zone=None
+    )
+    assert RiverDLNetCDFSource(one / "discharge_daily.nc")._daily_mean is False
+    with pytest.raises(ValueError, match="time_support"):
+        RiverDLNetCDFSource(u / "discharge_daily.nc", time_support="hourly")

@@ -32,6 +32,7 @@ the launcher's seasonal-cosine wrapper (see
 
 from __future__ import annotations
 
+import re
 import warnings
 from pathlib import Path
 from typing import Final
@@ -94,6 +95,7 @@ class RiverDLNetCDFSource(BaseForcingSource):
         salt_const: float = 0.0,
         fill_nan: bool = True,
         source_tz: str | None = None,
+        time_support: str | None = None,
     ) -> None:
         self._path = Path(nc_path)
         if not self._path.exists():
@@ -113,7 +115,7 @@ class RiverDLNetCDFSource(BaseForcingSource):
         self._fill_nan = bool(fill_nan)
 
         self._source_tz = self._resolve_source_tz(source_tz)
-        self._daily_mean = self._is_daily_mean()
+        self._daily_mean = self._is_daily_mean(time_support)
         # Source instants as NAIVE UTC (the generator's timeline is converted the same way in _interp_flux).
         self._src_time = self._to_naive_utc(pd.DatetimeIndex(self._ds["time"].values))
 
@@ -122,18 +124,72 @@ class RiverDLNetCDFSource(BaseForcingSource):
     # ------------------------------------------------------------------
     LEGACY_UTC_DIRS: Final[tuple[str, ...]] = ("LegacyF04v3",)
 
+    ZONE_ATTRS: Final[tuple[str, ...]] = ("time_zone", "timezone", "tz")
+    JST_ALIASES: Final[tuple[str, ...]] = (
+        "JST",
+        "UTC+9",
+        "UTC+09",
+        "UTC+09:00",
+        "+09:00",
+        "ASIA/TOKYO",
+    )
+    UTC_ALIASES: Final[tuple[str, ...]] = (
+        "UTC",
+        "GMT",
+        "Z",
+        "UTC+0",
+        "UTC+00:00",
+        "+00:00",
+        "ETC/UTC",
+    )
+
     def _resolve_source_tz(self, explicit: str | None) -> str:
-        if explicit:
-            return explicit
+        """Zone of the DECODED time values. Order: explicit argument; an offset in the CF units (xarray has then
+        already decoded to UTC); a zone attribute on ``time`` or the file; ``UTC`` for LegacyF04v3; the river_dl
+        contract (JST). Conflicting declarations raise."""
+        units = str(
+            self._ds["time"].encoding.get(
+                "units", self._ds["time"].attrs.get("units", "")
+            )
+        )
+        encoded = bool(re.search(r"(Z|[+-]\d{2}:?\d{2}|\bUTC)\s*$", units.strip()))
+        declared = None
         for attrs in (self._ds["time"].attrs, self._ds.attrs):
-            tz = attrs.get("time_zone")
-            if tz:
-                tz = str(tz).strip()
-                return (
-                    "Asia/Tokyo" if tz.upper() in ("JST", "UTC+9", "UTC+09:00") else tz
+            for key in self.ZONE_ATTRS:
+                if attrs.get(key):
+                    declared = str(attrs[key]).strip()
+                    break
+            if declared:
+                break
+        if declared:
+            up = declared.upper()
+            declared = (
+                "Asia/Tokyo"
+                if up in self.JST_ALIASES
+                else ("UTC" if up in self.UTC_ALIASES else declared)
+            )
+        if explicit:
+            self._zone_basis = "explicit"
+            return explicit
+        if encoded:
+            # decoded values are UTC instants already; a JST declaration next to an offset unit is contradictory
+            if (
+                declared
+                and declared != "UTC"
+                and not units.strip().endswith(("+09:00", "+0900"))
+            ):
+                raise ValueError(
+                    f"{self._path}: time units {units!r} carry an offset but the file declares {declared!r}"
                 )
-        if self._path.parent.name in self.LEGACY_UTC_DIRS:
+            self._zone_basis = "units offset"
             return "UTC"
+        if declared:
+            self._zone_basis = "attribute"
+            return declared
+        if self._path.parent.name in self.LEGACY_UTC_DIRS:
+            self._zone_basis = "LegacyF04v3"
+            return "UTC"
+        self._zone_basis = "river_dl contract"
         return "Asia/Tokyo"
 
     def _to_naive_utc(self, idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
@@ -145,12 +201,39 @@ class RiverDLNetCDFSource(BaseForcingSource):
             idx = idx.tz_localize(self._source_tz)
         return idx.tz_convert("UTC").tz_localize(None)
 
-    def _is_daily_mean(self) -> bool:
+    def _is_daily_mean(self, time_support: str | None) -> bool:
+        """True for a product whose value is the mean over a source-zone calendar day. Explicit ``time_support``
+        (argument or attribute: "daily_mean" / "instant") or ``cell_methods`` "time: mean" decide; otherwise the
+        cadence rule (midnight stamps, 1-day step) applies ONLY to products under the river_dl contract, whose daily
+        files are daily means (MLIT KIND=7, STP daily volumes); a single-record file is never inferred.
+        """
         t = pd.DatetimeIndex(self._ds["time"].values)
-        if len(t) < 3:
-            return False
-        step = pd.Series(t[1:] - t[:-1]).median()
-        return bool(step == pd.Timedelta(days=1) and (t.normalize() == t).all())
+        daily_cadence = len(t) >= 2 and bool(
+            pd.Series(t[1:] - t[:-1]).median() == pd.Timedelta(days=1)
+            and (t.normalize() == t).all()
+        )
+        sup = (
+            time_support
+            or self._ds["time"].attrs.get("time_support")
+            or self._ds.attrs.get("time_support")
+        )
+        if sup:
+            sup = str(sup).lower()
+            if sup not in ("daily_mean", "instant"):
+                raise ValueError(
+                    f"{self._path}: time_support {sup!r} (expected 'daily_mean' or 'instant')"
+                )
+            if sup == "daily_mean" and not daily_cadence:
+                raise ValueError(
+                    f"{self._path}: time_support daily_mean but the axis is not daily at midnight"
+                )
+            return sup == "daily_mean"
+        if (
+            "time: mean" in str(self._ds["discharge"].attrs.get("cell_methods", ""))
+            and daily_cadence
+        ):
+            return True
+        return daily_cadence and self._zone_basis == "river_dl contract"
 
     @property
     def source_tz(self) -> str:
