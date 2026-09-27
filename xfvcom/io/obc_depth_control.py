@@ -93,16 +93,20 @@ def next_obc_nodes(
 
     obc0 = [int(i) - 1 for i in obc_ids]
     obcset = set(obc0)
-    out = np.empty(len(obc0), dtype=np.int64)
+    out: NDArray[np.int64] = np.empty(len(obc0), dtype=np.int64)
 
     for k, p in enumerate(obc0):
         adj_obc = [j for j in neighbours[p] if j in obcset]
         if not adj_obc:
-            raise ValueError(f"OBC node {p + 1}: no adjacent OBC node found "
-                             "(mod_obcs.F would PSTOP here)")
+            raise ValueError(
+                f"OBC node {p + 1}: no adjacent OBC node found "
+                "(mod_obcs.F would PSTOP here)"
+            )
         if len(adj_obc) > 2:
-            raise ValueError(f"OBC node {p + 1}: {len(adj_obc)} adjacent OBC "
-                             "nodes; boundary line is not simple")
+            raise ValueError(
+                f"OBC node {p + 1}: {len(adj_obc)} adjacent OBC "
+                "nodes; boundary line is not simple"
+            )
         if len(adj_obc) == 1:
             # Boundary-string ENDPOINT (open/solid corner): observed runtime
             # behaviour is NO substitution (see module docstring) — return the
@@ -111,12 +115,16 @@ def next_obc_nodes(
             continue
         acc_x = acc_y = 0.0
         for q in adj_obc:
-            edge_cells = [c for c in cells_of[p]
-                          if q in (int(nv[0, c]), int(nv[1, c]), int(nv[2, c]))]
+            edge_cells = [
+                c
+                for c in cells_of[p]
+                if q in (int(nv[0, c]), int(nv[1, c]), int(nv[2, c]))
+            ]
             if len(edge_cells) != 1:
                 raise ValueError(
                     f"edge ({p + 1},{q + 1}) is shared by {len(edge_cells)} "
-                    "cells; expected a boundary edge (exactly 1)")
+                    "cells; expected a boundary edge (exactly 1)"
+                )
             c = edge_cells[0]
             dxn = x[q] - x[p]
             dyn = y[q] - y[p]

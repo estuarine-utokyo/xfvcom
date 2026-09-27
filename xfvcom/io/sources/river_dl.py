@@ -13,6 +13,14 @@ Expected NetCDF schema (river_dl Phase AM/AN/AO+, 2026-04-21):
 ``qc_flag(time)`` byte (optional, ignored here; available for audit)
 ================  =====================================================
 
+Time zone (2026-09-27; TB-FVCOM hydro/docs/obc_jcope_temperature_bias.md S18.121). river_dl products carry no
+zone attribute, and their time stamps are **JST** (river_dl ``docs/ersem_fvcom_usage.md``: "All timestamps are JST").
+Until this date the stamps were compared with the UTC FVCOM timeline as wall-clock values, so every river/sewer
+discharge series entered FVCOM **9 h late**. The source zone is now resolved per file, in order: an explicit
+``source_tz`` argument; a ``time_zone`` attribute on ``time`` or on the file; ``UTC`` for the ``LegacyF04v3``
+extracts (daily values decoded from an FVCOM forcing file, hence already UTC); otherwise ``Asia/Tokyo`` (the
+river_dl product contract). Source instants are converted to UTC before interpolation.
+
 The source intentionally returns *raw* observed/estimated discharge — no
 Optuna #123 per-river scaling or Trial #16 seasonal modulation. Those are
 runtime knobs applied via ``RIVERS_NAMELIST.RIVER_FLUX_SCALE_LOCAL`` and
@@ -22,6 +30,7 @@ the launcher's seasonal-cosine wrapper (see
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Final
 
@@ -82,6 +91,7 @@ class RiverDLNetCDFSource(BaseForcingSource):
         temp_const: float = 15.0,
         salt_const: float = 0.0,
         fill_nan: bool = True,
+        source_tz: str | None = None,
     ) -> None:
         self._path = Path(nc_path)
         if not self._path.exists():
@@ -100,10 +110,38 @@ class RiverDLNetCDFSource(BaseForcingSource):
         self._salt_const = float(salt_const)
         self._fill_nan = bool(fill_nan)
 
-        # Cache source time as naive datetime64 for fast comparison.
-        self._src_time = pd.DatetimeIndex(self._ds["time"].values)
-        if self._src_time.tz is not None:
-            self._src_time = self._src_time.tz_localize(None)
+        self._source_tz = self._resolve_source_tz(source_tz)
+        # Source instants as NAIVE UTC (the generator's timeline is converted the same way in _interp_flux).
+        self._src_time = self._to_naive_utc(pd.DatetimeIndex(self._ds["time"].values))
+
+    # ------------------------------------------------------------------
+    # Time zone
+    # ------------------------------------------------------------------
+    LEGACY_UTC_DIRS: Final[tuple[str, ...]] = ("LegacyF04v3",)
+
+    def _resolve_source_tz(self, explicit: str | None) -> str:
+        if explicit:
+            return explicit
+        for attrs in (self._ds["time"].attrs, self._ds.attrs):
+            tz = attrs.get("time_zone")
+            if tz:
+                tz = str(tz).strip()
+                return (
+                    "Asia/Tokyo" if tz.upper() in ("JST", "UTC+9", "UTC+09:00") else tz
+                )
+        if self._path.parent.name in self.LEGACY_UTC_DIRS:
+            return "UTC"
+        return "Asia/Tokyo"
+
+    def _to_naive_utc(self, idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
+        if idx.tz is None:
+            idx = idx.tz_localize(self._source_tz)
+        return idx.tz_convert("UTC").tz_localize(None)
+
+    @property
+    def source_tz(self) -> str:
+        """Zone the file's time stamps were interpreted in (see module docstring)."""
+        return self._source_tz
 
     # ------------------------------------------------------------------
     # Introspection
@@ -153,12 +191,14 @@ class RiverDLNetCDFSource(BaseForcingSource):
         # the surrounding valid samples. Disable only for diagnostics.
         if self._fill_nan:
             da_clean = da.dropna(dim="time")
-            src_time_clean = pd.DatetimeIndex(da_clean["time"].values)
-            if src_time_clean.tz is not None:
-                src_time_clean = src_time_clean.tz_localize(None)
+            src_time_clean = self._to_naive_utc(
+                pd.DatetimeIndex(da_clean["time"].values)
+            )
         else:
             da_clean = da
             src_time_clean = self._src_time
+        # interpolate on the UTC instants, not on the file's own (JST) wall clock
+        da_clean = da_clean.assign_coords(time=src_time_clean.values)
 
         # Skip interpolation when the requested timeline is an exact
         # match of the cleaned source (the common case for hourly FVCOM
@@ -172,7 +212,49 @@ class RiverDLNetCDFSource(BaseForcingSource):
                 da_clean.interp(time=target, method="linear").values,
                 dtype=np.float32,
             )
+            arr = self._hold_edges(
+                arr, target, src_time_clean, np.asarray(da_clean.values)
+            )
         return arr * np.float32(self._scale)
+
+    # Converting JST stamps to UTC moves the end of a product 9 h earlier: a product that ends 2024-12-31 23:00 JST
+    # stops at 14:00 UTC, short of the FVCOM year-end bookend. Targets outside the source coverage by at most this many
+    # hours take the nearest valid value (persistence), with a warning; anything further raises.
+    EDGE_HOLD_MAX_H: Final[float] = 24.0
+
+    def _hold_edges(self, arr, target, src_t, src_v):
+        if not self._fill_nan or len(src_t) == 0:
+            return arr
+        before, after = target < src_t[0], target > src_t[-1]
+        if not (before.any() or after.any()):
+            return arr
+        gap_h = max(
+            (
+                ((src_t[0] - target[before].min()) / pd.Timedelta(hours=1))
+                if before.any()
+                else 0.0
+            ),
+            (
+                ((target[after].max() - src_t[-1]) / pd.Timedelta(hours=1))
+                if after.any()
+                else 0.0
+            ),
+        )
+        if gap_h > self.EDGE_HOLD_MAX_H:
+            raise ValueError(
+                f"{self._path}: requested timeline extends {gap_h:.1f} h beyond the source coverage "
+                f"({src_t[0]} .. {src_t[-1]} UTC, source zone {self._source_tz}); max edge hold "
+                f"{self.EDGE_HOLD_MAX_H} h"
+            )
+        warnings.warn(
+            f"{self._path.name}: {int(before.sum() + after.sum())} target step(s) up to {gap_h:.1f} h outside the "
+            f"source coverage (ends {src_t[-1]} UTC); held at the nearest valid value",
+            stacklevel=3,
+        )
+        arr = arr.copy()
+        arr[before] = np.float32(src_v[0])
+        arr[after] = np.float32(src_v[-1])
+        return arr
 
 
 __all__ = ["RiverDLNetCDFSource"]

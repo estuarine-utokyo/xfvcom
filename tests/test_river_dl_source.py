@@ -25,6 +25,7 @@ def _make_river_dl_nc(
     discharge: np.ndarray,
     river: str = "TestRiver",
     station: str = "TestStation",
+    time_zone: str | None = "UTC",
 ) -> None:
     """Write a river_dl-style discharge_hourly.nc.
 
@@ -42,6 +43,10 @@ def _make_river_dl_nc(
         coords={"time": times},
         attrs={"river": river, "station": station, "Conventions": "CF-1.8"},
     )
+    # The mechanics tests below were written with source wall clock == UTC; they say so explicitly. Real river_dl
+    # products carry no zone attribute and are JST (see the time-zone tests at the end).
+    if time_zone is not None:
+        ds.attrs["time_zone"] = time_zone
     ds.to_netcdf(path)
 
 
@@ -236,3 +241,73 @@ def test_river_dl_generator_missing_source_key_raises(
                 "RiverA": {"scale": 1.5},  # 'source' missing
             },
         )
+
+
+# ------------------------------------------------------------------
+# Time zone (TB-FVCOM S18.121): river_dl stamps are JST, FVCOM is UTC
+# ------------------------------------------------------------------
+def test_river_dl_default_zone_is_jst(tmp_path: Path) -> None:
+    """A product without a zone attribute is JST: the value stamped 09:00 (JST) is the 00:00 UTC value."""
+    jst = pd.date_range("2021-07-03 00:00", periods=48, freq="1h")
+    p = tmp_path / "discharge_hourly.nc"
+    _make_river_dl_nc(p, times=jst, discharge=np.arange(48.0), time_zone=None)
+    src = RiverDLNetCDFSource(p)
+    assert src.source_tz == "Asia/Tokyo"
+    utc = pd.date_range("2021-07-03 00:00", periods=12, freq="1h", tz="UTC")
+    np.testing.assert_array_equal(src.get_series("flux", utc), np.arange(9.0, 21.0))
+
+
+def test_river_dl_peak_lands_nine_hours_earlier_in_utc(tmp_path: Path) -> None:
+    """A flood peak at 08:00 JST must appear at 23:00 UTC of the previous day."""
+    jst = pd.date_range("2021-07-02 00:00", periods=72, freq="1h")
+    q = np.zeros(72)
+    q[32] = 100.0  # 2021-07-03 08:00 JST
+    p = tmp_path / "discharge_hourly.nc"
+    _make_river_dl_nc(p, times=jst, discharge=q, time_zone=None)
+    utc = pd.date_range("2021-07-02 00:00", periods=48, freq="1h", tz="UTC")
+    f = RiverDLNetCDFSource(p).get_series("flux", utc)
+    assert utc[int(np.argmax(f))] == pd.Timestamp("2021-07-02 23:00", tz="UTC")
+
+
+def test_river_dl_zone_attribute_and_legacy_dir(tmp_path: Path) -> None:
+    jst = pd.date_range("2021-01-01", periods=24, freq="1h")
+    for attr, sub, want in (
+        ("JST", "a", "Asia/Tokyo"),
+        ("UTC", "b", "UTC"),
+        (None, "LegacyF04v3", "UTC"),
+    ):
+        d = tmp_path / sub
+        d.mkdir()
+        _make_river_dl_nc(
+            d / "discharge_hourly.nc",
+            times=jst,
+            discharge=np.arange(24.0),
+            time_zone=attr,
+        )
+        assert RiverDLNetCDFSource(d / "discharge_hourly.nc").source_tz == want
+    assert (
+        RiverDLNetCDFSource(
+            tmp_path / "a" / "discharge_hourly.nc", source_tz="UTC"
+        ).source_tz
+        == "UTC"
+    )
+
+
+def test_river_dl_year_end_hold_and_limit(tmp_path: Path) -> None:
+    """A JST product ending 23:00 JST stops at 14:00 UTC: the 10 h to the 00:00 UTC bookend are held (warning);
+    a gap beyond the hold limit raises."""
+    jst = pd.date_range("2024-12-30 00:00", "2024-12-31 23:00", freq="1h")
+    p = tmp_path / "discharge_hourly.nc"
+    _make_river_dl_nc(
+        p, times=jst, discharge=np.arange(len(jst), dtype=float), time_zone=None
+    )
+    src = RiverDLNetCDFSource(p)
+    utc = pd.date_range("2024-12-31 00:00", "2025-01-01 00:00", freq="1h", tz="UTC")
+    with pytest.warns(UserWarning, match="outside the"):
+        f = src.get_series("flux", utc)
+    assert (
+        f[14] == len(jst) - 1 and f[-1] == len(jst) - 1
+    )  # 14:00 UTC = last sample; bookend held
+    far = pd.date_range("2024-12-31 00:00", "2025-01-02 00:00", freq="1h", tz="UTC")
+    with pytest.raises(ValueError, match="beyond the source coverage"):
+        src.get_series("flux", far)
