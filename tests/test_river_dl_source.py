@@ -285,12 +285,15 @@ def test_river_dl_zone_attribute_and_legacy_dir(tmp_path: Path) -> None:
             time_zone=attr,
         )
         assert RiverDLNetCDFSource(d / "discharge_hourly.nc").source_tz == want
+    # an explicit source_tz applies to an unattributed file; contradicting a declaration raises
     assert (
         RiverDLNetCDFSource(
-            tmp_path / "a" / "discharge_hourly.nc", source_tz="UTC"
+            tmp_path / "LegacyF04v3" / "discharge_hourly.nc", source_tz="UTC"
         ).source_tz
         == "UTC"
     )
+    with pytest.raises(ValueError, match="contradicts"):
+        RiverDLNetCDFSource(tmp_path / "a" / "discharge_hourly.nc", source_tz="UTC")
 
 
 def test_river_dl_year_end_hold_and_limit(tmp_path: Path) -> None:
@@ -389,3 +392,55 @@ def test_river_dl_daily_support_rules(tmp_path: Path) -> None:
     assert RiverDLNetCDFSource(one / "discharge_daily.nc")._daily_mean is False
     with pytest.raises(ValueError, match="time_support"):
         RiverDLNetCDFSource(u / "discharge_daily.nc", time_support="hourly")
+
+
+def test_river_dl_encoded_offset_with_declared_zone(tmp_path: Path) -> None:
+    """+09:00 units decode to UTC once even when source_tz is given; a JST daily mean encoded with +09:00 is centred
+    at 12:00 JST; conflicting declarations raise; an explicit single-record daily mean is accepted.
+    """
+    ds = xr.Dataset(
+        {"discharge": (("time",), np.array([0.0, 24.0, 48.0], dtype=np.float32))},
+        coords={
+            "time": (
+                "time",
+                np.arange(3),
+                {"units": "days since 2021-07-01 00:00:00+09:00"},
+            )
+        },
+    )
+    ds.to_netcdf(tmp_path / "d.nc")
+    src = RiverDLNetCDFSource(
+        tmp_path / "d.nc", source_tz="Asia/Tokyo", time_support="daily_mean"
+    )
+    f = src.get_series(
+        "flux", pd.DatetimeIndex(["2021-07-02 03:00"], tz="UTC")
+    )  # 2021-07-02 12:00 JST
+    assert f[0] == 24.0
+    with pytest.raises(ValueError, match="contradicts"):
+        RiverDLNetCDFSource(tmp_path / "d.nc", source_tz="America/New_York")
+    c = tmp_path / "c"
+    c.mkdir()
+    _make_river_dl_nc(
+        c / "discharge_hourly.nc",
+        times=pd.date_range("2021-01-01", periods=3, freq="1h"),
+        discharge=np.arange(3.0),
+        time_zone="UTC",
+    )
+    with nc.Dataset(c / "discharge_hourly.nc", "a") as d:
+        d["time"].time_zone = "JST"
+    with pytest.raises(ValueError, match="conflicting"):
+        RiverDLNetCDFSource(c / "discharge_hourly.nc")
+    one = tmp_path / "one"
+    one.mkdir()
+    _make_river_dl_nc(
+        one / "discharge_daily.nc",
+        times=pd.date_range("2021-07-01", periods=1),
+        discharge=np.array([5.0]),
+        time_zone=None,
+    )
+    assert (
+        RiverDLNetCDFSource(
+            one / "discharge_daily.nc", time_support="daily_mean"
+        )._daily_mean
+        is True
+    )

@@ -143,74 +143,87 @@ class RiverDLNetCDFSource(BaseForcingSource):
         "ETC/UTC",
     )
 
+    def _canon(self, tz: str) -> str:
+        up = str(tz).strip().upper()
+        if up in self.JST_ALIASES:
+            return "Asia/Tokyo"
+        if up in self.UTC_ALIASES:
+            return "UTC"
+        return str(tz).strip()
+
     def _resolve_source_tz(self, explicit: str | None) -> str:
-        """Zone of the DECODED time values. Order: explicit argument; an offset in the CF units (xarray has then
-        already decoded to UTC); a zone attribute on ``time`` or the file; ``UTC`` for LegacyF04v3; the river_dl
-        contract (JST). Conflicting declarations raise."""
+        """Civil zone of the product (whose calendar defines its days). Order: explicit argument; a zone attribute on
+        ``time`` / the file (conflicting attributes raise); ``UTC`` for LegacyF04v3; the river_dl contract (JST).
+        Separately, ``self._decoded_utc`` records whether the CF units carry an offset -- then xarray has already
+        decoded the values to UTC instants and they are never localised again; an offset that disagrees with the
+        product zone raises (review job 6979769, amendment 1)."""
         units = str(
             self._ds["time"].encoding.get(
                 "units", self._ds["time"].attrs.get("units", "")
             )
-        )
-        encoded = bool(re.search(r"(Z|[+-]\d{2}:?\d{2}|\bUTC)\s*$", units.strip()))
-        declared = None
-        for attrs in (self._ds["time"].attrs, self._ds.attrs):
+        ).strip()
+        m = re.search(r"(Z|[+-]\d{2}:?\d{2}|\bUTC)$", units)
+        self._decoded_utc = bool(m)
+        declared = {}
+        for where, attrs in (
+            ("time", self._ds["time"].attrs),
+            ("file", self._ds.attrs),
+        ):
             for key in self.ZONE_ATTRS:
                 if attrs.get(key):
-                    declared = str(attrs[key]).strip()
-                    break
-            if declared:
-                break
-        if declared:
-            up = declared.upper()
-            declared = (
-                "Asia/Tokyo"
-                if up in self.JST_ALIASES
-                else ("UTC" if up in self.UTC_ALIASES else declared)
-            )
+                    declared[f"{where}:{key}"] = self._canon(attrs[key])
+        if len(set(declared.values())) > 1:
+            raise ValueError(f"{self._path}: conflicting zone declarations {declared}")
         if explicit:
-            self._zone_basis = "explicit"
-            return explicit
-        if encoded:
-            # decoded values are UTC instants already; a JST declaration next to an offset unit is contradictory
-            if (
-                declared
-                and declared != "UTC"
-                and not units.strip().endswith(("+09:00", "+0900"))
-            ):
+            zone, self._zone_basis = self._canon(explicit), "explicit"
+            if declared and zone != next(iter(declared.values())):
                 raise ValueError(
-                    f"{self._path}: time units {units!r} carry an offset but the file declares {declared!r}"
+                    f"{self._path}: source_tz {explicit!r} contradicts the file's {declared}"
                 )
-            self._zone_basis = "units offset"
-            return "UTC"
-        if declared:
-            self._zone_basis = "attribute"
-            return declared
-        if self._path.parent.name in self.LEGACY_UTC_DIRS:
-            self._zone_basis = "LegacyF04v3"
-            return "UTC"
-        self._zone_basis = "river_dl contract"
-        return "Asia/Tokyo"
+        elif declared:
+            zone, self._zone_basis = next(iter(declared.values())), "attribute"
+        elif self._path.parent.name in self.LEGACY_UTC_DIRS:
+            zone, self._zone_basis = "UTC", "LegacyF04v3"
+        elif self._decoded_utc:
+            zone, self._zone_basis = "UTC", "units offset"
+        else:
+            zone, self._zone_basis = "Asia/Tokyo", "river_dl contract"
+        if self._decoded_utc and m.group(1) not in ("Z", "UTC"):
+            off = m.group(1).replace(":", "")
+            want = (
+                pd.Timestamp(self._ds["time"].values[0])
+                .tz_localize("UTC")
+                .tz_convert(zone)
+                .strftime("%z")
+            )
+            if self._zone_basis in ("explicit", "attribute") and off != want:
+                raise ValueError(
+                    f"{self._path}: units offset {m.group(1)} contradicts zone {zone!r} ({want})"
+                )
+        return zone
 
     def _to_naive_utc(self, idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
-        if self._daily_mean:
-            # A daily product holds the mean over the source-zone calendar day stamped at 00:00; its representative
-            # instant is the middle of that day (12:00 source zone = 03:00 UTC for JST).
-            idx = idx + pd.Timedelta(hours=12)
+        # values -> aware instants: already UTC when the units carried an offset, else wall clock in the source zone
         if idx.tz is None:
-            idx = idx.tz_localize(self._source_tz)
+            idx = idx.tz_localize("UTC" if self._decoded_utc else self._source_tz)
+        if self._daily_mean:
+            # the mean over a source-zone calendar day sits at the middle of that day (12:00 source zone)
+            idx = idx.tz_convert(self._source_tz).normalize() + pd.Timedelta(hours=12)
         return idx.tz_convert("UTC").tz_localize(None)
 
     def _is_daily_mean(self, time_support: str | None) -> bool:
         """True for a product whose value is the mean over a source-zone calendar day. Explicit ``time_support``
         (argument or attribute: "daily_mean" / "instant") or ``cell_methods`` "time: mean" decide; otherwise the
-        cadence rule (midnight stamps, 1-day step) applies ONLY to products under the river_dl contract, whose daily
-        files are daily means (MLIT KIND=7, STP daily volumes); a single-record file is never inferred.
-        """
+        cadence rule (midnight stamps, 1-day step) applies ONLY to products under the river_dl contract. Midnight is
+        tested in the SOURCE calendar (a +09:00-encoded JST day decodes to 15:00 UTC); an explicit daily_mean may
+        have a single record (review job 6979769, amendment 2)."""
         t = pd.DatetimeIndex(self._ds["time"].values)
-        daily_cadence = len(t) >= 2 and bool(
-            pd.Series(t[1:] - t[:-1]).median() == pd.Timedelta(days=1)
-            and (t.normalize() == t).all()
+        local = t.tz_localize(
+            "UTC" if self._decoded_utc else self._source_tz
+        ).tz_convert(self._source_tz)
+        midnight = bool((local.normalize() == local).all())
+        daily_step = len(t) < 2 or bool(
+            pd.Series(local[1:] - local[:-1]).median() == pd.Timedelta(days=1)
         )
         sup = (
             time_support
@@ -223,17 +236,18 @@ class RiverDLNetCDFSource(BaseForcingSource):
                 raise ValueError(
                     f"{self._path}: time_support {sup!r} (expected 'daily_mean' or 'instant')"
                 )
-            if sup == "daily_mean" and not daily_cadence:
+            if sup == "daily_mean" and not (midnight and daily_step):
                 raise ValueError(
-                    f"{self._path}: time_support daily_mean but the axis is not daily at midnight"
+                    f"{self._path}: time_support daily_mean but the stamps are not source-zone midnights"
                 )
             return sup == "daily_mean"
+        inferred = len(t) >= 2 and midnight and daily_step
         if (
             "time: mean" in str(self._ds["discharge"].attrs.get("cell_methods", ""))
-            and daily_cadence
+            and inferred
         ):
             return True
-        return daily_cadence and self._zone_basis == "river_dl contract"
+        return inferred and self._zone_basis == "river_dl contract"
 
     @property
     def source_tz(self) -> str:
