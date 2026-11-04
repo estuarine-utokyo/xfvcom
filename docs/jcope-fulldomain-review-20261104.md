@@ -1858,3 +1858,92 @@ VERDICT: FAIL (0 blocker, 0 major, 3 minor, 0 nit)
 ### Triage
 
 The reviewer CONCEDED the round-13 rebuttal (default endpoint rule stays 'observed'; both rules selectable and recorded). All 3 new findings (minor) accepted. xfvcom 88ff803 (tests/test_round14_review.py, 14 tests): #2 fortran_real() moved to xfvcom/fortran_numbers.py (neutral module; xfvcom/io/sigma_dat.py re-exports it) and used for mesh coordinates, read_dep and parse_dep_dat; read_dat/read_dep no longer accept nan/inf/overflow through float(); #3 leading spaces (not tabs) stripped before the count headers; 20 grid files and 30 depth files read identically. jcopetda 96f429f: #1 the lock file is opened without truncation and without following links (O_NOFOLLOW, regular file checked).
+
+## Round 15 (commit 09b8f67 reviewed; fixes in 2133600)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `09b8f67` and jcopetda `96f429f`. No files were modified.
+
+| Round-14 finding | Status | Evidence |
+|---|---|---|
+| #1: Provisional-tree lock | RESOLVED | Open flags include `O_NOFOLLOW` and exclude `O_TRUNC`; mocked symlink and nonregular-file cases are refused. |
+| #2: Fortran real literals | RESOLVED | The readers share `fortran_real()`; supported exponent forms work, and nonfinite values are rejected. |
+| #3: Indented mesh headers | RESOLVED | Leading spaces work; tab indentation remains rejected. |
+
+All 14 round-14 test cases passed with in-memory file adapters. Nineteen meshes and 30 depth files decoded identically before and after the fix. Production checks covered all five variables at all 13 Tokyo Bay OBC nodes, SADAPT, NPZ reordering, both depth-control rules, and both provisional repair days. The full suite and annual builds were not run.
+
+No round-14 regression was substantiated. The following findings are pre-existing.
+
+1. **Minor — The comparison can approve a field attached to the wrong vertical dimension.**
+
+   Location: [compare_jcope_sources.py:149](/home/pj24001722/ku40000343/Github/xfvcom/scripts/compare_jcope_sources.py:149).
+
+   **Reproduction:** Keep the regional `level=0..45` coordinate, but put `TT` on `(time, wrong_level, lat, lon)`, with `wrong_level=45..0`. Supply numerically matching payloads by array position.
+
+   A mocked execution of the actual comparison reported all five variables `OK` and returned `0`. The generator rejects the same TT variable. The comparison validates the canonical coordinate but never requires TT to use it; the shape assertion cannot establish vertical alignment.
+
+   **Fix:** Validate each variable’s dimension names before comparison, then transpose explicitly to canonical order. Use explicit shape validation rather than an assertion.
+
+2. **Minor — Mesh count headers silently accept fractional and negative counts.**
+
+   Location: [dat_reader.py:61](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:61), also line 67.
+
+   **Reproduction:** In an otherwise valid three-node, one-element mesh, use:
+
+   ```text
+   Node Number = 3.5
+   Cell Number = 1.5
+   ```
+
+   `FvcomGrid.from_dat()` succeeds with three nodes and one element. Negative declarations `-3` and `-1` likewise become positive counts. `re.findall()` extracts the first digit sequence instead of parsing the declared integer. FVCOM’s integer header requests reject the fractional form.
+
+   **Fix:** Parse the complete header value as one positive integer, allowing supported comments and spacing. Reject fractional, negative, and otherwise malformed values.
+
+3. **Minor — Extra mesh records bypass count and duplicate-ID validation.**
+
+   Location: [dat_reader.py:121](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:121), also line 153.
+
+   **Reproduction:** Append another node record after a complete mesh—for example, append `3 0.0 0.0` to a valid three-node mesh.
+
+   `FvcomGrid.from_dat()` returns success and ignores the appended record, including its duplicate ID. The runner’s subsequent depth correspondence check still passes. FVCOM’s `READ_COLDSTART_COORDS` instead reads the additional row and stops because the node count is exceeded.
+
+   **Fix:** After reading the declared node block, reject additional data records. Permit only supported blank/comment content afterward.
+
+4. **Minor — The runner rejects valid trailing comments in depth records.**
+
+   Location: [run_jcope_obc.py:142](/home/pj24001722/ku40000343/Github/xfvcom/scripts/run_jcope_obc.py:142). The analogous restriction exists at line 116 for OBC records.
+
+   **Reproduction:**
+
+   ```text
+   Node Number = 1
+   400000.0 3900000.0 10.0 ! surveyed depth
+   ```
+
+   `read_dep()` returns depth `10.0`; `parse_dep_dat()` rejects the same record as malformed. FVCOM’s list-directed depth read accepts the trailing comment. Unused trailing columns encounter the same exact-token-count restriction.
+
+   **Fix:** Remove Fortran comments before record validation and parse the required leading fields, consistently with FVCOM. Preserve declared-count, finiteness, and coordinate correspondence checks.
+
+5. **Minor — Valid mesh headers fail when the cell count precedes the node count.**
+
+   Location: [dat_reader.py:66](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:66).
+
+   **Reproduction:** Swap only the two count headers:
+
+   ```text
+   Cell Number = 1
+   Node Number = 3
+   ```
+
+   With unchanged valid connectivity and node blocks, `read_dat()` raises `Node/Cell counts not found in DAT file`. It stops scanning immediately upon encountering the cell header. FVCOM independently scans for both keys, rewinding for each lookup, so this ordering is accepted.
+
+   **Fix:** Collect both count headers independently of their order, then locate the connectivity block. Retain strict record-order validation.
+
+## Verdict
+
+VERDICT: FAIL (0 blocker, 0 major, 5 minor, 0 nit)
+
+### Triage
+
+No round-14 regression; all 5 new findings (minor, pre-existing, mesh/depth file parsing and the comparison script) accepted. xfvcom 2133600 (tests/test_round15_review.py, 29 cases): #1 variables are matched by dimension NAME and transposed (wrong_level refused), #2 count headers are one positive integer (duplicates refused), #3 extra data records after a declared block are refused, #4 trailing '!' comments and extra columns in depth/OBC records, #5 the two count headers in either order, connectivity starts at the first four-integer line as in READ_COLDSTART_GRID. 18 grid and 18 depth files read identically.
