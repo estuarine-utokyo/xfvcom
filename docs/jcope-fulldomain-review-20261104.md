@@ -499,3 +499,196 @@ Numbered findings, each with severity, file:line, a reproduction or evidence, an
 | 26 | minor | yes | document states the bound against the interpolation |
 | 27 | minor | yes | failure injection test for both writers |
 | 28 | nit | NO (rebutted) | 'Celcius' is the convention of the existing production OBC files (the module docstring: following the conventions already in use); FVCOM does not parse the string; changing it would make new and old files differ |
+
+## Round 3 (commit 894e28c reviewed; fixes in 48b69af, jcopetda 0624221)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `894e28c` and the jcopetda tool at `8ac3a97`, including the updated documentation at `250406a`. No files were modified.
+
+Validation included 27 existing test cases executed through a read-only harness, diskless NetCDF fault injections, all **2,192 daily files for 2020–2025**, and real production-node reads. The real one-day comparison passed for all five variables. Six simultaneous processes calling `_process_year`, each using one production day, returned finite forcing.
+
+No substantial performance regression was established. Annual source objects serialized to approximately 175 KB, and the day-sized validity check removes round-2 #17’s annual boolean allocation. A complete six-year payload build and actual joblib `--jobs` orchestration were **not** run.
+
+**Round-2 status**
+
+| # | Status | Assessment |
+|---|---|---|
+| 1 | RESOLVED | Searches all ocean candidates and minimizes distance from the requested position. A tie-documentation discrepancy remains under finding 20. |
+| 2 | RESOLVED | Reused source paths, wrong source years, duplicate times, and unapproved discontinuities are rejected. Finding 18 concerns additional helper validation. |
+| 3 | PARTIAL | Ordinary NaN/Inf forcing is rejected; masked arrays and conversion overflow bypass protection. Findings 3–4. |
+| 4 | RESOLVED | Cache acceptance checks the source/grid fingerprint, nodes, coordinates, cells, times, and profile shapes. |
+| 5 | PARTIAL | Root-level aliases are rejected; output year-directory aliases remain destructive. Finding 5. |
+| 6 | RESOLVED | Dimension lengths, coordinate dimensions, and payload shapes are checked. Finding 15 identifies a separate coordinate-mask loophole. |
+| 7 | RESOLVED | Supported packing scales, decoding attributes, offsets, and integer format version are enforced. |
+| 8 | PARTIAL | Irrelevant halo hours are excluded and longer gaps work; unused variables can still force unnecessary halo dependencies. Finding 7. |
+| 9 | RESOLVED | Shared validation checks sigma endpoints, ordering, layer placement, and permitted collapsed layers. |
+| 10 | RESOLVED | Sampled source depths and active-level geometry are validated. |
+| 11 | RESOLVED | Declared counts and malformed initial records are checked. |
+| 12 | RESOLVED | Depth-file coordinates and row correspondence are checked against the mesh. |
+| 13 | PARTIAL | Float32 identifiers can overflow the supposedly validated int32 result. Finding 13. |
+| 14 | RESOLVED | The permitted domain is explicitly limited to the grid plus half a spacing. |
+| 15 | RESOLVED | Complex and boolean cell indices are rejected. |
+| 16 | PARTIAL | xfvcom uses exclusive unique temporaries; the tree builder still deletes other runs’ active temporaries. Finding 6. |
+| 17 | RESOLVED | Archive validity checks operate on daily blocks. |
+| 18 | PARTIAL | Actual repairs and worker provenance are collected; repaired halo dependencies are omitted. Finding 8. |
+| 19 | PARTIAL | Source/grid, vertical, and time alignment checks exist; regional horizontal tolerance remains too loose. Finding 16. |
+| 20 | RESOLVED | Reference selection uses up to two intact levels per side, with the documented boundary fallback. |
+| 21 | RESOLVED | Valid explicit damaged-level declarations handle moderate-only corruption. Declaration validation and diagnostics have defects under findings 9–10. |
+| 22 | RESOLVED | Empty retained-cell diagnostics no longer crash. Finding 11 concerns empty reference levels. |
+| 23 | RESOLVED | EGT explicitly falls back to pure temporal interpolation. |
+| 24 | RESOLVED | Removed days, filled copies, and removed years are reconciled. |
+| 25 | RESOLVED | Explicit paths work without `DATA_DIR`. |
+| 26 | RESOLVED | The document correctly bounds deviation from interpolation, without asserting a bound against truth. |
+| 27 | RESOLVED | Both writer tests now inject failure during payload-variable creation. |
+| 28 | WITHDRAWN | Rebuttal accepted. A production OBC file inspected during this review uses `Celcius`; retaining that established output convention is reasonable. |
+
+**Findings**
+
+1. **Minor — The regional generator does not validate complete horizontal axes.**  
+   Location: [jcope_obc_generator.py:326](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:326).
+
+   **Evidence:** Doubling a synthetic region’s longitude spacing while preserving its origin passes construction and produces forcing. For requested longitude `117.1666667`, the reader samples a regional column labelled `117.2222222`. Only the origin and translated index bounds are checked.
+
+   **Fix:** Require the complete regional latitude/longitude axes to match the corresponding contiguous grid block, with explicit absolute tolerances.
+
+2. **Minor — Regional vertical coordinates and dimension order can silently change profile interpretation.**  
+   Location: [jcope_obc_generator.py:363](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:363).
+
+   **Evidence:** Reversing both the regional level coordinate and its payload preserves the physical dataset, but the generator ignores the coordinate and assigns values to ascending JCOPE indices. The reproduced temperature difference was **8.893334°C**, with entirely finite output. The reader also assigns remaining dimensions positionally without transposing them.
+
+   **Fix:** Validate the supported level coordinate and dimension schema, and explicitly transpose accepted variables into canonical order before reading.
+
+3. **Major — Masked arrays bypass missing-forcing protection.**  
+   Locations: [jcope_obc_generator.py:761](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:761), [jcope_obc_generator.py:878](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:878), and [jcope_obc_generator.py:497](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:497).
+
+   **Evidence:** Both writers successfully wrote fully masked inputs whose underlying values were finite; the resulting NetCDF variables contained missing values. Supplying fully masked raw profiles instead discarded the mask and produced finite temperature `17` everywhere. Masked arrays are ordinary outputs of netCDF4 reads.
+
+   **Fix:** Preserve and inspect masks before conversion. Reject masked forcing, or convert masks to NaN before validation and interpolation.
+
+4. **Minor — Finite float64 inputs can become infinite written forcing.**  
+   Locations: [jcope_obc_generator.py:761](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:761) and [jcope_obc_generator.py:878](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:878).
+
+   **Evidence:** Passing `1e300` to either writer passes finite validation. Conversion into the `f4` variable emits a warning, stores infinity, and returns success.
+
+   **Fix:** Convert to the output dtype under checked conversion, validate that converted array, and write that same array.
+
+5. **Minor — Output year-directory aliases still permit source-file destruction.**  
+   Location: [make_provisional_tree.py:228](/home/pj24001722/ku40000343/Github/jcopetda/tools/make_provisional_tree.py:228).
+
+   **Evidence:** With separate roots `/archive` and `/output`, let `/output/2020` symlink to `/archive/2020`. The root guard passes. A filesystem-mocked execution reached an `os.replace` that would replace the source day with a symlink pointing to itself, then reported success.
+
+   **Fix:** Reject aliased output subdirectories before cleanup or publication. Verify that every output parent resolves inside the output tree and outside the source tree.
+
+6. **Minor — Tree startup cleanup deletes other runs’ active temporary files.**  
+   Location: [make_provisional_tree.py:208](/home/pj24001722/ku40000343/Github/jcopetda/tools/make_provisional_tree.py:208).
+
+   **Evidence:** Every invocation unconditionally unlinks all `.provtmp-*` entries. A mocked second invocation deleted another run’s active temporary. That run subsequently cannot rename its completed file. UUID filenames do not protect against this cleanup.
+
+   **Fix:** Hold an exclusive reconciliation lock before cleanup and rebuilding, or establish ownership and liveness before removing a temporary.
+
+7. **Minor — An unused variable’s gap can prevent otherwise valid reads.**  
+   Location: [jcope_fulldomain.py:175](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_fulldomain.py:175).
+
+   **Evidence:** An intact January 2 TT dataset with `UT_2020010200` declared missing cannot be constructed in interpolation mode when January 1 is absent. Construction raises for UT before a TT-only read can occur. The same issue affects elevation-only or T/S-only builds.
+
+   **Fix:** Resolve halo dependencies when each variable is read, or let construction restrict its required variables.
+
+8. **Minor — Provenance omits provisional repairs used through halo dependencies.**  
+   Location: [jcope_fulldomain.py:155](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_fulldomain.py:155).
+
+   **Evidence:** Repairing January 2 00Z TT using a January 1 23Z neighbor marked with `provisional_fill` reports the January 2 interpolation but omits the neighbor’s provisional repair and method. Notes are restricted to requested days, although output depends on the halo value.
+
+   **Fix:** Track the actual interpolation endpoints and include relevant provisional provenance from those dependencies.
+
+9. **Minor — Invalid damaged-level declarations silently disable intended corruption handling.**  
+   Location: [make_provisional_tree.py:168](/home/pj24001722/ku40000343/Github/jcopetda/tools/make_provisional_tree.py:168).
+
+   **Evidence:** `UT:3-2` produces an empty set; `UX:2` accepts an unknown variable; repeated variable specifications overwrite earlier ranges. In a moderate-corruption probe, valid `UT:2` replaced `9 m/s` with `1 m/s`, whereas reversed-range and misspelled declarations retained `9 m/s` successfully.
+
+   **Fix:** Validate variable names, ascending ranges, active-level bounds, nonempty selections, and repeated specifications before modifying the tree.
+
+10. **Minor — Explicit damaged levels falsify extreme/moderate replacement counts.**  
+    Location: [make_provisional_tree.py:83](/home/pj24001722/ku40000343/Github/jcopetda/tools/make_provisional_tree.py:83).
+
+    **Evidence:** Declaring an otherwise intact level forces its extreme count to one. The reproduced diagnostic was: `1 extreme + -1 moderate garbage cells replaced`, while the actual replacement count was zero. Moderate-only corruption is likewise misclassified.
+
+    **Fix:** Keep the measured extreme count separate from a boolean indicating that a level requires tolerance testing.
+
+11. **Minor — A reference level with no ocean cells crashes repair.**  
+    Location: [make_provisional_tree.py:88](/home/pj24001722/ku40000343/Github/jcopetda/tools/make_provisional_tree.py:88).
+
+    **Evidence:** Setting one reference level’s sea mask entirely false makes `_dev` return an empty array. `np.percentile(d, 99.99)` raises `IndexError`. The later empty retained-cell handling does not cover this earlier calculation.
+
+    **Fix:** Exclude empty levels from usable references and require sufficient finite reference scatter, with a clear error or documented fallback.
+
+12. **Minor — Grid origin/spacing attributes are not checked against grid axes.**  
+    Location: [jcope_grid.py:65](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_grid.py:65).
+
+    **Evidence:** Shifting only `grid_origin_lon` by one cell was accepted. The full-domain payload index remained `i=6`, while the geometry lookup moved from depth **300 m to 350 m**. Consequently, valid data were paired with another cell’s vertical geometry.
+
+    **Fix:** Validate finite positive spacing and agreement between the full axes and `origin + index × spacing` during grid construction.
+
+13. **Minor — Float32 node IDs can overflow after passing validation.**  
+    Location: [jcope_obc_generator.py:577](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:577).
+
+    **Evidence:** `_validate_obc_nodes(np.array([2**31], dtype=np.float32))` returns `[-2147483648]`, with only a warning. The comparison rounds the int32 maximum to float32 before checking it.
+
+    **Fix:** Perform range checking in a representation that preserves the bound, and verify the converted result before returning it.
+
+14. **Minor — Raw-profile overrides can silently drop times or nodes.**  
+    Location: [jcope_obc_generator.py:496](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:496).
+
+    **Evidence:** For a 24-hour source, overrides shaped `(1,46,1)` return successful one-hour forcing. For a two-node generator, overrides shaped `(24,46,1)` return one-node forcing. The public builder succeeds; writers detect the mismatch only later.
+
+    **Fix:** Require every supplied profile to have exactly `(len(self.mjd),46,self.n_obc)` before interpolation.
+
+15. **Minor — Coordinate masks are discarded during archive validation.**  
+    Location: [jcope_fulldomain.py:244](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_fulldomain.py:244).
+
+    **Evidence:** Giving the level coordinate `missing_value=10` makes its tenth entry masked in netCDF4. Construction nevertheless succeeds because `np.asarray` exposes the underlying `10`, allowing comparison with `0..45` to pass.
+
+    **Fix:** Reject masked coordinate entries before conversion, then validate finite coordinate values and supported decoding metadata.
+
+16. **Minor — The comparison script accepts materially shifted regional axes.**  
+    Location: [compare_jcope_sources.py:95](/home/pj24001722/ku40000343/Github/xfvcom/scripts/compare_jcope_sources.py:95).
+
+    **Evidence:** Shifting regional longitude by `0.001°` and latitude by `0.0001°` still produced five `OK` results and exit `0` with horizontally homogeneous synthetic fields. Default `np.allclose` relative tolerance permits these shifts, unlike the explicit archive/grid tolerance.
+
+    **Fix:** Use `rtol=0` and a justified small absolute tolerance consistently for both sources.
+
+17. **Minor — Public ocean lookup silently accepts invalid coordinate arrays.**  
+    Location: [jcope_grid.py:122](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_grid.py:122).
+
+    **Evidence:** On an all-ocean grid, latitude `[NaN]` returns a valid edge cell with only a warning. Latitude `[2]` and longitude `[1,3]` return one result, silently ignoring the second longitude. Generator-side validation does not protect direct grid callers.
+
+    **Fix:** Validate finite coordinates and supported, matching shapes before lookup; validate the search radius explicitly as well.
+
+18. **Minor — The new source-time helper accepts NaN timestamps.**  
+    Location: [run_jcope_obc.py:175](/home/pj24001722/ku40000343/Github/xfvcom/scripts/run_jcope_obc.py:175).
+
+    **Evidence:** `check_time_axis([2020], {2020: np.array([np.nan,np.nan])})` returns successfully because all comparisons with NaN are false. Public writers subsequently reject such times, but this helper does not establish its advertised validation.
+
+    **Fix:** Require finite, nonempty, one-dimensional time arrays before period and step checks.
+
+19. **Minor — Mesh node zero becomes a valid negative array index.**  
+    Locations: [dat_reader.py:70](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:70) and [grid_obj.py:148](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/grid_obj.py:148).
+
+    **Evidence:** A three-node mesh containing element connectivity `0 2 3` passes `FvcomGrid.from_dat`, returning connectivity `[-1,1,2]`. Subsequent indexing silently uses the last node for `-1`; this connectivity also reaches the OBC depth-control path.
+
+    **Fix:** Validate connectivity against both bounds before indexing, preferably rejecting nonpositive identifiers while parsing.
+
+20. **Nit — Nearest-ocean tie behavior contradicts its documentation.**  
+    Location: [jcope_grid.py:135](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_grid.py:135).
+
+    **Evidence:** The docstring promises the first cell in `(j,i)` order for ties. On a unit-spaced all-ocean grid, querying `(1.5,1.5)` returns `(2,2)` through the rounded-cell shortcut, although `(1,1)` is the first equally distant cell.
+
+    **Fix:** Apply the stated tie rule consistently, or document the shortcut’s rounding rule.
+
+## Verdict
+
+VERDICT: FAIL (0 blocker, 1 major, 18 minor, 1 nit)
+
+### Triage
+
+Round-2 #28 (the unit string 'Celcius') was WITHDRAWN by the reviewer after our rebuttal. All 20 round-3 findings were accepted: #3 (major, masked arrays bypassed the finite check) and #1,2,4,7,8,12-18,19,20 in xfvcom 48b69af, each with a regression test (31 of the 35 new tests failed on the old code); #5,6,9,10,11 in jcopetda 0624221 (reconciliation lock, no write through linked year dirs, strict --damaged-levels, measured vs declared damage counts, empty reference levels).
