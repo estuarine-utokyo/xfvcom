@@ -39,6 +39,13 @@ import numpy as np
 # jsasaki 2026-11-05: review round 14 #2: shared helper, re-exported for existing imports
 from ..fortran_numbers import _FORTRAN_REAL, fortran_real  # noqa: F401
 
+# jsasaki 2026-11-05: review round 18 #6: the GET_VALUE model shared with the mesh/depth/OBC readers
+from ..fvcom_input import NUMCHARS as _NUMCHARS  # noqa: F401
+from ..fvcom_input import bad as _bad
+from ..fvcom_input import check_numeric_line as _check_numeric_line
+from ..fvcom_input import fvcom_type as _fvcom_type
+from ..fvcom_input import with_point as _with_point  # noqa: F401
+
 # jsasaki 2026-11-05: review round 11 #2: FVCOM's 32-bit INTEGER range
 from ..grid.gtsz import FORTRAN_INT_MAX, FORTRAN_INT_MIN, GtszSpec
 
@@ -64,7 +71,8 @@ class SigmaFile:
 # READ_COLDSTART_SIGMA (mod_input.F) turns into a silent default for most GTSZ
 # keys (e.g. "GTSZ P1 = 4" runs with P1 = 2.0).  Every form that FVCOM would
 # read differently from its face value is REJECTED here with the fix to apply.
-_NUMCHARS = frozenset("0123456789+-Ee. ")
+# jsasaki 2026-11-05: review round 18 #6: _NUMCHARS, _fvcom_type() and _bad() moved to
+# xfvcom/fvcom_input.py (one GET_VALUE model for every FVCOM input reader); imported at the top
 
 #: SIGMAZ keys and the SCAN_FILE request type FVCOM uses for each
 #: (mod_input.F READ_COLDSTART_SIGMA, case(STYPE_SIGMAZ)).
@@ -131,25 +139,9 @@ def _is_continued_fvcom(line: str) -> bool:
     return _is_continued(line) or _is_continued(_fvcom_buffer(line))
 
 
-def _fvcom_type(val: str) -> str:
-    """The type FVCOM's ``GET_VALUE`` assigns to a value already normalised by
-    :func:`read_sigma_dat` (commas blanked, comment removed, space-trimmed)."""
-    # jsasaki 2026-11-05: review round 8 #2: the value arrives normalised ONCE
-    # (commas -> blanks) and the same text is used for typing and conversion
-    if val in ("T", "F"):
-        return "logical"
-    if any(c not in _NUMCHARS for c in val):
-        return "string"
-    return "float" if "." in val else "integer"
-
-
 def _scan(pairs: dict[str, str], key: str) -> str | None:
     """FVCOM ``SCAN_FILE`` key lookup (exact key text, first occurrence)."""
     return pairs.get(key)
-
-
-def _bad(path: Path, key: str, val: str, need: str) -> ValueError:
-    return ValueError(f"{path}: '{key} = {val}': {need}")
 
 
 def _get_int(path: Path, pairs: dict[str, str], key: str) -> int | None:
@@ -194,95 +186,9 @@ def _check_int32(path: Path, key: str, val: str, iv: int) -> None:
 # conversion shared by the numeric-line validator and the active readers
 # jsasaki 2026-11-05: review round 14 #2: fortran_real() now lives in xfvcom/fortran_numbers.py
 # (shared with the mesh and depth readers) and is re-exported by the import at the top
-
-
-def _with_point(tok: str) -> str:
-    """``tok`` with a decimal point in its mantissa ('8' -> '8.0', '8e-4' ->
-    '8.0e-4', '1-3' -> '1.0-3'), the literal FVCOM types as 'float' with the
-    same value.  A token that is not a real literal is returned with '.0'
-    appended."""
-    m = _FORTRAN_REAL.fullmatch(tok)
-    i = m.end("mant") if m is not None else len(tok)
-    return f"{tok[:i]}.0{tok[i:]}"
-
-
+# jsasaki 2026-11-05: review round 18 #6: _with_point() and _check_numeric_line() moved to
+# xfvcom/fvcom_input.py (shared with the mesh, depth and OBC header scanner); imported at the top
 # <--- jsasaki 2026-11-05
-
-
-# jsasaki 2026-11-05: review round 12 #2: new helper
-def _check_numeric_line(path: Path, lineno: int, key: str, val: str) -> None:
-    """Reject a numeric key/value line FVCOM's ``GET_VALUE`` cannot read.
-
-    ``SCAN_FILE`` (mod_utils.F) calls ``GET_VALUE`` on every line it passes
-    BEFORE comparing the key, and ``GET_VALUE`` converts every token of a
-    numeric value with an internal list-directed ``READ`` without ``IOSTAT``:
-    into the 32-bit ``INTEGER`` buffer when the value has no decimal point, into
-    the ``REAL(DP)`` buffer otherwise.  A token that does not convert therefore
-    stops FVCOM's reader even when its key is never used (an inactive
-    ``GTSZ ZLEV`` / ``GTSZ LOWFRAC``, an unknown key).
-    """
-    typ = _fvcom_type(val)
-    if typ not in ("integer", "float"):
-        return
-    why = (
-        "; FVCOM's SCAN_FILE converts every numeric line it passes before "
-        "matching the key, so it stops here even when the key is unused"
-    )
-    for tok in val.split():
-        if typ == "integer":
-            try:
-                iv = int(tok)
-            except ValueError:
-                hint = ""
-                try:
-                    # jsasaki 2026-11-05: review round 13 #2: Fortran real syntax
-                    fortran_real(tok)
-                    hint = (
-                        f" -- for a floating value write it with a decimal point, "
-                        f"e.g. '{_with_point(tok)}'"
-                    )
-                except ValueError:
-                    pass
-                raise _bad(
-                    path,
-                    key,
-                    val,
-                    f"line {lineno}: '{tok}' is not a valid integer (a value without "
-                    f"a decimal point is read as an INTEGER){why}{hint}",
-                ) from None
-            if not FORTRAN_INT_MIN <= iv <= FORTRAN_INT_MAX:
-                raise _bad(
-                    path,
-                    key,
-                    val,
-                    f"line {lineno}: '{tok}' is outside FVCOM's 32-bit INTEGER "
-                    f"range [{FORTRAN_INT_MIN}, {FORTRAN_INT_MAX}] (a value without "
-                    f"a decimal point is read as an INTEGER){why}",
-                )
-        else:
-            # ---> jsasaki 2026-11-05: review round 13 #2: Fortran real syntax
-            # ('1.0-3' is valid); overflow is told apart from bad syntax
-            if _FORTRAN_REAL.fullmatch(tok) is None:
-                raise _bad(
-                    path,
-                    key,
-                    val,
-                    f"line {lineno}: '{tok}' is not a valid floating value (not a "
-                    f"Fortran real literal){why}",
-                )
-            try:
-                fortran_real(tok)
-            except ValueError:
-                raise _bad(
-                    path,
-                    key,
-                    val,
-                    f"line {lineno}: '{tok}' is not finite (overflows REAL(DP): "
-                    "Intel Fortran stops on it, gfortran reads Infinity); FVCOM's "
-                    "SCAN_FILE converts every numeric line it passes before matching "
-                    "the key, even when the key is unused",
-                ) from None
-            # <--- jsasaki 2026-11-05
 
 
 #: FVCOM's fallback for a floating key it cannot read (mod_input.F)

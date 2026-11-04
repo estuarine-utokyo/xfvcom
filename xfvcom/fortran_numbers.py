@@ -49,6 +49,12 @@ def fortran_real(tok: str) -> float:
 
 #: A list-directed value separator: a comma with optional blanks around it, or blanks alone.
 _LIST_SEPARATOR = re.compile(r"\s*,\s*|\s+")
+# ---> jsasaki 2026-11-05: review round 18 #7: list-directed repetition 'r*value' / 'r*'
+#: A repeated value: a positive repeat count, '*', and the value (empty = r null values).
+_REPEAT = re.compile(r"(?P<r>[0-9]+)\*(?P<val>.*)")
+#: Upper bound on the fields one record expands to (callers use only the first few).
+MAX_LIST_FIELDS = 4096
+# <--- jsasaki 2026-11-05
 
 
 def list_fields(body: str) -> list[str]:
@@ -59,7 +65,9 @@ def list_fields(body: str) -> list[str]:
     commas, or a leading comma -- is returned as an empty string, which no
     numeric conversion accepts, so a record relying on Fortran's
     leave-unchanged semantics for null values is refused by the caller.  A
-    trailing comma ends the record and adds no field.
+    trailing comma ends the record and adds no field.  A repeated value
+    ``r*value`` becomes ``r`` fields (``1*3150`` -> ``3150``, ``2*`` -> two null
+    values), bounded by ``MAX_LIST_FIELDS``.
     """
     s = body.strip()
     if not s:
@@ -67,4 +75,20 @@ def list_fields(body: str) -> list[str]:
     fields = _LIST_SEPARATOR.split(s)
     if fields and fields[-1] == "" and s.endswith(","):
         fields.pop()
-    return fields
+    # ---> jsasaki 2026-11-05: review round 18 #7: expand 'r*value' (r >= 1) into r copies, at most
+    # MAX_LIST_FIELDS fields in all; 'r*' alone is r null values (empty fields, refused by every
+    # conversion), and '0*5' or '*5' stay as they are (no conversion accepts them either)
+    out: list[str] = []
+    for f in fields:
+        m = _REPEAT.fullmatch(f)
+        rs = m["r"].lstrip("0") if m is not None else ""
+        if m is not None and rs:
+            # a count of more than 18 digits is only needed up to the bound
+            r = int(rs) if len(rs) <= 18 else MAX_LIST_FIELDS
+            out.extend([m["val"]] * min(r, MAX_LIST_FIELDS - len(out)))
+        else:
+            out.append(f)
+        if len(out) >= MAX_LIST_FIELDS:
+            break
+    return out
+    # <--- jsasaki 2026-11-05

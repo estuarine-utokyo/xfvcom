@@ -207,9 +207,11 @@ def test_round15_depth_checks_are_kept(tmp_path):
     f.write_text("Node Number = 1\n400000.0 3900000.0 ! 10.0\n")
     with pytest.raises(ValueError, match="malformed depth record"):
         r.parse_dep_dat(f)
-    # a comment-only line is not a record (FVCOM would count it as a bad row)
-    f.write_text("Node Number = 1\n! note\n400000.0 3900000.0 10.0\n")
-    with pytest.raises(ValueError, match="declares 1 record"):
+    # a comment-only line inside the record block is counted by FVCOM as a bad row
+    # jsasaki 2026-11-05: review round 18 #3: before the first record it is a header line (FVCOM's
+    # header-skip loop passes over it); inside the block it still breaks the row count
+    f.write_text("Node Number = 2\n400000.0 3900000.0 10.0\n! note\n4.0e5 3.9e6 1.0\n")
+    with pytest.raises(ValueError, match="declares 2 record"):
         r.parse_dep_dat(f)
     f.write_text("Node Number = 1\n400000.0 3900000.0 inf ! x\n")
     with pytest.raises(ValueError, match="malformed depth record"):

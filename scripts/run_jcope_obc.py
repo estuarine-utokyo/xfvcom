@@ -25,7 +25,7 @@ import argparse
 import os
 
 # jsasaki 2026-11-05: review round 2 #2 #4 #11 #12: strict parsers, time-axis and cache checks
-import re
+# jsasaki 2026-11-05: review round 18 #4: 're' no longer needed (header regexes replaced)
 import sys
 import tempfile
 from pathlib import Path
@@ -36,7 +36,14 @@ from numpy.typing import NDArray
 
 # jsasaki 2026-11-05: review round 14 #2: shared Fortran real-literal conversion
 # jsasaki 2026-11-05: review round 17 #4: list-directed fields (commas separate like blanks)
-from xfvcom.fortran_numbers import fortran_real, list_fields
+# jsasaki 2026-11-05: review round 18 #1-#7: list_fields now reached through the shared scanner
+from xfvcom.fortran_numbers import fortran_real
+from xfvcom.fvcom_input import (
+    first_record_index,
+    is_comment_only,
+    record_fields,
+    scan_count_headers,
+)
 from xfvcom.grid.grid_obj import FvcomGrid
 from xfvcom.io import (
     FullDomainSource,
@@ -46,11 +53,14 @@ from xfvcom.io import (
     write_tsobc_nc,
 )
 
+# jsasaki 2026-11-05: review round 18 #8: the generator's real-dtype guard, reused for the npz arrays
+from xfvcom.io.jcope_obc_generator import _plain_float
+
 # jsasaki 2026-11-05: review round 2 #2 #11 #12: constants of the strict parsers / time-axis check
-# jsasaki 2026-11-05: review round 15 #4: a trailing '!' comment is allowed (FVCOM's GET_VALUE)
-_OBC_HEADER = re.compile(r"^OBC Node Number\s*=\s*(\d+)\s*(?:!.*)?$")
-# jsasaki 2026-11-05: review round 15 #4: a trailing '!' comment is allowed (FVCOM's GET_VALUE)
-_DEP_HEADER = re.compile(r"^Node Number\s*=\s*(\d+)\s*(?:!.*)?$")
+# jsasaki 2026-11-05: review round 18 #4: the exact SCAN_FILE keys, looked up by the shared scanner
+# (xfvcom/fvcom_input.py: commas, a signed count, '!' comments, the 400-byte buffer)
+_OBC_KEY = "OBC Node Number"
+_DEP_KEY = "Node Number"
 DEP_XY_ATOL = 1e-3  # depth-file coordinates are written with 6 decimals
 _HOUR = 1.0 / 24.0  # days
 _STEP_TOL = 1e-6  # days (0.09 s)
@@ -87,32 +97,44 @@ def format_year_label(years: list[int]) -> str:
     return f"{min(years)}-{max(years)}"
 
 
-def _declared_block(path: Path, header: re.Pattern) -> tuple[int, list[str]]:
-    """The count N of the one header line ``... = N`` and the non-blank records after it."""
-    lines = [s.strip() for s in path.read_text().splitlines()]
-    lines = [s for s in lines if s]
-    m = header.match(lines[0]) if lines else None
-    if m is None:
-        raise ValueError(f"{path}: the first line is not the header {header.pattern!r}")
-    n = int(m.group(1))
-    records = lines[1:]
-    if n < 1 or len(records) != n:
+# ---> jsasaki 2026-11-05: review round 18 #1-#7: the count header through the shared FVCOM scanner,
+# the records after it as FVCOM's READ_COLDSTART_* loops see them
+def _declared_block(path: Path, key: str) -> tuple[int, list[tuple[int, str]]]:
+    """The count N of the ``<key> = N`` header and the N records of the block that follows.
+
+    Comment-only and ``key = value`` lines before the first record are header lines (FVCOM's
+    header-skip loop passes over them); the header is looked up as SCAN_FILE does
+    (:func:`xfvcom.fvcom_input.scan_count_headers`).  Blank lines are not records (a list-directed
+    READ passes over them).  A comment-only line INSIDE the record block is refused: FVCOM's
+    list-directed ``READ(unit,*,IOSTAT=IOS)`` fails on the '!' (gfortran IOSTAT 5010, ifx 59,
+    checked 2026-11-05), and READ_COLDSTART_OBC_GRID / READ_COLDSTART_DEPTH count every READ that
+    does not hit end-of-file as one row, so the row count no longer matches the header.
+    """
+    lines = [
+        (n, s) for n, s in enumerate(path.read_text().splitlines(), 1) if s.strip()
+    ]
+    start = first_record_index(lines)
+    counts = scan_count_headers(path, lines, {key: "n"}, start, block="record block")
+    if "n" not in counts:
+        raise ValueError(
+            f"{path}: the header '{key} = N' was not found before the first record (FVCOM "
+            f"looks up the exact, case-sensitive key '{key}')"
+        )
+    n = counts["n"]
+    records = lines[start:]
+    for lineno, raw in records:
+        if is_comment_only(raw):
+            raise ValueError(
+                f"{path}: line {lineno}: comment-only line inside the record block; FVCOM's "
+                "list-directed READ fails on it and counts it as one more row, so the header "
+                f"declares {n} record(s) but FVCOM reads {len(records)} -- move the comment "
+                "above the first record or after a record on the same line"
+            )
+    if len(records) != n:
         raise ValueError(
             f"{path}: the header declares {n} record(s), the file holds {len(records)}"
         )
     return n, records
-
-
-# ---> jsasaki 2026-11-05: review round 15 #4: comment-stripped record fields
-def _record_fields(line: str) -> list[str]:
-    """The list-directed fields (blank- or comma-separated) of a record before any '!' comment.
-
-    A comment-only line yields no fields, so it is refused as a malformed record: FVCOM's
-    list-directed read would count it as a (bad) row of the block.
-    """
-    # jsasaki 2026-11-05: review round 17 #4: commas separate fields like blanks (list-directed READ);
-    # a null value (',,') is an empty field, which the int/real conversion refuses
-    return list_fields(line.split("!", 1)[0])
 
 
 # <--- jsasaki 2026-11-05
@@ -127,12 +149,14 @@ def parse_obc_dat(path: Path) -> np.ndarray:
     """
     # ---> jsasaki 2026-11-05: review round 2 #11: one recognised header, its count enforced, every
     # record (the first included) parsed strictly
-    _n, records = _declared_block(Path(path), _OBC_HEADER)
+    # jsasaki 2026-11-05: review round 18 #3 #4: shared header scanner, numbered records
+    _n, records = _declared_block(Path(path), _OBC_KEY)
     nodes: list[int] = []
-    for line in records:
+    for _lineno, line in records:
         # jsasaki 2026-11-05: review round 15 #4: FVCOM reads the leading N1,N2,N3 list-directed;
         # a trailing '!' comment and unused further columns are ignored
-        parts = _record_fields(line)
+        # jsasaki 2026-11-05: review round 18 #7: shared fields with 'r*value' repetition expanded
+        parts = record_fields(line)
         try:
             if len(parts) < 3:
                 raise ValueError
@@ -156,12 +180,14 @@ def parse_dep_dat(path: Path, node_xy: np.ndarray | None = None) -> np.ndarray:
     or one of another mesh is refused instead of putting depths on the wrong nodes.
     """
     # ---> jsasaki 2026-11-05: review round 2 #12: the whole declared block, strictly, with coordinates
-    _n, records = _declared_block(Path(path), _DEP_HEADER)
+    # jsasaki 2026-11-05: review round 18 #3 #4: shared header scanner, numbered records
+    _n, records = _declared_block(Path(path), _DEP_KEY)
     rows: NDArray[np.float64] = np.empty((len(records), 3), dtype=np.float64)
-    for k, line in enumerate(records):
+    for k, (_lineno, line) in enumerate(records):
         # jsasaki 2026-11-05: review round 15 #4: FVCOM reads the leading X,Y,H list-directed; a
         # trailing '!' comment and unused further columns are ignored (as xfvcom.io.read_dep does)
-        parts = _record_fields(line)
+        # jsasaki 2026-11-05: review round 18 #7: shared fields with 'r*value' repetition expanded
+        parts = record_fields(line)
         try:
             if len(parts) < 3:
                 raise ValueError
@@ -350,9 +376,12 @@ def load_siglev_npz(
     with np.load(path) as d:
         if "siglev" not in d.files:
             raise ValueError(f"--siglev-npz {path} has no array 'siglev'")
-        z = np.asarray(d["siglev"], dtype=np.float64)
+        # ---> jsasaki 2026-11-05: review round 18 #8: real numeric dtypes required BEFORE the cast
+        # (a complex -> float64 cast drops a non-finite imaginary part before the finiteness check)
+        z = _plain_float(d["siglev"], "--siglev-npz 'siglev'")
         ids = np.asarray(d["obc_node"]) if "obc_node" in d.files else None
-        h_rec = np.asarray(d["h"], dtype=np.float64) if "h" in d.files else None
+        h_rec = _plain_float(d["h"], "--siglev-npz 'h'") if "h" in d.files else None
+        # <--- jsasaki 2026-11-05
     if z.ndim != 2 or z.shape[1] < 2:
         raise ValueError(f"--siglev-npz 'siglev' must be (n_obc, KB), got {z.shape}")
     if not np.all(np.isfinite(z)):
