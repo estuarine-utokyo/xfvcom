@@ -2245,3 +2245,113 @@ VERDICT: FAIL (0 blocker, 0 major, 8 minor, 0 nit)
 ### Triage
 
 All 8 findings accepted (minor; #1 a round-17 regression), #3 with a PARTIAL REBUTTAL. xfvcom d47f778 (tests/test_round18_review.py, 26 cases): one shared FVCOM header/record scanner in xfvcom/fvcom_input.py replaces the per-reader regexes (used by read_dat, read_dep, parse_obc_dat, parse_dep_dat); #1/#2 the 400-byte line and 40-byte key limits count UTF-8 bytes and only matter when the cut changes the interpretation (a long '!' comment is fine); #4 'OBC Node Number = 13,' and 'Node Number = +3210' accepted; #5 tabs in count values refused; #6 every header line up to the last count header gets the unconditional GET_VALUE-style numeric check ('mesh_scale = 1e3' refused; continuation lines refused); #7 list-directed 'r*value' expanded (cap 4096 fields, repeated nulls refused); #8 complex siglev/h refused. #3: blank and comment lines BEFORE the first record are accepted, but a comment-only line INSIDE a depth/OBC record block is still refused: gfortran (IOSTAT 5010) and ifx (59) fail on it and FVCOM's read loops count that row, so the file has one row too many for FVCOM; the reviewer's recipe (insert between records) describes a file FVCOM cannot read. 149 grid/depth/OBC files read identically (0 differ).
+
+## Round 19 (commit b17a37e reviewed; fixes in fea58bc)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `b17a37e` and jcopetda `96f429f`. No files were modified.
+
+| Round-18 finding | Status | Verification |
+|---|---|---|
+| #1 Long header comments | RESOLVED | Harmless comments pass; truncation that changes the count fails. |
+| #2 Byte-based buffer limits | RESOLVED | The reported multibyte overflow is rejected. |
+| #3 Standalone comments | RESOLVED; rebuttal conceded | Leading comments pass. The original demand to accept interior comments is withdrawn. |
+| #4 Signed/comma-terminated counts | RESOLVED | Both reported forms pass. |
+| #5 Tabs in count values | RESOLVED | Rejected while record tabs remain supported. |
+| #6 Traversed numeric headers | RESOLVED | Invalid numeric headers and continuations are rejected. |
+| #7 Repetition syntax | RESOLVED | Ordinary repetitions work; oversized counts introduce finding 2 below. |
+| #8 Complex NPZ arrays | RESOLVED | Complex `siglev` and `h` are rejected before conversion. |
+
+**Rebuttal:** I concede round-18 #3. FVCOM’s reads at [mod_input.F:4785](/home/pj24001722/ku40000343/Github/FVCOM/src/mod_input.F:4785) and [mod_input.F:5088](/home/pj24001722/ku40000343/Github/FVCOM/src/mod_input.F:5088) increment the row count whenever `IOS >= 0`, including conversion errors. An in-memory gfortran reproduction returned `IOSTAT=5010` for an interior comment and counted three rows against two declared records.
+
+Validation passed: all **91 regression cases from rounds 15–18**, production mesh and 30 depth-file checks, a one-day comparison of all five variables at all 13 OBC nodes, uniform sigma, both depth-control rules, SADAPT, the production NPZ coordinate, and diskless serialization through both writers. The comparison script returned `0`. Both repaired-day samples were finite and retained provisional provenance. Full annual builds and the complete suite were not rerun.
+
+1. **Minor — Free-text depth titles are newly rejected.**
+
+   **Location:** [fvcom_input.py:320](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/fvcom_input.py:320), reached by [dep_reader.py:59](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/dep_reader.py:59). **Round-18 regression in `read_dep()`.**
+
+   **Reproduction:**
+
+   ```text
+   Tokyo Bay bathymetry
+   Node Number = 1
+   400000.0 3900000.0 10.0
+   ```
+
+   The previous `read_dep()` returns `[10.0]`. The current reader raises “count header … follows the start of the depth records.” `first_record_index()` mistakes any noncomment line without `=` for data.
+
+   FVCOM’s header search skips unsuccessful numeric reads, including this title. Its `GET_VALUE` also returns “no data” for a line without `=`.
+
+   **Fix:** Locate the first successfully readable numeric record, using the required field types, rather than classifying every free-text line as data. Preserve physical-line information and strict validation inside the resulting block.
+
+2. **Minor — Capped repetition expansion accepts counts that Fortran rejects.**
+
+   **Location:** [fortran_numbers.py:87](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/fortran_numbers.py:87). **Round-18 regression.**
+
+   **Reproduction:**
+
+   ```text
+   OBC Node Number = 1
+   1 3150 999999999999999999999*1
+   ```
+
+   `parse_obc_dat()` successfully returns `[3150]`. The tokenizer substitutes `4096` for the oversized repetition count and supplies valid-looking leading fields. A gfortran reproduction rejects this record; FVCOM consequently cannot read the declared block.
+
+   The allocation cap prevents excessive memory use but also hides an invalid numeric count.
+
+   **Fix:** Validate repetition counts against supported Fortran runtime limits before applying the expansion cap. Reject unsupported counts explicitly instead of substituting a smaller count.
+
+3. **Minor — Attached slash terminators are rejected despite being valid list-directed input.**
+
+   **Location:** [fortran_numbers.py:75](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/fortran_numbers.py:75). Pre-existing.
+
+   **Reproduction:**
+
+   ```text
+   OBC Node Number = 1
+   1 3150 1/
+   ```
+
+   `parse_obc_dat()` reports a malformed record. Likewise, a depth record ending in `10.0/` fails both depth readers.
+
+   The compiler reproduction reads `1 3150 1/` successfully as `(1, 3150, 1)`. `/` terminates a list-directed read and need not have surrounding whitespace. The tokenizer currently leaves it attached to the numeric token.
+
+   **Fix:** Recognize `/` as a list-directed terminator. Accept it after all required fields have been supplied; reject records where it leaves required fields unset.
+
+4. **Minor — Physical-line counting rejects valid records spanning lines.**
+
+   **Location:** [run_jcope_obc.py:124](/home/pj24001722/ku40000343/Github/xfvcom/scripts/run_jcope_obc.py:124), with analogous per-line assumptions in the mesh/depth readers. Pre-existing.
+
+   **Reproduction:**
+
+   ```text
+   OBC Node Number = 2
+   1 3150
+   1
+   2 3142
+   1
+   ```
+
+   The runner rejects this as four records against two declared. The compiler reproduction of FVCOM’s header-skip and data loops reads exactly two records: `(1,3150,1)` and `(2,3142,1)`. A list-directed read continues onto another physical line when it still needs values.
+
+   **Fix:** Count completed numeric reads rather than physical lines. Use a record iterator that consumes continuation lines until the required fields are supplied, while preserving FVCOM’s treatment of unused trailing fields and conversion errors.
+
+5. **Minor — Removing leading blanks hides FVCOM’s header-rewind misalignment.**
+
+   **Location:** [run_jcope_obc.py:113](/home/pj24001722/ku40000343/Github/xfvcom/scripts/run_jcope_obc.py:113). Pre-existing; the shared readers also discard these blanks.
+
+   **Reproduction:** Prepend one blank line to the production `TokyoBay_obc.dat`. Python accepts the unchanged 13 nodes.
+
+   In FVCOM’s header search, the first numeric read skips that blank and then fails on the count header. `NHEADER` becomes **1**, although two physical lines were consumed. After rewinding, FVCOM skips only the blank, reads the header again as a bad data row, and counts **14 rows**. An in-memory compiler reproduction using the production file confirmed this sequence.
+
+   Blanks after the final header or between numeric records do not exhibit this particular mismatch.
+
+   **Fix:** Retain physical blanks while modelling the header search and rewind. Reject inputs whose replay starts inside the header, with a diagnostic identifying the offending blank line.
+
+## Verdict
+VERDICT: FAIL (0 blocker, 0 major, 5 minor, 0 nit)
+
+### Triage
+
+The reviewer CONCEDED the round-18 #3 rebuttal (FVCOM's reads at mod_input.F:4785/5088 count a row whenever IOS >= 0). All 5 new findings accepted (minor; #1 and #2 round-18 regressions; #3-#5 list-directed Fortran read semantics). xfvcom fea58bc (tests/test_round19_review.py): the OBC, depth and mesh readers count list-directed READs instead of physical lines (xfvcom/fvcom_input.py: list_read, read_all, locate_records; checked with gfortran 8.5 and ifx): #1 the data block starts at FVCOM's first successful typed READ (free-text title lines, even with '=', read again), #2 repetition counts beyond the Fortran runtime limit are errors, never silently capped, #3 '/' ends a read, #4 records may continue onto later lines, #5 a blank line that throws off FVCOM's header skip is rejected and named. 149 grid/depth/OBC files read identically (0 differ).
