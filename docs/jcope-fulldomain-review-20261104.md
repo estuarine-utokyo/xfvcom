@@ -1103,3 +1103,113 @@ VERDICT: FAIL (0 blocker, 2 major, 8 minor, 0 nit)
 ### Triage
 
 All 10 findings accepted. Only #4 (umask fallback) and #5 (source-year alias in the jcopetda tool) were defects of this work; #1 #2 #3 #6 #7 #8 #9 #10 are pre-existing defects of general xfvcom modules (the round-5/6 prompts asked for 'everything it touches', which pulled the whole grid library in). Fixed in 0d0102e (31 tests, 27 failed on the old code): shared connectivity normalisation (#1), geographic grids are marked and metric areas raise (#2: marked, not projected), gtsz load_mesh transposes always (#3), writer permission policy (#4), control-volume vertices via the grid's projection (#6), topology caches keyed on an nv fingerprint (#7), strict selectors (#8), JcopeGrid mask validation (#9), elems2nodes float accumulator (#10). jcopetda 61ad7e8: #5. Behaviour changes for existing callers are listed in the commit message of 0d0102e. From round 7 on the review scope is stated explicitly (the modules run_jcope_obc.py reaches), because the free audit had left the subject of this work.
+
+## Round 7 (commit 98e74bf reviewed, scope stated explicitly; fixes in 294c361, jcopetda 41c46e4)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `98e74bf` and jcopetda `61ad7e8`. No files were modified.
+
+Validation included 17 existing file-free regression cases, in-memory NetCDF and filesystem mocks, and real 2020-01-01 data at all 13 production OBC nodes. All five raw variables matched the regional archive within packing tolerance. Uniform-sigma, SADAPT and depth-control builds produced finite forcing. The complete suite and six-year build were not rerun.
+
+**Round-6 status**
+
+| Finding | Status | Verification |
+|---|---|---|
+| 1. Connectivity consumers | RESOLVED | Core loader, input loader and meteorological writer preserve explicitly zero-based connectivity, including meshes omitting node zero. |
+| 2. Geographic areas | RESOLVED | All three metric-area methods reject geographic grids; the geographic flag survives reconstruction. |
+| 3. Three-element sigma-z meshes | RESOLVED | `load_mesh()` returns the intended triangle rows for a three-element mesh. |
+| 4. Writer permissions | RESOLVED | Replacements retain existing permission bits; unknown umask retains `0600`; known masks produce the expected new-file modes. |
+| 5. Source-year aliases | RESOLVED | The reported source-year alias is rejected before day publication. A separate day-file alias remains: finding 5 below. |
+| 6. Geographic control volumes | RESOLVED | Projection-based vertices agree with independently transformed vertices in both hemispheres. |
+| 7. Connectivity cache invalidation | RESOLVED | Replacement and in-place connectivity edits produce the same topology and areas as fresh objects. |
+| 8. Selectors | RESOLVED | Reported fractional, masked, Boolean and invalid-base selectors are rejected; duplicate-node area sums count nodes once. |
+| 9. Static mask | RESOLVED | Missing and nonbinary decoded masks are rejected; valid binary masks load. |
+| 10. Integer interpolation | RESOLVED | Integer inputs work across supported ranks; Boolean interpolation works and float32 output retains its dtype. |
+
+**Findings**
+
+1. **Major — `--siglev-npz` ignores the node identities and bathymetry accompanying the coordinate.**  
+   Location: [scripts/run_jcope_obc.py:648](/home/pj24001722/ku40000343/Github/xfvcom/scripts/run_jcope_obc.py:648). Pre-existing.
+
+   **Evidence:** The production `lsc2_obc_siglev_kb51.npz` contains `siglev`, `obc_node` and `h`, but the runner reads only `siglev` and checks the node count. Reversing the OBC order therefore passes validation while assigning coordinates to different nodes. The equivalent column-swap check using production-day profiles changed temperature by up to **7.7488°C**, with finite output throughout.
+
+   The same NPZ is accepted with `TokyoBay_dep.dat`, although its recorded depths differ by up to **347.18 m**. Its intended matching depth file agrees within approximately `6e-6 m`.
+
+   **Fix:** Validate supplied node IDs and reorder coordinates explicitly by ID, or reject order mismatches. Validate recorded depths against the selected OBC depths. Require sufficient identity metadata to establish that externally built coordinates belong to the requested boundary.
+
+2. **Major — Sigma-file numeric parsing can construct a different coordinate from the one FVCOM actually uses.**  
+   Location: [xfvcom/io/sigma_dat.py:119](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:119). Pre-existing.
+
+   **Reproduction:** Read a pure SIGMAZ file containing:
+
+   ```text
+   NUMBER OF SIGMA LEVELS = 31
+   SIGMA COORDINATE TYPE = SIGMAZ
+   GTSZ BASE = 2
+   GTSZ P1 = 4
+   ```
+
+   Python uses `P1=4`. FVCOM’s scanner classifies decimal-less `4` as an integer, rejects the floating-scalar request, and [falls back to `P1=2`]( /home/pj24001722/ku40000343/Github/FVCOM/src/mod_input.F:5728). The resulting interfaces differ by up to **37.29 m** in a 300 m column. Using the production-day profiles, the resulting temperature fields differed by **2.8824°C**, while both passed forcing validation.
+
+   This is reachable through ordinary library-generated files: `gtsz_to_lines()` formats nondefault integral-valued floating parameters with `:g`, producing precisely this syntax.
+
+   **Fix:** Make the reader reproduce FVCOM’s effective parameter semantics, or reject forms that FVCOM interprets differently. Emit decimal literals for floating parameters.
+
+3. **Minor — LOWFRAC coordinates omit FVCOM’s normalization step.**  
+   Location: [xfvcom/grid/gtsz.py:385](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/gtsz.py:385). Pre-existing.
+
+   **Reproduction:** Use `kb=5`, `base=1`, `k1=2`, `sadapt=True`, `lowsig=True`, and `lowfrac=(0.33331, 0.33331, 0.33331)`. Their sum, `0.99993`, passes both implementations’ tolerance checks. FVCOM [normalizes the fractions]( /home/pj24001722/ku40000343/Github/FVCOM/src/mod_input.F:5774); Python accumulates the original fractions.
+
+   With `H=300 m` and `href=20 m`, the resulting interfaces differ by approximately **13.1 mm**. Thus the runner’s supposedly matching per-node coordinate differs systematically from the model’s coordinate.
+
+   **Fix:** Normalize accepted LOWFRAC values before accumulating them, consistently with FVCOM.
+
+4. **Minor — GTSZ validation accepts model-invalid parameters that produce plausible finite coordinates.**  
+   Location: [xfvcom/grid/gtsz.py:129](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/gtsz.py:129). Pre-existing.
+
+   **Reproduction:** Both `GtszSpec(kb=31, p1=0.0)` and `GtszSpec(kb=31, smooth=-1.0)` pass `validate()`. Their constructed columns also pass the generator’s sigma validation.
+
+   With `P1=0`, most interfaces cluster near sigma `-0.5`; negative smoothing silently selects the unsmoothed branch. FVCOM explicitly rejects these settings at startup. Corresponding decimal-valued `sigma.dat` entries reach these paths through the runner.
+
+   **Fix:** Mirror FVCOM’s relevant startup checks, including finite positive A2 `P1`, finite nonnegative `SMOOTH`, and the SADAPT surface-band constraints.
+
+5. **Minor — Individual source-day aliases can still destroy the last good payload during provisional rebuilding.**  
+   Location: [jcopetda/tools/make_provisional_tree.py:275](/home/pj24001722/ku40000343/Github/jcopetda/tools/make_provisional_tree.py:275). Pre-existing.
+
+   **Reproduction:** Keep both year directories ordinary directories, but arrange:
+
+   ```text
+   /archive/2020/jcopetda_20200101.nc -> /output/2020/jcopetda_20200101.nc
+   /output/2020/jcopetda_20200101.nc  = valid ordinary day file
+   ```
+
+   A filesystem-mocked execution of the actual `main()` passed both directory guards, replaced the output payload with a link back to the source alias, and reported `1 links, 0 filled copies`. Both paths then formed a symlink loop; the payload was gone.
+
+   **Fix:** Preflight individual source-day paths before reconciliation. Reject files resolving inside the output tree or aliasing destination entries.
+
+6. **Minor — Exhausting the grassfire sweep budget returns an unconverged reference surface as success.**  
+   Location: [xfvcom/grid/gtsz_builder.py:167](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/gtsz_builder.py:167). Pre-existing.
+
+   **Reproduction:** On the production Tokyo Bay mesh and `TokyoBay_dep_m7001tp_rfac0p2_cap300.dat`, use the production SADAPT specification’s slope and inject `max_sweep=1`. The function returns normally, although its reference depths differ from the converged result by up to **225.18 m**.
+
+   The function never distinguishes convergence from budget exhaustion. The runner uses the default budget, so this requires an unusually demanding mesh or an injected limit; the checked Tokyo Bay default converges.
+
+   **Fix:** Track convergence and raise when the budget is exhausted without satisfying the tolerance. Match FVCOM’s explicit failure behavior.
+
+7. **Minor — The shared connectivity fix silently accepts contradictory indexing-base attributes.**  
+   Location: [xfvcom/grid/connectivity.py:104](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/connectivity.py:104). **Round-6 regression.**
+
+   **Reproduction:** Set `nv.attrs["start_index"] = np.array([0, 1])`. The new helper takes only the first entry and silently chooses zero-based indexing.
+
+   For `x=[0,1,0,5]`, `y=[0,0,1,1]`, and connectivity `[1,2,3]`, current `FvcomGrid.from_dataset()` accepts this contradictory metadata and returns triangle area **2.5**. Executing the pre-round-6 implementation against the same dataset rejects it. An empty attribute array now causes an incidental `IndexError`.
+
+   **Fix:** Require exactly one attribute value before validating its base; reject empty and multi-valued attributes explicitly.
+
+## Verdict
+
+VERDICT: FAIL (0 blocker, 2 major, 5 minor, 0 nit)
+
+### Triage
+
+All 7 findings accepted (2 major, 5 minor; all on the sigma-z / siglev-npz / SIGMAZ-file path or the jcopetda tool, pre-existing except #7). xfvcom 294c361 (32 tests, 26 failed on the old code): #1 load_siglev_npz reorders by obc_node and checks the npz depths against the OBC depths (largest difference 347.18 m for the wrong depth file, 6e-6 m for the intended one; --siglev-npz-ignore-depth), #2 the sigma.dat reader types values like FVCOM's SCAN_FILE/GET_VALUE and REJECTS what FVCOM would read differently (e.g. 'GTSZ P1 = 4'), the writer always writes a decimal point (before, ZLEV was written '-2 -4', which FVCOM treats as missing); mirroring was not chosen because several cases are ambiguous; all 51 existing SIGMAZ files under ~/Github still parse to the same spec, #3 LOWFRAC normalised, #4 validate() mirrors FVCOM's startup checks (P1 > 0, SMOOTH >= 0, ...), #6 grassfire raises when it does not converge (the production case converges in 11 sweeps), #7 start_index must hold exactly one value. jcopetda 41c46e4: #5 individual source day files are preflighted.
