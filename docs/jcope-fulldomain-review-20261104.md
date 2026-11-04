@@ -1708,3 +1708,80 @@ VERDICT: FAIL (0 blocker, 0 major, 4 minor, 1 nit)
 ### Triage
 
 All 5 findings accepted (4 minor, 1 nit). xfvcom 2b0b2db (tests/test_round12_review.py): #1 the single-precision check calls libm tanhf/powf through ctypes (numpy float32 fallback) and rejects separations within 16 float32 ulps (SP_MIN_ULP); double builds unchanged; the 8 LOWSIG production sigma.dat files build in both modes, #2 every numeric key=value line within the first 201 lines is validated (32-bit integer range / finite real) even when its key is unused, #3 mesh node records need J X Y and element records J N1 N2 N3 only (14 further real grid files now read; the 25 that read before read identically), #5 diagnostic recommends 8.0e-4. jcopetda bd548f7: #4 static/ is preflighted for aliases. All 3,756 *sigma*.dat files parse identically.
+
+## Round 13 (commit f91e894 reviewed; fixes in 87a8593, jcopetda cd384ac)
+
+### Final answer (verbatim)
+
+Round-12 status:
+
+| Finding | Status | Verification |
+|---|---|---|
+| #1: Single-precision SBAND | RESOLVED | The libm and fallback paths reject the reported cases. All eight production LOWSIG files build in both precisions. |
+| #2: Unused numeric lines | RESOLVED | Invalid syntax and integer overflow are rejected independently of key usage. The fix introduces finding 2 below. |
+| #3: Mesh record columns | RESOLVED | Minimal and trailing-column records pass; order validation remains enforced. |
+| #4: `static/` aliases | PARTIAL | Existing-target aliases are rejected; dangling aliases bypass preflight. Finding 3 below. |
+| #5: Exponent diagnostic | RESOLVED | The recommendation is now the valid `8.0e-4`. |
+
+All 33 round-12 regression cases passed using virtual text files. Production comparison for 2020-01-01 passed for TT/ST/UT/VT/EGT at all 13 Tokyo Bay boundary nodes. No files were modified.
+
+1. **Major — Depth control applies an endpoint exception that disagrees with FVCOM’s source rule.**
+
+   Location: [obc_depth_control.py:110](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/obc_depth_control.py:110). Pre-existing.
+
+   **Evidence:** Python returns every boundary-string endpoint as its own `NEXT_OBC`. However, [FVCOM’s neighbor selection](/home/pj24001722/ku40000343/Github/FVCOM/src/mod_obcs.F:1180) includes endpoints, and [SET_WATER_DEPTH](/home/pj24001722/ku40000343/Github/FVCOM/src/mod_startup.F:2519) copies the selected neighbor’s depth without an endpoint exception.
+
+   On the supplied `TokyoBay_grd.dat`, `TokyoBay_obc.dat`, and `TokyoBay_dep.dat`:
+
+   | Endpoint | Python sampling depth | FVCOM source-rule depth |
+   |---|---:|---:|
+   | 3150 | 28.869210 m | 56.402027 m, from node 3158 |
+   | 3015 | 9.200233 m | 9.287256 m, from node 3023 |
+
+   Using production 2020-01-01 profiles, this changes node 3150’s generated temperature by up to **1.6213 °C** and salinity by **0.12139**. The repository’s strip fixture likewise gives Python depths `[1, 20, 3]`, versus `[10, 20, 30]` under FVCOM’s formulas.
+
+   This is source-based and in-memory evidence; a complete FVCOM simulation was not run. The documented observation from one 60-rank configuration does not establish a universal endpoint rule for serial runs or other decompositions.
+
+   **Fix:** Make the default calculation follow FVCOM’s endpoint selection. Support observed exceptions through explicit, verified effective depths or configuration-specific overrides.
+
+2. **Minor — The new numeric validator rejects valid Fortran implicit-exponent literals.**
+
+   Location: [sigma_dat.py:249](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:249). Regression introduced by `2b0b2db`.
+
+   **Reproduction:** This valid file was accepted before the fix and is now rejected:
+
+   ```text
+   NUMBER OF SIGMA LEVELS = 5
+   SIGMA COORDINATE TYPE = SIGMAZ
+   GTSZ BASE = 1
+   GTSZ NZ = 0
+   GTSZ LOWFRAC = 1.0-3 0.999
+   ```
+
+   The local Fortran runtime reads `1.0-3` as `0.001`, with `IOSTAT=0`. FVCOM’s scanner classifies it as floating and performs that list-directed conversion, including on unused lines. Python’s `float(tok)` raises instead, and the diagnostic incorrectly claims FVCOM would stop.
+
+   **Fix:** Parse the supported Fortran real syntax, including signed exponents without `E`. Share that conversion with the active scalar/vector readers.
+
+3. **Minor — A dangling `static/` alias still permits publication of a symlink loop.**
+
+   Location: [make_provisional_tree.py:233](/home/pj24001722/ku40000343/Github/jcopetda/tools/make_provisional_tree.py:233). Incomplete round-12 fix.
+
+   **Reproduction:** Start with separate roots and:
+
+   ```text
+   /source/static -> /output/static
+   /output/static does not exist
+   ```
+
+   `Path.exists()` returns false for the dangling source link, so preflight skips it. Reconciliation subsequently creates `/output/static -> /source/static`, completing a loop.
+
+   A filesystem-mocked execution of the actual `main()` confirmed both publication operations and successful completion.
+
+   **Fix:** Inspect symlink entries even when dangling. Reject broken or looping links and aliases into the output tree before publication.
+
+## Verdict
+VERDICT: FAIL (0 blocker, 1 major, 2 minor, 0 nit)
+
+### Triage
+
+#2 and #3 accepted. #1 (major, pre-existing: the --obc-depth-control endpoint rule) is REBUTTED as a default and answered with an explicit option: the rule 'boundary-string endpoints keep their own depth' was measured, not assumed (TB-FVCOM b9 mesh, 60-rank production run: the runtime h at all 13 OBC nodes is reproduced; see the module docstring of xfvcom/io/obc_depth_control.py and TB-FVCOM hydro/docs/obc_depth_consistency.md section 6), and the reviewer's rule is derived from the Fortran source only. xfvcom 87a8593 (tests/test_round13_review.py): endpoint_rule='observed' (default) | 'source' (literal mod_obcs.F/mod_startup.F reading; reproduces the reviewer's numbers: node 3150 28.869 vs 56.402 m, node 3015 9.200 vs 9.287 m), CLI --obc-depth-control-endpoints, the rule is printed and written to the file history; #2 a shared Fortran real-literal parser (implicit exponents like 1.0-3, E/D/Q exponents; grammar checked with gfortran and ifx, strict where they disagree: '1e' and overflow are rejected). jcopetda cd384ac: #3 a dangling static link is refused. All 3,756 *sigma*.dat files parse identically.
