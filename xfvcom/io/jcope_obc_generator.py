@@ -30,6 +30,8 @@ time step we therefore have:
 
 from __future__ import annotations
 
+import functools
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -134,16 +136,30 @@ class JcopeObcGenerator:
             self._src = region_nc
             self.region_nc_path = region_nc.root
             self.source_name = region_nc.name
+            self.source_files = region_nc.provenance()
         else:
             self.region_nc_path = Path(region_nc).expanduser().resolve()
             self._region_ds = xr.open_dataset(self.region_nc_path)
             self.source_name = self.region_nc_path.name
+            self.source_files = [self.source_name]
 
         self.obc_nodes = np.asarray(obc_nodes, dtype=np.int32)
         self.obc_lat = np.asarray(obc_lat, dtype=np.float64)
         self.obc_lon = np.asarray(obc_lon, dtype=np.float64)
         self.obc_h_fvcom = np.asarray(obc_h_fvcom, dtype=np.float32)
 
+        # jsasaki 2026-11-04: review round 1 #10 #11: refuse physically invalid inputs
+        if not (np.isfinite(self.obc_lat).all() and np.isfinite(self.obc_lon).all()):
+            raise ValueError("obc_lat / obc_lon must be finite")
+        if not (
+            self.obc_lat.min() >= grid.lat.min() - grid.dy
+            and self.obc_lat.max() <= grid.lat.max() + grid.dy
+            and self.obc_lon.min() >= grid.lon.min() - grid.dx
+            and self.obc_lon.max() <= grid.lon.max() + grid.dx
+        ):
+            raise ValueError("an OBC node lies outside the JCOPE grid")
+        if not (np.isfinite(self.obc_h_fvcom).all() and (self.obc_h_fvcom > 0).all()):
+            raise ValueError("obc_h_fvcom must be finite and positive")
         n_obc = self.obc_nodes.size
         if not (
             self.obc_lat.size == n_obc
@@ -207,6 +223,15 @@ class JcopeObcGenerator:
                 -(np.arange(self.n_siglay, dtype=np.float64) + 0.5) / self.n_siglay
             )
 
+        # jsasaki 2026-11-04: review round 1 #10: sigma coordinates must be finite, in [-1, 0] and
+        # ordered from the surface (0) to the bed (-1)
+        for label, arr in (("siglay", self.siglay), ("siglev", self.siglev)):
+            if not np.isfinite(arr).all() or arr.max() > 0 or arr.min() < -1:
+                raise ValueError(f"{label} must be finite and within [-1, 0]")
+            if (np.diff(arr, axis=0) > 0).any():
+                raise ValueError(
+                    f"{label} must not increase with layer index (0 surface -> -1 bed)"
+                )
         # Authoritative JCOPE depth and σ at the nearest ocean cell of each
         # OBC node. Both reads use basic.nc's mask, so they are consistent.
         self.obc_h_jcope: NDArray[np.float32] = grid.h_at(self.obc_lat, self.obc_lon)
@@ -263,6 +288,16 @@ class JcopeObcGenerator:
         is sampled for both depth/σ metadata and time-series values.
         """
         # jsasaki 2026-11-04: full-domain archive source (FullDomainSource)
+        if self._src is not None and not (
+            self._src.lat.shape == self.grid.lat.shape
+            and self._src.lon.shape == self.grid.lon.shape
+            and np.allclose(self._src.lat, self.grid.lat, rtol=0, atol=1e-6)
+            and np.allclose(self._src.lon, self.grid.lon, rtol=0, atol=1e-6)
+        ):
+            # jsasaki 2026-11-04: review round 1 #4: the day files must be on the grid file's axes
+            raise ValueError(
+                "the full-domain archive's lat/lon axes differ from the grid file's"
+            )
         # Region's local axes (the full-domain archive's axes are the grid's own)
         if self._src is not None:
             r_lat, r_lon = self._src.lat, self._src.lon
@@ -476,7 +511,7 @@ class JcopeObcGenerator:
             fields=fields,
             title=title,
             # jsasaki 2026-11-04: source label of either archive kind
-            source_files=[self.source_name],
+            source_files=self.source_files,
         )
 
     def write_elevation(
@@ -493,11 +528,31 @@ class JcopeObcGenerator:
             elevation=self.build_elevation_array(),
             title=title,
             # jsasaki 2026-11-04: source label of either archive kind
-            source_files=[self.source_name],
+            source_files=self.source_files,
         )
 
 
 # ---------- module-level NC writers ---------- #
+
+
+def _atomic_write(impl):
+    """Write to a temporary sibling and rename on success, so a failure never destroys an existing file."""
+    # jsasaki 2026-11-04: review round 1 #13: the writers truncated the destination before writing
+
+    @functools.wraps(impl)
+    def wrapper(out_path, *args, **kwargs):
+        final = Path(out_path).expanduser().resolve()
+        final.parent.mkdir(parents=True, exist_ok=True)
+        tmp = final.with_name(final.name + ".tmp")
+        try:
+            impl(tmp, *args, **kwargs)
+            os.replace(tmp, final)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
+        return final
+
+    return wrapper
 
 
 def _format_history(source_files: Iterable[str]) -> str:
@@ -506,6 +561,7 @@ def _format_history(source_files: Iterable[str]) -> str:
     return f"Created {when} UTC from {sources}"
 
 
+@_atomic_write
 def write_tsobc_nc(
     out_path: str | Path,
     *,
@@ -608,6 +664,7 @@ def write_tsobc_nc(
     return out_path
 
 
+@_atomic_write
 def write_elevation_nc(
     out_path: str | Path,
     *,

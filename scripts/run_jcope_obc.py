@@ -47,6 +47,23 @@ def parse_year_spec(spec: str) -> list[int]:
     return [int(s) for s in spec.split(",") if s.strip()]
 
 
+def check_year_list(years: list[int], allow_gaps: bool = False) -> None:
+    """Refuse duplicate, unordered or (unless allowed) non-consecutive years.
+
+    jsasaki 2026-11-04: review round 1 #2: the years are concatenated in list order, so a repeated or
+    reversed year gives a non-monotonic time axis and a skipped year a silent gap inside one file.
+    """
+    if len(set(years)) != len(years):
+        raise SystemExit(f"duplicate years in {years}")
+    if years != sorted(years):
+        raise SystemExit(f"years must be in increasing order (got {years})")
+    if not allow_gaps and any(b != a + 1 for a, b in zip(years, years[1:])):
+        raise SystemExit(
+            f"years {years} are not consecutive: the output has ONE time axis, a skipped year would be an "
+            f"unrepresented gap inside it (pass --allow-year-gaps to build it anyway)"
+        )
+
+
 def format_year_label(years: list[int]) -> str:
     if len(years) == 1:
         return str(years[0])
@@ -62,14 +79,19 @@ def parse_obc_dat(path: Path) -> np.ndarray:
             if not line or line.startswith("OBC Node Number"):
                 continue
             parts = line.split()
+            # jsasaki 2026-11-04: review round 1 #12: a malformed record is an error, not skipped
             if len(parts) < 2:
-                continue
+                raise ValueError(f"{path}: malformed OBC record {line!r}")
             try:
                 nodes.append(int(parts[1]))
             except ValueError:
-                continue
+                if not nodes:  # a header-like first line
+                    continue
+                raise ValueError(f"{path}: malformed OBC record {line!r}") from None
     if not nodes:
         raise ValueError(f"no OBC nodes parsed from {path}")
+    if min(nodes) < 1 or len(set(nodes)) != len(nodes):
+        raise ValueError(f"{path}: OBC node IDs must be unique and >= 1")
     return np.asarray(nodes, dtype=np.int32)
 
 
@@ -232,6 +254,11 @@ def main() -> int:
         help="path to jcopetda_region_YYYY.nc time-series archive "
         "(single-year mode; mutually exclusive with --region-pattern)",
     )
+    parser.add_argument(
+        "--allow-year-gaps",
+        action="store_true",
+        help="accept a --years list that skips years (the output time axis then has a jump)",
+    )
     # jsasaki 2026-11-04: read the daily full-domain archive instead of region files
     parser.add_argument(
         "--archive-root",
@@ -361,6 +388,7 @@ def main() -> int:
         years = parse_year_spec(args.years)
     if not years:
         sys.exit("no years to process")
+    check_year_list(years, args.allow_year_gaps)
 
     if args.archive_root is not None:
         # jsasaki 2026-11-04: one FullDomainSource per calendar year
@@ -404,6 +432,8 @@ def main() -> int:
     print(f"[grid] reading OBC node list from {args.fvcom_obc}")
     obc_ids = parse_obc_dat(args.fvcom_obc)
     print(f"  OBC nodes ({obc_ids.size}): {obc_ids.tolist()}")
+    if int(obc_ids.max()) > n_nodes:
+        sys.exit(f"OBC node {int(obc_ids.max())} exceeds the mesh's {n_nodes} nodes")
 
     idx0: NDArray[np.int64] = (obc_ids - 1).astype(np.int64)
     obc_lat = np.asarray(mesh.lat)[idx0]
@@ -575,8 +605,11 @@ def main() -> int:
     label = format_year_label(years)
     # jsasaki 2026-11-04: a FullDomainSource carries its own label
     source_files = [
-        p.name if isinstance(p, FullDomainSource) else Path(p).name
+        line
         for p in region_paths
+        for line in (
+            p.provenance() if isinstance(p, FullDomainSource) else [Path(p).name]
+        )
     ]
 
     if not args.no_tsobc:

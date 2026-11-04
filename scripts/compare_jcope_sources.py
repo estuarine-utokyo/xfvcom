@@ -49,6 +49,21 @@ def main() -> int:
     src = FullDomainSource(a.archive_root, a.start, a.end)
     reg = xr.open_dataset(a.region_nc)
     j0, i0 = grid.index_of(reg["lat"].values[0], reg["lon"].values[0])
+    rj, ri = jj - int(j0), ii - int(i0)
+    if (
+        (rj < 0).any()
+        or (ri < 0).any()
+        or (rj >= reg.sizes["lat"]).any()
+        or (ri >= reg.sizes["lon"]).any()
+    ):
+        sys.exit("an OBC cell lies outside the region file")
+    if not (
+        np.allclose(reg["lat"].values, grid.lat[int(j0) : int(j0) + reg.sizes["lat"]])
+        and np.allclose(
+            reg["lon"].values, grid.lon[int(i0) : int(i0) + reg.sizes["lon"]]
+        )
+    ):
+        sys.exit("the region file's axes are not a block of the grid's")
     pts = dict(
         lat=xr.DataArray(jj - int(j0), dims="n"),
         lon=xr.DataArray(ii - int(i0), dims="n"),
@@ -65,6 +80,13 @@ def main() -> int:
         ref = sub.transpose("time", ..., "n").values
         assert got.shape == ref.shape, (name, got.shape, ref.shape)
         both = np.isfinite(got) & np.isfinite(ref)
+        if not both.any():
+            print(
+                f"{name:3s}: no jointly finite values (archive finite {int(np.isfinite(got).sum())}, "
+                f"region finite {int(np.isfinite(ref).sum())})  INSUFFICIENT"
+            )
+            bad += 1
+            continue
         d = np.abs(got - ref)[both]
         nan_mismatch = int(np.count_nonzero(np.isfinite(got) != np.isfinite(ref)))
         ok = d.max() <= STEP[name] * 0.5 * (1 + 1e-3) + 1e-6 and nan_mismatch == 0
