@@ -77,8 +77,24 @@ class FvcomGrid:
     # Constructors
     # ------------------------------------------------------------------
     @classmethod
-    def from_dataset(cls, ds: _DatasetLike, *, validate: bool = True) -> "FvcomGrid":
-        """Build from an xarray.Dataset that already contains grid variables."""
+    def from_dataset(
+        cls,
+        ds: _DatasetLike,
+        *,
+        validate: bool = True,
+        # jsasaki 2026-11-05: review round 4 #4: explicit indexing base for ambiguous inputs
+        start_index: int | None = None,
+    ) -> "FvcomGrid":
+        """Build from an xarray.Dataset that already contains grid variables.
+
+        The indexing base of ``nv`` is taken, in order, from the ``start_index``
+        argument (0 or 1), from ``nv.attrs["start_index"]`` (0 or 1), and
+        otherwise inferred: ``nv`` whose minimum is 1 is taken as one-based
+        (FVCOM output), anything else as zero-based. The inference is ambiguous
+        for zero-based connectivity that does not reference node 0 (e.g. a subset
+        keeping unused nodes); pass ``start_index`` or set the attribute then.
+        :meth:`to_xarray` writes ``start_index=0``.
+        """
         req = ("x", "y", "nv")
         miss = [n for n in req if n not in ds]
         if miss and validate:
@@ -107,9 +123,19 @@ class FvcomGrid:
         nv_raw = np.asarray(ds["nv"].values, dtype=int)
         if nv_raw.shape[0] != 3 and nv_raw.shape[1] == 3:
             nv_raw = nv_raw.T  # (nele,3) → (3,nele)
-        # 1-based → 0-based
-        if nv_raw.min() == 1:
+        # ---> jsasaki 2026-11-05: review round 4 #4: an explicit base (argument, then attribute)
+        # wins over the min()==1 inference, which changed zero-based subsets silently
+        base = start_index
+        if base is None:
+            base = getattr(ds["nv"], "attrs", {}).get("start_index")
+        if base is not None:
+            if isinstance(base, (bool, np.bool_)) or base not in (0, 1):
+                raise ValueError(f"nv start_index must be 0 or 1 (got {base!r})")
+            nv_raw = nv_raw - int(base)
+        elif nv_raw.min() == 1:
+            # 1-based → 0-based (inferred; see the docstring)
             nv_raw = nv_raw - 1
+        # <--- jsasaki 2026-11-05
         # jsasaki 2026-11-05: review round 3 #19: a negative index would silently wrap to the last node
         if nv_raw.min() < 0 or nv_raw.max() >= kw["x"].size:
             raise ValueError("Connectivity (nv) references a node outside the mesh")
@@ -194,7 +220,8 @@ class FvcomGrid:
             {
                 "x": ("node", self.x),
                 "y": ("node", self.y),
-                "nv": (("three", "nele"), self.nv),
+                # jsasaki 2026-11-05: review round 4 #4: the exported base is stated
+                "nv": (("three", "nele"), self.nv, {"start_index": 0}),
             },
             coords={
                 "node": ("node", np.arange(self.node)),

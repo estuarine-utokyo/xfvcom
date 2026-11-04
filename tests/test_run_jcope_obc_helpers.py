@@ -249,3 +249,21 @@ def test_round3_compare_region_axes_have_no_relative_tolerance():
         )
         with pytest.raises(SystemExit, match="not a block"):
             c.check_region_block(grid, shifted)
+
+
+# ---------------------------------------------------------------------------
+# review round 4 (gpt-6.1-sol)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "t",
+    [
+        np.array([complex(58849, np.nan), complex(58849 + 1 / 24, np.inf)]),
+        np.array([58849, 58849 + 1 / 24], dtype=object),
+    ],
+)
+def test_round4_time_axis_must_be_real(t):
+    # #9: casting complex times to float64 discarded a non-finite imaginary part
+    with pytest.raises(SystemExit, match="real numbers"):
+        r.check_time_axis([2020], {2020: t})

@@ -637,3 +637,19 @@ def test_round3_readers_return_plain_arrays(mini):
     src = FullDomainSource(root, "2020-01-01", "2020-01-01")
     for got in (src.read_profile("TT", [3], [6]), src.read_2d("EGT", [3], [6])):
         assert type(got) is np.ndarray and got.dtype == np.float32
+
+
+# ---------------------------------------------------------------------------
+# review round 4 (gpt-6.1-sol)
+# ---------------------------------------------------------------------------
+
+
+def test_round4_masked_cell_indices_are_refused(mini):
+    # #6: np.asarray dropped the mask and the underlying cell (3, 6) was read
+    root, _p = mini
+    src = FullDomainSource(root, "2020-01-01", "2020-01-01")
+    with pytest.raises(ValueError, match="masked"):
+        src.read_profile("TT", np.ma.masked_array([3], mask=True), [6])
+    with pytest.raises(ValueError, match="masked"):
+        src.read_2d("EGT", [3], np.ma.masked_array([6], mask=True))
+    assert np.isfinite(src.read_profile("TT", np.ma.masked_array([3]), [6])).all()

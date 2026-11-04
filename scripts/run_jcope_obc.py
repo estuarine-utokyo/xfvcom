@@ -175,7 +175,14 @@ def check_time_axis(
     # with every bound below); masked entries count as missing
     checked: dict[int, np.ndarray] = {}
     for y in years:
-        t = np.ma.filled(np.ma.asarray(mjd_by_year[y]).astype(np.float64), np.nan)
+        # jsasaki 2026-11-05: review round 4 #9: complex/object times are refused before the cast
+        # (a cast to float64 discards a non-finite imaginary part)
+        raw = np.ma.asarray(mjd_by_year[y])
+        if raw.dtype.kind not in "iuf":
+            raise SystemExit(
+                f"the source for {y} has a time axis of dtype {raw.dtype}; real numbers are required"
+            )
+        t = np.ma.filled(raw.astype(np.float64), np.nan)
         if t.ndim != 1 or t.size == 0 or not np.isfinite(t).all():
             raise SystemExit(
                 f"the source for {y} must have a non-empty, finite 1-D time axis"

@@ -946,3 +946,96 @@ def test_round3_raw_profile_override_shape_is_exact(generator, shape):
         generator.build_tsobc_arrays(
             variables=("temp",), raw_profiles={"temp": np.full(shape, 15.0)}
         )
+
+
+# ---------------------------------------------------------------------------
+# review round 4 (gpt-6.1-sol)
+# ---------------------------------------------------------------------------
+
+import tracemalloc  # noqa: E402
+
+from xfvcom.io.jcope_obc_generator import _forcing_float32  # noqa: E402
+
+
+def test_round4_float32_forcing_is_not_copied_and_peak_is_small():
+    # #2: a valid float32 field used to make a float64 copy and a float32 copy (~72 MB extra
+    # for 24 MB of input); it is now checked blockwise in place
+    arr = np.full((2000, 30, 100), 15.0, dtype=np.float32)  # 24 MB
+    nodes = np.arange(1, 101)
+    tracemalloc.start()
+    try:
+        tracemalloc.reset_peak()
+        out = _forcing_float32("temp", arr, nodes)
+        _cur, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert np.shares_memory(out, arr)
+    # a float64 copy alone would be 48 MB; the blockwise boolean temporaries are ~2 MB each
+    assert peak < 8 * 2**20, peak
+
+
+def test_round4_masked_float32_forcing_is_copied_not_mutated():
+    # #2: a mask with set entries still becomes NaN (refused), the caller's data untouched
+    data = np.full((3, 2, 2), 1.0, dtype=np.float32)
+    m = np.ma.masked_array(data, mask=False)
+    out = _forcing_float32("temp", m, [1, 2])  # empty mask: no copy needed
+    assert np.shares_memory(out, data)
+    m[1, 0, 1] = np.ma.masked
+    with pytest.raises(ValueError, match="time index 1, node 2"):
+        _forcing_float32("temp", m, [1, 2])
+    assert (data == 1.0).all()
+
+
+def test_round4_raw_profiles_float32_are_used_without_float64_round_trip(generator):
+    # #2: the cached raw-profile path gives identical forcing from float32 and float64 overrides
+    raw = generator.read_raw_profiles()
+    a = generator.build_tsobc_arrays(raw_profiles=raw)
+    b = generator.build_tsobc_arrays(
+        raw_profiles={k: v.astype(np.float64) for k, v in raw.items()}
+    )
+    for v in ("temp", "salt"):
+        np.testing.assert_array_equal(a[v], b[v])
+
+
+def test_round4_depth_and_coordinates_must_be_1d(synthetic_archive):
+    # #5: a (1, n_obc) depth broadcast against the layer axis and gave finite, wrong profiles
+    basic_path, region_path = synthetic_archive
+    grid = JcopeGrid(basic_path)
+    try:
+        for key, val in (
+            ("obc_h_fvcom", np.asarray(_H, dtype=float)[None, :]),
+            ("obc_lat", np.asarray(_LATS, dtype=float)[None, :]),
+            ("obc_lon", np.asarray(_LONS, dtype=float)[:, None]),
+        ):
+            with pytest.raises(ValueError, match=rf"{key} must have shape \(3,\)"):
+                JcopeObcGenerator(**_kw(region_path, grid, n_siglay=3, **{key: val}))
+    finally:
+        grid.close()
+
+
+def test_round4_fill_marker_is_refused_by_both_writers(generator, tmp_path):
+    # #7: finite values equal to the f4 fill marker were written and read back as missing
+    g = generator
+    fill = nc.default_fillvals["f4"]
+    fields = g.build_tsobc_arrays()
+    fields["temp"][1, 2, 0] = fill
+    out = tmp_path / "ts.nc"
+    with pytest.raises(
+        ValueError, match=r"field 'temp'.*fill marker.*time index 1, node 101"
+    ):
+        write_tsobc_nc(
+            out,
+            time_mjd=g.mjd,
+            obc_nodes=g.obc_nodes,
+            obc_h=g.obc_h_fvcom,
+            siglev=g.siglev,
+            siglay=g.siglay,
+            fields=fields,
+        )
+    elev = g.build_elevation_array().astype(np.float64)
+    elev[3, 2] = fill
+    with pytest.raises(
+        ValueError, match=r"elevation.*fill marker.*time index 3, node 103"
+    ):
+        write_elevation_nc(out, time_mjd=g.mjd, obc_nodes=g.obc_nodes, elevation=elev)
+    assert not out.exists()

@@ -82,16 +82,27 @@ def read_dat(path: str | Path) -> _GridData:
     x: NDArray[np.float64] = np.empty(node, dtype=np.float64)
     y: NDArray[np.float64] = np.empty(node, dtype=np.float64)
     read_node = 0
+    # jsasaki 2026-11-05: review round 4 #3: coordinates are placed by the record's own node id
+    # (validated 1..node and unique), not by row position
+    seen: NDArray[np.bool_] = np.zeros(node, dtype=bool)
     while read_node < node and idx < len(lines):
         parts = lines[idx].split()
         idx += 1
         if len(parts) != 4 or not _is_int(parts[0]):
             continue
         try:
-            x[read_node] = float(parts[1])
-            y[read_node] = float(parts[2])
+            xv = float(parts[1])
+            yv = float(parts[2])
         except ValueError:
             continue
+        nid = int(parts[0])
+        if nid < 1 or nid > node:
+            raise ValueError(f"node record id {nid} outside 1..{node} (1-based)")
+        if seen[nid - 1]:
+            raise ValueError(f"node record id {nid} appears more than once")
+        seen[nid - 1] = True
+        x[nid - 1] = xv
+        y[nid - 1] = yv
         read_node += 1
     if read_node != node:
         raise ValueError(f"Node block ended prematurely ({read_node}/{node})")

@@ -398,6 +398,9 @@ class FullDomainSource:
         return self._read(name, jj, ii, False)
 
     def _indices(self, jj: ArrayLike, ii: ArrayLike) -> tuple[NDArray, NDArray]:
+        # jsasaki 2026-11-05: review round 4 #6: a masked index would select its underlying cell
+        if np.ma.getmaskarray(jj).any() or np.ma.getmaskarray(ii).any():
+            raise ValueError("cell indices must not be masked")
         a, b = np.asarray(jj), np.asarray(ii)
         if a.ndim != 1 or a.shape != b.shape or a.size == 0:
             raise ValueError("jj and ii must be non-empty 1-D arrays of equal length")

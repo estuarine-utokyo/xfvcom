@@ -47,3 +47,65 @@ def test_real_tokyo_bay_mesh_still_parses():
     d = read_dat(p)
     assert d["nv"].min() == 0 and d["nv"].max() == d["x"].size - 1
     assert np.isfinite(d["x"]).all()
+
+
+# ---------------------------------------------------------------------------
+# review round 4 (gpt-6.1-sol)
+# ---------------------------------------------------------------------------
+
+
+def _dat_nodes(path, nodes):
+    path.write_text("Node Number = 3\nCell Number = 1\n1 1 2 3 1\n" + nodes)
+    return path
+
+
+def test_round4_node_records_are_placed_by_their_id(tmp_path):
+    # #3: records ordered 2,1,3 used to be assigned by row position (x[node 1] became 401000)
+    p = _dat_nodes(
+        tmp_path / "r_grd.dat",
+        "2 401000.0 3900000.0 0.0\n1 400000.0 3900000.0 0.0\n3 400000.0 3901000.0 0.0\n",
+    )
+    d = read_dat(p)
+    assert d["x"].tolist() == [400000.0, 401000.0, 400000.0]
+    assert d["y"].tolist() == [3900000.0, 3900000.0, 3901000.0]
+
+
+@pytest.mark.parametrize(
+    "first, msg",
+    [
+        ("0", r"node record id 0 outside 1\.\.3"),
+        ("4", r"id 4 outside"),
+        ("2", "more than once"),
+    ],
+)
+def test_round4_bad_node_record_ids_are_refused(tmp_path, first, msg):
+    p = _dat_nodes(
+        tmp_path / "b_grd.dat",
+        f"{first} 400000.0 3900000.0 0.0\n2 401000.0 3900000.0 0.0\n"
+        "3 400000.0 3901000.0 0.0\n",
+    )
+    with pytest.raises(ValueError, match=msg):
+        read_dat(p)
+
+
+def test_round4_from_dataset_honours_start_index():
+    # #4: zero-based nv that does not use node 0 was shifted as if one-based
+    import xarray as xr
+
+    x = np.arange(5.0)
+    nv = xr.DataArray(np.array([[1], [2], [3]]), dims=("three", "nele"))
+    ds = xr.Dataset({"x": ("node", x), "y": ("node", x), "nv": nv})
+    assert FvcomGrid.from_dataset(ds).nv[:, 0].tolist() == [0, 1, 2]  # inferred
+    ds["nv"].attrs["start_index"] = 0
+    assert FvcomGrid.from_dataset(ds).nv[:, 0].tolist() == [1, 2, 3]
+    ds["nv"].attrs["start_index"] = 1
+    assert FvcomGrid.from_dataset(ds).nv[:, 0].tolist() == [0, 1, 2]
+    assert FvcomGrid.from_dataset(ds, start_index=0).nv[:, 0].tolist() == [1, 2, 3]
+    ds["nv"].attrs["start_index"] = 2
+    with pytest.raises(ValueError, match="start_index"):
+        FvcomGrid.from_dataset(ds)
+    # the export states its base, so a round trip keeps the geometry
+    g = FvcomGrid.from_dataset(ds, start_index=0)
+    out = g.to_xarray()
+    assert out["nv"].attrs["start_index"] == 0
+    assert FvcomGrid.from_dataset(out).nv[:, 0].tolist() == [1, 2, 3]

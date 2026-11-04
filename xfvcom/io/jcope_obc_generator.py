@@ -154,6 +154,19 @@ class JcopeObcGenerator:
         self.obc_lat = _plain_float(obc_lat, "obc_lat")
         self.obc_lon = _plain_float(obc_lon, "obc_lon")
         self.obc_h_fvcom = _to_float32(_plain_float(obc_h_fvcom, "obc_h_fvcom"))
+        # ---> jsasaki 2026-11-05: review round 4 #5: exactly (n_obc,), checked before anything else;
+        # a (1, n_obc) depth broadcast against the layer axis and gave finite wrong profiles
+        n_obc = self.obc_nodes.size
+        for label, arr in (
+            ("obc_lat", self.obc_lat),
+            ("obc_lon", self.obc_lon),
+            ("obc_h_fvcom", self.obc_h_fvcom),
+        ):
+            if arr.shape != (n_obc,):
+                raise ValueError(
+                    f"{label} must have shape ({n_obc},) like obc_nodes (got {arr.shape})"
+                )
+        # <--- jsasaki 2026-11-05
 
         # jsasaki 2026-11-04: review round 1 #10 #11: refuse physically invalid inputs
         if not (np.isfinite(self.obc_lat).all() and np.isfinite(self.obc_lon).all()):
@@ -523,9 +536,8 @@ class JcopeObcGenerator:
             if raw_profiles is not None and v in raw_profiles:
                 # ---> jsasaki 2026-11-05: review round 3 #3 #14: masked -> NaN (then refused as
                 # non-finite forcing), and exactly (n_time, 46, n_obc): no time or node is dropped
-                jcope_field = _to_float32(
-                    _plain_float(raw_profiles[v], f"raw_profiles[{v!r}]")
-                )
+                # jsasaki 2026-11-05: review round 4 #2: float32 kept as it is (no float64 round trip)
+                jcope_field = _as_float32(raw_profiles[v], f"raw_profiles[{v!r}]")
                 want = (self.mjd.size, N_JCOPE_ACTIVE_LEVELS, self.n_obc)
                 if jcope_field.shape != want:
                     raise ValueError(
@@ -737,13 +749,62 @@ def _to_float32(a: NDArray) -> NDArray[np.float32]:
         return np.asarray(a).astype(np.float32)
 
 
+# ---> jsasaki 2026-11-05: review round 4 #2 #7: no float64 round trip of large forcing arrays, and the
+# netCDF fill marker refused
+# The fill marker of the f4 forcing variables: a finite value equal to it reads back as missing.
+F4_FILL = np.float32(nc.default_fillvals["f4"])
+
+
+def _as_float32(values: ArrayLike, label: str) -> NDArray[np.float32]:
+    """A plain float32 ndarray; masked entries become NaN, so a mask never passes as data.
+
+    An unmasked float32 ndarray is returned as it is (no copy); another real dtype is converted once
+    (a finite value beyond the float32 range becomes inf); a copy is made for a mask only when the
+    mask has a set entry.
+    """
+    mask = np.ma.getmask(values)
+    data = np.asarray(np.ma.getdata(values))
+    if data.dtype.kind not in "iuf":
+        raise ValueError(f"{label} must be real numbers (got dtype {data.dtype})")
+    if data.dtype != np.float32:
+        data = _to_float32(data)
+    if mask is not np.ma.nomask and mask.any():
+        if np.shares_memory(data, np.ma.getdata(values)):
+            data = data.copy()
+        data[np.broadcast_to(mask, data.shape)] = np.nan
+    return data
+
+
+def _check_not_fill(label: str, arr: NDArray, obc_nodes: ArrayLike) -> None:
+    """Refuse a value equal to the netCDF f4 fill marker, blockwise along time like _check_finite."""
+    nodes = np.asarray(obc_nodes)
+    step = 744
+    for t0 in range(0, arr.shape[0], step):
+        hit = arr[t0 : t0 + step] == F4_FILL
+        if hit.any():
+            first = np.unravel_index(int(np.argmax(hit)), hit.shape)
+            node = int(first[-1])
+            raise ValueError(
+                f"{label}: value {float(F4_FILL):g} (the netCDF fill marker, read back as missing) "
+                f"at time index {t0 + int(first[0])}, node "
+                f"{int(nodes[node]) if node < nodes.size else node} (column {node})"
+                + (f", layer {int(first[1])}" if len(first) == 3 else "")
+            )
+
+
 def _forcing_float32(
     label: str, arr: ArrayLike, obc_nodes: ArrayLike
 ) -> NDArray[np.float32]:
-    """The float32 array that will be written, validated finite (masked, NaN, Inf, overflow refused)."""
-    out = _to_float32(_plain_float(arr, label))
+    """The float32 array that will be written, validated finite (masked, NaN, Inf, overflow refused)
+    and free of the fill marker; an unmasked float32 input is checked in place, not copied.
+    """
+    out = _as_float32(arr, label)
     _check_finite(f"{label} (masked, NaN, Inf or beyond float32)", out, obc_nodes)
+    _check_not_fill(label, out, obc_nodes)
     return out
+
+
+# <--- jsasaki 2026-11-05
 
 
 def _validate_region_schema(ds: xr.Dataset, path: Path) -> None:
