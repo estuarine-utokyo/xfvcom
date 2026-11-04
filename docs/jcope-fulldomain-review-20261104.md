@@ -1329,3 +1329,107 @@ VERDICT: FAIL (0 blocker, 0 major, 8 minor, 0 nit)
 ### Triage
 
 All 8 findings accepted (all minor; #2 was a round-7 regression, #8 a relative-root bug of FullDomainSource, the rest FVCOM-compatibility details of the sigma.dat reader/writer and GTSZ checks). xfvcom 9748876 (22 tests): #1 depth-weighted FRAC1 as in mod_setup.F (compute_kbp1_frac1 now takes H), #2 commas normalised once, #3 space-only trimming (tabs rejected), #4 case-sensitive coordinate type, #5 scanner limits (201 header lines, 400 characters, 150 values) enforced by reader and writer (the writer shortens list literals so the 70-level ZLEV fits), #6 MASK needs a z-band, masked columns need >= 2 layers, BPG REF NZ in 0..500, #7 one minimum (3 levels / 2 layers), #8 absolute root. All 3756 *sigma*.dat files under ~/Github parse to the same spec as before.
+
+## Round 9 (commit 9748876 reviewed; fixes in b89128d)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `9748876` and jcopetda `41c46e4`. No files were modified.
+
+The round-8 cases passed using in-memory file adapters and real-archive reads. Production checks covered all five variables against the regional archive and finite uniform, SADAPT, NPZ, and depth-control builds. Both NetCDF writers were checked in memory. The full suite and multi-year build were not rerun.
+
+| Round-8 finding | Status | Evidence |
+|---|---|---|
+| 1. Depth-weighted FRAC1 | RESOLVED | Production element 5309 gives `0.8947629270902231`, aperture `131.373971799 m`. |
+| 2. Comma normalization | RESOLVED | Reported trailing-comma logical and integer cases work. A separate normalization regression remains below. |
+| 3. Tabs/CR | RESOLVED | Non-space whitespace in data lines is rejected; comment cases remain accepted. |
+| 4. Coordinate-type case | RESOLVED | Noncanonical capitalization is rejected. |
+| 5. Scanner limits | RESOLVED | Reported line, header-position and token limits are enforced; compacted lists round-trip. |
+| 6. Startup constraints | RESOLVED | All three reported MASK/BPG cases are rejected. Another missing startup check is finding 1 below. |
+| 7. Minimum layer count | RESOLVED | Three levels work; one-layer coordinates are rejected. |
+| 8. Relative archive root | RESOLVED | A real source constructed with a relative root remains readable after changing directory. |
+
+1. **Minor — LOWSIG builds accept invalid interior columns that FVCOM rejects.**  
+   Location: [xfvcom/grid/gtsz_builder.py:280](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/gtsz_builder.py:280). Pre-existing.
+
+   **Reproduction:** Use the production `TokyoBay_grd.dat`, `TokyoBay_dep_m7001tp2_raw.dat`, and `tb_ss30_m7tp_kb31_sigma.dat`. The depth file contains ten nonpositive depths. `build_gtsz()` succeeds, although 111 sigma-layer thicknesses are nonpositive. The OBC columns pass validation, and an actual production-day build returns finite temperature and salinity.
+
+   Thus validation restricted to the boundary hides invalid columns elsewhere in the mesh. FVCOM’s `SIGMA_GTSZ` checks the minimum physical LOWSIG layer thickness over the domain and terminates for this configuration (`FVCOM/src/mod_setup.F:1594`).
+
+   **Fix:** Validate mesh depths before construction and reproduce FVCOM’s domain-wide positive-thickness check for LOWSIG.
+
+2. **Minor — Reordered grid records can pass the runner’s consistency check while describing different node locations to FVCOM.**  
+   Location: [xfvcom/grid/dat_reader.py:114](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:114). Pre-existing in this review round.
+
+   **Reproduction:** In memory, swap the complete node records for production OBC nodes **3142** and **3016**, retaining their IDs. `FvcomGrid.from_dat()` restores coordinates by ID, and `parse_dep_dat()` accepts the unchanged production depth file.
+
+   FVCOM’s `READ_COLDSTART_COORDS`, however, reads `J,X1,Y1` and assigns coordinates by **row position**, ignoring `J` (`FVCOM/src/mod_input.F:4967`). The resulting location discrepancy at node 3142 is **16,278.87 m**. The generator therefore samples a different physical location from the one FVCOM assigns that node.
+
+   **Fix:** Reject nonsequential node-record IDs on the FVCOM runner path. An explicit permissive mode can retain ID-based reconstruction for other uses.
+
+3. **Minor — Comma normalization now removes leading key characters that FVCOM preserves.**  
+   Location: [xfvcom/io/sigma_dat.py:286](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:286). **Round-8 regression.**
+
+   **Reproduction:** Add this to an otherwise valid pure SIGMAZ file:
+
+   ```text
+   ,GTSZ P1 = 4.0
+   ```
+
+   The current reader uses `P1=4`; the pre-round-8 reader uses the default `P1=2`.
+
+   FVCOM applies `ADJUSTL` **before** replacing commas. Consequently, the comma becomes a leading space in the key, which does not match `GTSZ P1`; FVCOM uses its default. Python replaces commas and then applies `lstrip`, making the key match. The two coordinates differ by up to **37.2859 m** in a 300 m column.
+
+   **Fix:** Preserve FVCOM’s operation order, or reject leading commas explicitly.
+
+4. **Minor — Continued comments can silently hide parameters from FVCOM.**  
+   Locations: [xfvcom/io/sigma_dat.py:266](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:266), [xfvcom/io/sigma_dat.py:485](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:485). Pre-existing.
+
+   **Reproduction:** Place a comment ending in four literal backslashes immediately before:
+
+   ```text
+   GTSZ P1 = 4.0
+   ```
+
+   Python skips the comment and uses `P1=4`. FVCOM processes continuations before comments, joining the parameter onto the comment line and discarding it. It consequently uses `P1=2`.
+
+   The writer also accepts such a `header_comment`; its final comment can swallow the mandatory level-count line.
+
+   **Fix:** Reject supported continuation suffixes before skipping comments, including in writer-supplied comments, unless continuation semantics are implemented explicitly.
+
+5. **Minor — Fixed-decimal serialization changes valid coordinates and can emit invalid fractions.**  
+   Locations: [xfvcom/io/sigma_dat.py:508](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:508), [xfvcom/io/sigma_dat.py:519](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:519). Pre-existing.
+
+   **Evidence:** `smax=0.0000125` is emitted as `0.000013`. On the production capped mesh, serializing and reading a valid LOWSIG specification changes interfaces by up to **0.01581768 m**. `smax=4e-7` becomes zero, selecting the flat-reference branch.
+
+   A valid specification with `kb=31`, `k1=3`, `sadapt=True`, `lowsig=True`, and:
+
+   ```python
+   lowfrac = (1e-7,) + ((1 - 1e-7) / 27,) * 27
+   ```
+
+   emits its first fraction as `0.000000`. FVCOM rejects that nonpositive fraction.
+
+   **Fix:** Use decimal-bearing significant-digit formatting for SMAX, DREF and LOWFRAC, preserving positive values and coordinate parameters through serialization.
+
+6. **Minor — The writer emits single-value vectors that its reader and FVCOM reject.**  
+   Location: [xfvcom/io/sigma_dat.py:463](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:463). Pre-existing.
+
+   **Reproduction:** Both specifications validate and serialize successfully:
+
+   ```python
+   GtszSpec(kb=4, k1=1, k2=3, nz=1, zlev=(-2.0,))
+   GtszSpec(kb=3, bpg_ref_zlev=(0.0,))
+   ```
+
+   They emit one-value `GTSZ ZLEV` and `BPG REF ZLEV` lists respectively. `read_sigma_dat()` rejects both. FVCOM’s `SCAN_FILE` likewise returns `-4` for a one-value `FVEC`, causing startup failure.
+
+   **Fix:** Reject unsupported single-value mandatory vectors before writing. Keep this restriction in serialization rather than prohibiting otherwise useful in-memory coordinates.
+
+## Verdict
+
+VERDICT: FAIL (0 blocker, 0 major, 6 minor, 0 nit)
+
+### Triage
+
+All 6 findings accepted (minor; #3 was a round-8 regression; all in the sigma.dat reader/writer, the GTSZ builder or the grid-file reader, none on the uniform-sigma production path). xfvcom b89128d (29 tests): #1 build_gtsz refuses non-finite depths and, with LOWSIG, repeats FVCOM's domain-wide positive-thickness check (the reviewer's m7001tp2_raw case is rejected; all 42 distinct TB-FVCOM SIGMAZ specs still build on the production cap300 depth file), #2 read_dat/from_dat require node AND element ids 1..n in file order by default (FVCOM places them by row position; allow_unordered=True keeps ID placement; the runner is strict), #3 exact FVCOM order (ADJUSTL, then commas), #4 backslash-continuation lines rejected by reader and writer, #5 floats written in shortest exact form with a decimal point, #6 single-value mandatory vectors refused by the writer. All 2,993 *sigma*.dat files found parse identically before/after.
