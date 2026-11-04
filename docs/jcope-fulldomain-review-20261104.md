@@ -2107,3 +2107,141 @@ VERDICT: FAIL (0 blocker, 0 major, 4 minor, 0 nit)
 ### Triage
 
 All 4 findings accepted (minor, pre-existing; #1 an incompleteness of the round-16 fix). xfvcom a87bf3d (26 new tests): #1 the NEXT_OBC traversal normalises each cell to FVCOM's native clockwise winding from x/y signed areas, so .dat-built and native-FVCOM grids give the same result (zero-area cells raise); TokyoBay unchanged for both endpoint rules; #2 count-header keys match exactly and case-sensitively as in SCAN_FILE/GET_VALUE; #3 header lines over 400 characters are refused; #4 commas separate fields in mesh, depth and OBC records (null values refused). 19 grid, 85 depth and OBC files read identically (223 same, 0 diff).
+
+## Round 18 (commit 5e8d0e7 reviewed; fixes in d47f778)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `5e8d0e7` and jcopetda `96f429f`. No files were modified.
+
+| Round-17 finding | Status | Reason |
+|---|---|---|
+| #1: Winding-independent NEXT_OBC | RESOLVED | File-order and native connectivity select node 5 / 100 m in the reported fan. Both windings also agree for all 13 production OBC nodes under both endpoint rules. |
+| #2: Exact header keys | RESOLVED | Complete, case-sensitive keys are enforced; the reported aliases and prefixes are rejected. |
+| #3: Header-buffer limit | PARTIAL | The reported ASCII overflow is rejected. Multibyte text still bypasses the buffer check, and harmless long comments introduce a regression; findings 1–2. |
+| #4: Comma-separated records | RESOLVED | The reported mesh, depth, and OBC records work while retaining the tested consistency checks. |
+
+All **65 regression cases from rounds 15–17** passed through an in-memory filesystem adapter. One-day runner checks passed for uniform sigma, both depth-control rules, SADAPT, the production NPZ coordinate, and the regional source, using diskless writes. The actual comparison script passed all five variables within packing tolerance.
+
+Both complete provisional repaired fields matched fresh in-memory executions of `keep_good_cells()`: **zero differing cells and matching CRCs**. Full annual builds and the complete pytest suite were not run.
+
+1. **Minor — Harmless long header comments are newly rejected.**
+
+   Location: [dat_reader.py:76](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:76). **Round-17 regression.**
+
+   **Reproduction:** Replace the production node-count header with:
+
+   ```python
+   "Node Number = 3210 ! " + "x" * 400
+   ```
+
+   The previous reader accepts the unchanged 3,210-node mesh; the current reader raises a header-length error. FVCOM retains the complete assignment before its 400-byte cutoff and discards the comment suffix, so truncation does not change the count.
+
+   **Fix:** Reject truncation that changes header interpretation. Permit an overlong suffix when the complete count and comment marker are already inside the buffer.
+
+2. **Minor — The buffer check counts Unicode characters instead of Fortran bytes.**
+
+   Location: [dat_reader.py:74](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:74). Remaining incompleteness of round-17 #3.
+
+   **Reproduction:** Substitute this production node-count header:
+
+   ```python
+   "Node Number" + " " * 29 + "あ" * 120 + " = 3210"
+   ```
+
+   It occupies **167 Python characters but 407 UTF-8 bytes**. The current reader accepts all 3,210 nodes. FVCOM’s default-character 400-byte buffer ends before `=`, leaving the required header undiscoverable. The first 40 characters still normalize to the recognized key, which exposes the mismatch.
+
+   **Fix:** Model the 40-byte key and 400-byte line buffers using encoded bytes, or explicitly reject unsupported non-ASCII header text.
+
+3. **Minor — Standalone comments are counted as depth/OBC data records.**
+
+   Location: [run_jcope_obc.py:98](/home/pj24001722/ku40000343/Github/xfvcom/scripts/run_jcope_obc.py:98). Pre-existing.
+
+   **Reproduction:** Insert `! segment note` between the first two production OBC records. `parse_obc_dat()` reports 14 records against the declared 13. Inserting a comment between depth records similarly reports 3,211 against 3,210.
+
+   External list-directed Fortran reads skip comment-only records. The explanation at lines 110–111 claiming FVCOM counts them as bad rows is incorrect.
+
+   **Fix:** Exclude blank and comment-only lines from data-record counts. Continue rejecting malformed noncomment records and enforcing the exact numeric-record count.
+
+4. **Minor — Valid count-header syntax remains unsupported by the runner.**
+
+   Locations: [run_jcope_obc.py:51](/home/pj24001722/ku40000343/Github/xfvcom/scripts/run_jcope_obc.py:51), [run_jcope_obc.py:53](/home/pj24001722/ku40000343/Github/xfvcom/scripts/run_jcope_obc.py:53). Pre-existing.
+
+   **Reproduction:** These valid FVCOM headers are rejected:
+
+   ```text
+   OBC Node Number = 13,
+   Node Number = +3210
+   ```
+
+   FVCOM normalizes the comma to a blank and accepts the signed integer. The runner’s regular expressions support neither form. The grid-header reader already accepts both.
+
+   **Fix:** Share FVCOM-aware count-header normalization across the readers, including comma normalization and an optional leading `+`.
+
+5. **Minor — Tabbed count values are accepted although FVCOM rejects them.**
+
+   Location: [dat_reader.py:39](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:39). Pre-existing; the runner’s header expressions have the same problem.
+
+   **Reproduction:** Change the production header to `Node Number =\t3210`. `read_dat()` successfully returns the unchanged mesh.
+
+   FVCOM’s `GET_VALUE` does not include tabs in its numeric character set. It classifies this value as a string, and `SCAN_FILE(..., ISCAL=...)` rejects it. Python’s `\s*` accepts the tab.
+
+   **Fix:** Validate header whitespace before conversion and restrict numeric-header padding to ASCII spaces. Preserve tab support in data records where list-directed reading permits it.
+
+6. **Minor — Unrecognized numeric headers bypass FVCOM’s unconditional conversion checks.**
+
+   Location: [dat_reader.py:161](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:161). Pre-existing.
+
+   **Reproduction:** Prepend this line to the otherwise unchanged production mesh:
+
+   ```text
+   mesh_scale = 1e3
+   ```
+
+   `read_dat()` accepts the mesh. FVCOM processes every traversed header through `GET_VALUE` before matching its key. Without a decimal point, `1e3` is classified as an integer and its internal integer read fails. The repository’s existing `_check_numeric_line()` correctly diagnoses this exact case.
+
+   **Fix:** Validate every header line traversed by either count lookup before filtering for recognized keys. Reuse the existing numeric-line validation.
+
+7. **Minor — Valid list-directed repetition syntax is rejected.**
+
+   Location: [fortran_numbers.py:67](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/fortran_numbers.py:67). Pre-existing reader limitation.
+
+   **Reproduction:** Change the first production OBC record from:
+
+   ```text
+   1 3150 1
+   ```
+
+   to:
+
+   ```text
+   1 1*3150 1
+   ```
+
+   These supply identical values to Fortran’s list-directed read. `parse_obc_dat()` rejects the second as malformed because the shared tokenizer leaves repetition tokens unexpanded.
+
+   **Fix:** Support bounded expansion of `r*value` before field conversion, while continuing to reject repeated null values and enforcing record consistency.
+
+8. **Minor — NPZ conversion discards nonfinite complex components before validation.**
+
+   Location: [run_jcope_obc.py:353](/home/pj24001722/ku40000343/Github/xfvcom/scripts/run_jcope_obc.py:353). Pre-existing.
+
+   **Reproduction:** An in-memory NPZ containing matching node/depth metadata and:
+
+   ```python
+   siglev = np.array(
+       [[0, complex(-0.5, np.nan), -1]], dtype=complex
+   )
+   ```
+
+   makes `load_siglev_npz()` return `[[0, -0.5, -1]]`. Conversion emits a `ComplexWarning`, but loading succeeds and the resulting coordinate passes generator sigma validation. The nonfinite component disappears before the finiteness check. Recorded `h` has the same unchecked conversion.
+
+   **Fix:** Require real numeric dtypes before casting both arrays, preferably through the existing `_plain_float()` helper.
+
+## Verdict
+
+VERDICT: FAIL (0 blocker, 0 major, 8 minor, 0 nit)
+
+### Triage
+
+All 8 findings accepted (minor; #1 a round-17 regression), #3 with a PARTIAL REBUTTAL. xfvcom d47f778 (tests/test_round18_review.py, 26 cases): one shared FVCOM header/record scanner in xfvcom/fvcom_input.py replaces the per-reader regexes (used by read_dat, read_dep, parse_obc_dat, parse_dep_dat); #1/#2 the 400-byte line and 40-byte key limits count UTF-8 bytes and only matter when the cut changes the interpretation (a long '!' comment is fine); #4 'OBC Node Number = 13,' and 'Node Number = +3210' accepted; #5 tabs in count values refused; #6 every header line up to the last count header gets the unconditional GET_VALUE-style numeric check ('mesh_scale = 1e3' refused; continuation lines refused); #7 list-directed 'r*value' expanded (cap 4096 fields, repeated nulls refused); #8 complex siglev/h refused. #3: blank and comment lines BEFORE the first record are accepted, but a comment-only line INSIDE a depth/OBC record block is still refused: gfortran (IOSTAT 5010) and ifx (59) fail on it and FVCOM's read loops count that row, so the file has one row too many for FVCOM; the reviewer's recipe (insert between records) describes a file FVCOM cannot read. 149 grid/depth/OBC files read identically (0 differ).
