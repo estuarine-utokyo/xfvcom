@@ -692,3 +692,131 @@ VERDICT: FAIL (0 blocker, 1 major, 18 minor, 1 nit)
 ### Triage
 
 Round-2 #28 (the unit string 'Celcius') was WITHDRAWN by the reviewer after our rebuttal. All 20 round-3 findings were accepted: #3 (major, masked arrays bypassed the finite check) and #1,2,4,7,8,12-18,19,20 in xfvcom 48b69af, each with a regression test (31 of the 35 new tests failed on the old code); #5,6,9,10,11 in jcopetda 0624221 (reconciliation lock, no write through linked year dirs, strict --damaged-levels, measured vs declared damage counts, empty reference levels).
+
+## Round 4 (commit 8ec0a6d reviewed; fixes in 56b5870, jcopetda 6698843)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `8ec0a6d` and jcopetda `0624221`. No files were modified.
+
+Validation included diskless NetCDF reproductions, focused existing regression cases through a read-only harness, construction of all **2,192 daily sources for 2020–2025**, and real production-node reads. The one-day comparison passed for all five variables. Six concurrent process workers, each processing one production day, returned finite forcing. A complete six-year payload build and the actual joblib launch were not run.
+
+**Round-3 findings**
+
+| # | Status | Reason |
+|---|---|---|
+| 1 | RESOLVED | Complete regional axes are checked with explicit absolute tolerance; altered spacing is rejected. |
+| 2 | RESOLVED | Reversed levels are rejected; transposed payloads produce bit-identical forcing. |
+| 3 | RESOLVED | Masks become NaN before interpolation/conversion; masked forcing is rejected by both writers. |
+| 4 | RESOLVED | Writers validate the converted float32 arrays and reject conversion overflow. |
+| 5 | RESOLVED | Linked output year directories are rejected before publication; verified with filesystem mocks. |
+| 6 | RESOLVED | Lock acquisition precedes temporary cleanup; a rejected second invocation performs no cleanup. |
+| 7 | RESOLVED | Halo dependencies are resolved when the particular variable is read. |
+| 8 | RESOLVED | Provisional notes from halo interpolation endpoints are propagated and filtered by the dependent variable. |
+| 9 | PARTIAL | Unknown variables, reversed ranges, duplicates and out-of-range levels are rejected. Incomplete ranges remain accepted; finding 8 below. |
+| 10 | RESOLVED | Measured extreme counts are separate from declared damage; zero-replacement diagnostics remain nonnegative. |
+| 11 | RESOLVED | Empty reference levels are excluded; insufficient usable references produce a clear error. |
+| 12 | RESOLVED | Origins, spacings and complete axes are checked; the real `basic.nc` loads successfully. |
+| 13 | RESOLVED | Float32/int64 values above the int32 limit are rejected without overflowing conversion. |
+| 14 | RESOLVED | Raw overrides must have exactly `(n_time,46,n_obc)`. |
+| 15 | RESOLVED | Masked and nonfinite archive coordinate entries are rejected. |
+| 16 | RESOLVED | Regional alignment uses `rtol=0` and an explicit absolute tolerance. |
+| 17 | RESOLVED | Nonfinite, masked and mismatched coordinates, and invalid radii, are rejected. |
+| 18 | PARTIAL | Ordinary NaN, empty, multidimensional and masked times are rejected. Lossy conversion still permits nonfinite complex inputs; finding 9 below. |
+| 19 | RESOLVED | The reported out-of-range connectivity identifiers are rejected before indexing. Separate node-record and connectivity-interpretation defects remain below. |
+| 20 | RESOLVED | Removing the shortcut applies the documented tie rule consistently; scalar and vector tie tests pass. |
+
+**Findings**
+
+1. **Minor — Explicit damaged-level declarations disable automatic damage detection elsewhere.**  
+   Location: [jcopetda/tools/make_provisional_tree.py:85](/home/pj24001722/ku40000343/Github/jcopetda/tools/make_provisional_tree.py:85).
+
+   **Evidence:** `needs_tol` uses the declaration *instead of* measured extreme damage whenever declarations exist. In an eight-level UT probe with a `1 m/s` midpoint, level 2 contained one extreme value and one `9 m/s` garbage value. Automatic detection replaced both. Passing `damaged_levels={5}` retained `9 m/s` successfully on level 2. That damaged level can also contaminate reference scatter.
+
+   This contradicts the documentation’s “extreme values, **or** … named with `--damaged-levels`” rule. The current production declarations cover the known damaged levels, so this reproduction does not establish an error in the existing provisional copies.
+
+   **Fix:** Use `extreme[k] > 0 or k in declared_levels`.
+
+2. **Minor — The mask/overflow fix substantially increases production writer memory.**  
+   Locations: [jcope_obc_generator.py:731](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:731), [jcope_obc_generator.py:744](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:744).
+
+   **Evidence:** Every ordinary float32 field is copied to float64 and then copied back to float32. A measured 24 MB input required approximately **72 MB of additional peak allocation**, and the result shared no memory with its input.
+
+   For six years × 300 nodes × 30 layers, each T/S field occupies approximately 1.894 GB. With annual results and concatenated fields retained, conversion raises the T/S buffer peak from approximately **7.6 GB to 15.2 GB**, excluding workers and other allocations. This affects both serial and `--jobs` builds. Cached raw-profile overrides incur the same conversion pattern inside workers.
+
+   **Fix:** Preserve already suitable, unmasked float32 arrays; inspect masks before conversion and perform checked conversion only when needed. Keep finite checks blockwise.
+
+3. **Minor — Mesh node-record identifiers are ignored.**  
+   Location: [dat_reader.py:88](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:88).
+
+   **Evidence:** A three-node file with node identifiers `0,2,3` is accepted. Records ordered `2,1,3` are also accepted, but coordinates are assigned by row position: the reproduced `x[node 1]` became `401000` instead of `400000`.
+
+   The new connectivity bounds do not detect this. If the depth rows follow the same reordered coordinates, the runner’s depth-coordinate check also passes while OBC identifiers select the wrong coordinates.
+
+   **Fix:** Validate node identifiers for range, uniqueness and required row order, or populate coordinate arrays explicitly by validated identifier.
+
+4. **Minor — `from_dataset` can silently change explicitly zero-based connectivity.**  
+   Location: [grid_obj.py:111](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/grid_obj.py:111).
+
+   **Evidence:** For five nodes, connectivity `[[1],[2],[3]]` with `nv.attrs["start_index"]=0` becomes `[[0],[1],[2]]`. The method ignores the explicit attribute and assumes one-based indexing whenever the minimum is one. This changes geometry for datasets retaining unused nodes, including subsets.
+
+   **Fix:** Honor `start_index`, provide an explicit indexing argument for ambiguous inputs, and annotate exported connectivity with `start_index=0`.
+
+5. **Minor — A two-dimensional depth array can produce finite, incorrectly interpolated profiles.**  
+   Location: [jcope_obc_generator.py:173](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:173).
+
+   **Evidence:** Constructor validation checks depth `.size`, not shape. Using the existing three-node synthetic fixture with three sigma layers, replacing depths `[100,200,60]` with shape `(1,3)` succeeds and returns the expected output shape, but temperature differs by up to **5.029335°C**. Broadcasting mixes the node and layer axes. With other layer counts, it instead fails later with an incidental broadcasting error.
+
+   **Fix:** Require `obc_h_fvcom.shape == (n_obc,)` before interpolation; enforce equivalent shapes for node coordinate arrays.
+
+6. **Minor — Masked cell indices silently select their underlying cells.**  
+   Location: [jcope_fulldomain.py:401](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_fulldomain.py:401).
+
+   **Evidence:** On the synthetic day source:
+
+   ```python
+   src.read_profile("TT", np.ma.masked_array([3], mask=True), [6])
+   ```
+
+   succeeds and returns the finite column at `(3,6)`. `np.asarray` discards the index mask before validation, so an unavailable location becomes an apparently valid selection.
+
+   **Fix:** Reject masked entries in both index arrays before converting them, consistently with node and geographic-coordinate validation.
+
+7. **Minor — Both writers still accept finite values that become missing NetCDF values.**  
+   Locations: [jcope_obc_generator.py:946](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:946), [jcope_obc_generator.py:1020](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:1020).
+
+   **Evidence:** Filling otherwise valid inputs with `netCDF4.default_fillvals["f4"]` passes float32 finite validation. Both public writers return successfully, but netCDF4 reads the resulting forcing variables as entirely masked because the variables use that default fill marker.
+
+   This also matters when callers have already discarded a masked array’s mask and exposed its finite fill payload.
+
+   **Fix:** Reject the output variable’s reserved fill marker before publication, or explicitly use a nonfinite fill value that the existing validation already excludes.
+
+8. **Minor — An incomplete damaged-level range is silently narrowed to one level.**  
+   Location: [jcopetda/tools/make_provisional_tree.py:176](/home/pj24001722/ku40000343/Github/jcopetda/tools/make_provisional_tree.py:176).
+
+   **Evidence:** `parse_levels("UT:2-")` returns `{"UT": {2}}`. The parser replaces an absent upper endpoint with the lower endpoint even when a range separator was supplied. A truncated range declaration can therefore leave intended damaged levels untreated without an error.
+
+   **Fix:** Distinguish `VAR:N` from `VAR:LO-HI`; require both endpoints whenever `-` is present.
+
+9. **Minor — Source-time validation can discard nonfinite components before checking finiteness.**  
+   Location: [run_jcope_obc.py:178](/home/pj24001722/ku40000343/Github/xfvcom/scripts/run_jcope_obc.py:178).
+
+   **Evidence:** The following input passes `check_time_axis`:
+
+   ```python
+   np.array([
+       complex(58849, np.nan),
+       complex(58849 + 1/24, np.inf),
+   ])
+   ```
+
+   Conversion to float64 discards the imaginary components with a warning; the subsequent finite and hourly checks see ordinary valid timestamps. Normal generator-produced MJD arrays are unaffected.
+
+   **Fix:** Reject non-real dtypes before casting, then preserve masks and validate finiteness.
+
+## Verdict
+VERDICT: FAIL (0 blocker, 0 major, 9 minor, 0 nit)
+
+### Triage
+
+All 9 findings (minor) accepted. xfvcom 56b5870: #2 (writers keep unmasked float32 without a float64 round trip; measured extra peak 72 MB -> 4.3 MB on a 24 MB input), #3 (mesh node coordinates placed by validated record id), #4 (from_dataset honours start_index), #5 (1-D shapes), #6 (masked indices), #7 (netCDF fill marker rejected), #9 (complex/object times). jcopetda 6698843: #1 (declared levels add to measured damage), #8 (incomplete ranges are errors). No finding of any severity above minor remained after round 3's fixes.
