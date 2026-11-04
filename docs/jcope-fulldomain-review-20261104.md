@@ -941,3 +941,165 @@ VERDICT: FAIL (0 blocker, 1 major, 10 minor, 0 nit)
 ### Triage
 
 All 11 findings accepted (1 major pre-existing in grid_obj.calculate_node_area_median_dual: area depended on the coordinate origin; the TokyoBay per-node areas agree with the old function to 8.4e-9 relative and their total now equals the total triangle area). Fixed in xfvcom eece081 with 41 new tests (37 failed on the old code): #1 topology-based midpoint removal and translated shoelace; #2/#4 connectivity orientation by dimension names, integral/finite check; #3 nv_zero keeps zero base; #5 utm_zone/hemisphere round trip; #6 dat element ids; #7 decoded region time; #8 JcopeGrid dimension order; #9 fill marker in obc_h/time; #10 umask read from /proc, never set; #11 compare script shares the generator's regional schema validation. jcopetda: nothing in this round.
+
+## Round 6 (commit a1b5d00 reviewed; fixes in 0d0102e, jcopetda 61ad7e8)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `a1b5d00` and jcopetda `6698843`. No files were modified.
+
+Validation included 30 selected file-free regression tests, in-memory NetCDF round trips, mocks and fault injections, and a real 2020-01-01 build at all 13 production OBC nodes. Regional and full-domain values agreed within packing tolerance; generated forcing was finite. The complete suite and six-year build were not rerun.
+
+**Round-5 status**
+
+| Finding | Status | Verification |
+|---|---|---|
+| 1 | RESOLVED | Translated meshes retain their areas. Tokyo Bay’s dual-area total agrees with its triangle-area total. |
+| 2 | RESOLVED | Named, transposed `(3,3)` connectivity reconstructs correctly. |
+| 3 | RESOLVED | Adopted `nv_zero` retains zero-based indexing; explicit overrides work. |
+| 4 | RESOLVED | Fractional, nonfinite and non-real connectivity is rejected before conversion. |
+| 5 | RESOLVED | Zone and southern-hemisphere metadata survive reconstruction and serialized round trips. |
+| 6 | RESOLVED | Reordered element records populate columns by ID; duplicate and out-of-range IDs are rejected. |
+| 7 | RESOLVED | Numeric, missing, duplicate and decreasing regional timestamps are rejected. |
+| 8 | RESOLVED | Transposing square-grid `h` and `mask` preserves lookup results. |
+| 9 | RESOLVED | Depth and time fill markers are rejected before publication. |
+| 10 | RESOLVED | Reading the mask no longer calls `os.umask`. A separate fallback regression appears below. |
+| 11 | RESOLVED | Comparison requires the regional schema, including the vertical coordinate. |
+
+**Findings**
+
+1. **Major — Grid consumers still corrupt explicitly zero-based connectivity.**  
+   Locations: [io/core.py:121](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/core.py:121), [input_loader.py:179](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/input_loader.py:179), [met_nc_generator.py:558](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/met_nc_generator.py:558). Pre-existing.
+
+   **Reproduction:** Serialize `FvcomGrid.to_xarray()` with triangles `[[0,1,2], [1,3,2]]`, then read it through `FvcomDataLoader(utm2geo=False)`. Although `nv.start_index` remains `0`, the loader produces:
+
+   ```text
+   nv_zero = [[-1,0,1], [0,2,1]]
+   ```
+
+   For node values `[10,20,30,1000]`, subsequent node-to-element averaging returns `[343.333333,20]` instead of `[20,350]`. Negative indices silently sample the last node.
+
+   The input loader and meteorological writer have the related minimum-based inference problem: zero-based connectivity omitting node zero is treated as one-based. A reproduced input-loader case changed triangles `[1,2,3]` and `[2,4,3]` into `[0,1,2]` and `[1,3,2]`.
+
+   **Fix:** Share connectivity normalization across consumers, honoring dimension names and `start_index`. Connectivity obtained directly from `FvcomGrid` is always zero-based and should be converted explicitly.
+
+2. **Major — Geographic fallback silently returns degree-squared areas as square metres.**  
+   Location: [grid_obj.py:183](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/grid_obj.py:183). Pre-existing.
+
+   **Reproduction:** Pass `get_grid()` a dataset containing only geographic coordinates and connectivity:
+
+   ```python
+   lon = [139.0, 139.01, 139.0]
+   lat = [35.0, 35.0, 35.01]
+   nv = [[1], [2], [3]]
+   ```
+
+   Its automatic loose fallback copies longitude/latitude into `x/y`. Both triangle and median-dual area calculations then return approximately **0.00005**, documented as m². The geodesic triangle area is approximately **506,378.5 m²**. Construction and calculation succeed without identifying the unit mismatch.
+
+   **Fix:** Project geographic coordinates into metres before constructing a metric grid, or retain coordinate-type metadata and reject metric area calculations on geographic coordinates.
+
+3. **Minor — Three-element meshes remain misoriented in the sigma-z loader.**  
+   Location: [gtsz_builder.py:86](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/gtsz_builder.py:86). Pre-existing.
+
+   **Reproduction:** `read_dat()` always returns `(3, nele)`, but `load_mesh()` skips transposition when `nele == 3`. Intended triangle rows:
+
+   ```text
+   [[0,1,2], [1,3,2], [2,3,4]]
+   ```
+
+   become:
+
+   ```text
+   [[0,1,2], [1,3,3], [2,2,4]]
+   ```
+
+   With `x=[0,1,0,1,0]`, `y=[0,0,1,1,2]`, depths `[100,100,100,100,5]` and `smax=10`, the resulting reference depth at zero-based node 3 is **39.142 m**, versus **19.142 m** with correct connectivity. This reaches the runner’s `--sigma-dat` path.
+
+   **Fix:** Unconditionally transpose connectivity received from `read_dat()`, whose orientation is already known.
+
+4. **Minor — The new umask fallback can widen output permissions.**  
+   Locations: [jcope_obc_generator.py:885](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:885), [jcope_obc_generator.py:906](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:906). Round-5 regression.
+
+   **Evidence:** Fault-injecting an unavailable `/proc/self/status` makes `_current_umask()` return `022`. The writer consequently applies mode **0644**, including when the effective process mask is **077**, which requires **0600**. This affects platforms without Linux procfs and environments where procfs is unavailable.
+
+   The unconditional chmod also broadens an existing `0600` destination to `0644` under an ordinary `022` mask.
+
+   **Fix:** Preserve restrictive temporary-file permissions when the mask is unknown. Preserve an existing destination’s permissions when replacing it, unless an explicit permission policy requests otherwise.
+
+5. **Minor — Source-year aliases can still destroy archive data during provisional-tree rebuilding.**  
+   Location: [make_provisional_tree.py:247](/home/pj24001722/ku40000343/Github/jcopetda/tools/make_provisional_tree.py:247). Pre-existing.
+
+   **Reproduction:** Use separate roots `/archive` and `/output`, but make `/archive/2020` a symlink to `/output/2020`, containing a valid ordinary day file. The destination-directory guard passes.
+
+   A filesystem-mocked execution of `main()` replaced that day with a symlink pointing to `/archive/2020/<same-day>`. Through the source-year alias, this points back to itself, replacing the last good payload. The command reported `1 links, 0 filled copies` successfully.
+
+   **Fix:** Before cleanup or publication, reject source-year directories resolving inside the output tree or aliasing destination directories.
+
+6. **Minor — Geographic control-volume polygons are displaced by the approximate conversion.**  
+   Location: [grid_obj.py:979](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/grid_obj.py:979). Pre-existing.
+
+   **Reproduction:** On a valid two-triangle, 1 km square mesh at UTM `(400000,3900000)`, zone 54, populate geographic coordinates using the existing projection helper. Comparing `get_node_control_volumes([1])` with the proper transformation of `get_node_control_volume(1)` gives vertex-position errors up to **54.9 m**.
+
+   Each vertex is anchored to its nearest node and shifted using the fixed coefficient `1e-5 degrees/metre`, which is not the grid’s projection.
+
+   **Fix:** Transform polygon vertices with `utm_to_lonlat()` using the grid’s zone and hemisphere. Handle missing projection metadata explicitly.
+
+7. **Minor — Editing connectivity leaves cached topology stale and changes computed areas.**  
+   Location: [grid_obj.py:829](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/grid_obj.py:829). Pre-existing.
+
+   **Reproduction:** Construct a six-triangle fan of radius 10, calculate its central-node area, then remove one triangle through the public `nv` field. The existing object returns **68.560344 m²** for the central node; a fresh object with identical current arrays returns the correct **72.168784 m²**. Cached boundary edges still describe the original mesh.
+
+   **Fix:** Invalidate topology caches whenever connectivity changes, including in-place changes, or make connectivity immutable and provide an update API that invalidates both caches.
+
+8. **Minor — Area selectors silently truncate fractions, discard masks and double-count duplicate nodes.**  
+   Location: [grid_obj.py:899](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/grid_obj.py:899). Pre-existing; similar coercion occurs in the other selection methods.
+
+   **Reproduction:** On a unit right triangle:
+
+   - `[1.9]` silently selects node 1.
+   - A masked selector `[1, --]` with underlying values `[1,2]` includes node 2.
+   - `[1,1]` returns twice node 1’s median-dual area, unlike `calculate_node_area()`, which treats node selection as a set.
+
+   **Fix:** Validate selectors before integer conversion: reject masked and fractional entries, validate the indexing base, and reject or deduplicate repeated node IDs.
+
+9. **Minor — Missing static-mask values become ocean cells.**  
+   Location: [jcope_grid.py:78](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_grid.py:78). Pre-existing.
+
+   **Reproduction:** Supply a decoded mask containing:
+
+   ```text
+   [[NaN, 1],
+    [0,   0]]
+   ```
+
+   Construction succeeds and converts it to:
+
+   ```text
+   [[True,  True],
+    [False, False]]
+   ```
+
+   A lookup at the missing cell selects that cell as ocean. NaN can arise normally when xarray decodes a NetCDF fill value; dimension normalization does not protect against this conversion.
+
+   **Fix:** Validate the decoded mask as finite, unmasked binary values before converting it to Boolean. Reject missing or unsupported flags explicitly.
+
+10. **Minor — Shared element-to-node interpolation fails on integer fields.**  
+    Location: [interpolation.py:114](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/interpolation.py:114). Pre-existing.
+
+    **Reproduction:** Using the valid two-triangle connectivity from finding 1:
+
+    ```python
+    elems2nodes(np.array([1, 2]), grid.nv, n_nodes=4)
+    ```
+
+    raises `UFuncTypeError` during in-place division because the accumulator retains integer dtype. The expected result is `[1,1.5,1.5,2]`. The same problem affects the supported two- and three-dimensional integer inputs.
+
+    **Fix:** Promote the accumulator to a floating result dtype before accumulation and division; cover all three supported input ranks.
+
+## Verdict
+
+VERDICT: FAIL (0 blocker, 2 major, 8 minor, 0 nit)
+
+### Triage
+
+All 10 findings accepted. Only #4 (umask fallback) and #5 (source-year alias in the jcopetda tool) were defects of this work; #1 #2 #3 #6 #7 #8 #9 #10 are pre-existing defects of general xfvcom modules (the round-5/6 prompts asked for 'everything it touches', which pulled the whole grid library in). Fixed in 0d0102e (31 tests, 27 failed on the old code): shared connectivity normalisation (#1), geographic grids are marked and metric areas raise (#2: marked, not projected), gtsz load_mesh transposes always (#3), writer permission policy (#4), control-volume vertices via the grid's projection (#6), topology caches keyed on an nv fingerprint (#7), strict selectors (#8), JcopeGrid mask validation (#9), elems2nodes float accumulator (#10). jcopetda 61ad7e8: #5. Behaviour changes for existing callers are listed in the commit message of 0d0102e. From round 7 on the review scope is stated explicitly (the modules run_jcope_obc.py reaches), because the free audit had left the subject of this work.
