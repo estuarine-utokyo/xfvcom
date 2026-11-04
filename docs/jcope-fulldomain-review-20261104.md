@@ -1433,3 +1433,109 @@ VERDICT: FAIL (0 blocker, 0 major, 6 minor, 0 nit)
 ### Triage
 
 All 6 findings accepted (minor; #3 was a round-8 regression; all in the sigma.dat reader/writer, the GTSZ builder or the grid-file reader, none on the uniform-sigma production path). xfvcom b89128d (29 tests): #1 build_gtsz refuses non-finite depths and, with LOWSIG, repeats FVCOM's domain-wide positive-thickness check (the reviewer's m7001tp2_raw case is rejected; all 42 distinct TB-FVCOM SIGMAZ specs still build on the production cap300 depth file), #2 read_dat/from_dat require node AND element ids 1..n in file order by default (FVCOM places them by row position; allow_unordered=True keeps ID placement; the runner is strict), #3 exact FVCOM order (ADJUSTL, then commas), #4 backslash-continuation lines rejected by reader and writer, #5 floats written in shortest exact form with a decimal point, #6 single-value mandatory vectors refused by the writer. All 2,993 *sigma*.dat files found parse identically before/after.
+
+## Round 10 (commit d2de5d5 reviewed; fixes in ff73281)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `d2de5d5` (code fixes in `b89128d`) and jcopetda `41c46e4`. No files were modified.
+
+All 29 round-9 regression cases passed using in-memory file adapters. The 18 TB-FVCOM grid files found read identically in strict and permissive modes. Production checks produced finite uniform, SADAPT, LOWSIG, NPZ, and depth-control arrays; both NetCDF writers preserved their inputs in memory. The full suite and annual/multiyear builds were not rerun.
+
+| Round-9 finding | Status | Reason |
+|---|---|---|
+| 1. Domain-wide LOWSIG validation | RESOLVED | The reported production case is rejected; nonfinite depths and nonpositive domain-wide thicknesses are checked. A separate precision limitation appears below. |
+| 2. Grid-record ordering | RESOLVED | Default reads reject reordered records; explicit permissive reads retain ID placement. Production grids remain compatible. |
+| 3. Leading commas | RESOLVED | The reported comma-prefixed keys are rejected. |
+| 4. Continuations | PARTIAL | Reported suffixes are rejected, but truncation can expose an unchecked suffix; finding 1. |
+| 5. Exact float serialization | RESOLVED | Reported parameters round-trip exactly. The associated rounding change introduces finding 3. |
+| 6. Single-value vectors | RESOLVED | Both unsupported mandatory vectors are rejected before writing. |
+
+1. **Minor — Truncated comments still bypass continuation protection.**  
+   Locations: [sigma_dat.py:281](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:281), [sigma_dat.py:522](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:522). Incomplete round-9 fix.
+
+   **Reproduction:** Place this comment immediately before `GTSZ P1 = 4.0` in an otherwise valid pure SIGMAZ file:
+
+   ```python
+   comment = "! " + "x" * 394 + "\\" * 4 + "tail"
+   ```
+
+   Python skips the 404-character comment. FVCOM first truncates it to 400 characters, exposing four trailing backslashes, then joins the parameter onto the comment and discards it. Python therefore uses `P1=4`; FVCOM uses `P1=2`. The resulting interfaces differ by **37.2859 m** in a 300 m column.
+
+   The writer also accepts the corresponding `header_comment`, allowing the truncated comment to swallow the mandatory level-count line.
+
+   **Fix:** Check continuation suffixes against FVCOM’s 400-byte physical-line buffer before skipping comments. Apply the same rule to writer comments, or reject overlong comments.
+
+2. **Minor — The LOWSIG startup check misses layers that collapse in single-precision FVCOM builds.**  
+   Location: [gtsz_builder.py:308](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/gtsz_builder.py:308). Additional validation gap.
+
+   **Reproduction:** Build a triangle with all depths equal to 10 m using:
+
+   ```python
+   GtszSpec(
+       kb=5, base=1, k1=3, sadapt=True, lowsig=True,
+       lowfrac=(0.99999999, 1e-8),
+   )
+   ```
+
+   Construction and serialization succeed. Python’s minimum physical thickness is approximately **5e-8 m**. In FVCOM’s single-precision LOWFRAC normalization and accumulation, the last two interfaces both become `-1`, giving zero thickness and triggering its startup failure.
+
+   This does **not** affect the double-precision TB-FVCOM configuration inspected.
+
+   **Fix:** Make model precision explicit and evaluate the startup checks using that precision, including parameter conversion and LOWFRAC accumulation.
+
+3. **Minor — Micrometre rounding can return invalid suggested z-levels.**  
+   Location: [gtsz_builder.py:263](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/gtsz_builder.py:263). **Round-9 regression.**
+
+   **Reproduction:**
+
+   ```python
+   suggest_zlev(3.0, z_top=-4e-7)
+   # array([-0., -2., -3.])
+   ```
+
+   The returned surface level violates the documented negative-level contract. Also:
+
+   ```python
+   suggest_zlev(4.0, dz_shallow=2e-7, stretch=2.0)
+   ```
+
+   starts with duplicate levels. Before the rounding change, these inputs produced negative, strictly descending levels. Specifications built from the new results fail validation.
+
+   **Fix:** Preserve the unrounded values when rounding would introduce zero or duplicates, or reject unsupported resolution explicitly before returning.
+
+4. **Minor — Overflowed z-level literals become infinities and silently disappear from the coordinate.**  
+   Locations: [sigma_dat.py:245](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:245), [gtsz.py:175](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/gtsz.py:175). Pre-existing.
+
+   **Reproduction:** Use `KB=6`, `BASE=1`, `K1=3`, `K2=6`, `NZ=2`, `MASK=T`, `SADAPT=T`, and:
+
+   ```text
+   GTSZ ZLEV = -1.0e999 -2.0e999
+   ```
+
+   The reader produces `(-inf, -inf)`. Validation accepts them because their difference is NaN, making the descending-order rejection false. On a flat 10 m mesh, construction succeeds with finite coordinates and `KBP=2`; neither requested fixed level survives.
+
+   FVCOM cannot accept the equivalent levels: even if numeric conversion yields infinities, its pairwise comparison rejects equal consecutive values.
+
+   **Fix:** Reject nonfinite numeric conversion results and require finite z-levels before checking negativity and ordering.
+
+5. **Minor — Module invocation of the comparison script fails before argument parsing.**  
+   Location: [compare_jcope_sources.py:23](/home/pj24001722/ku40000343/Github/xfvcom/scripts/compare_jcope_sources.py:23). Pre-existing.
+
+   **Reproduction:**
+
+   ```bash
+   python -m scripts.compare_jcope_sources --help
+   ```
+
+   From the repository root, this raises `ModuleNotFoundError: No module named 'run_jcope_obc'`. The script inserts its directory into `sys.path` only after that import.
+
+   **Fix:** Move the path initialization before the import, or use package-relative importing with a direct-script fallback.
+
+## Verdict
+
+VERDICT: FAIL (0 blocker, 0 major, 5 minor, 0 nit)
+
+### Triage
+
+All 5 findings accepted (minor; #3 was a round-9 regression). xfvcom ff73281 (21 tests, 17 failed on the old code): #1 the continuation check is applied to the line cut to FVCOM's 400-byte buffer (mod_utils.F INPLINE) and the writer rejects comment lines over 400 characters, #2 build_gtsz(model_precision='double'|'single'): the LOWSIG startup checks are recomputed in float32 for 'single' (default 'double' = the TB-FVCOM build, unchanged), #3 suggest_zlev keeps the rounded levels only while they stay strictly negative and descending, #4 non-finite numeric conversions are rejected by the reader and GtszSpec.validate() requires finite ZLEV/LOWFRAC, #5 compare_jcope_sources sets sys.path before importing run_jcope_obc (python -m scripts.compare_jcope_sources works). All 2,993 *sigma*.dat files parse identically.
