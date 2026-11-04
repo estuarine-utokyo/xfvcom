@@ -30,8 +30,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from xfvcom.grid.grid_obj import FvcomGrid
-from xfvcom.io import (JcopeGrid, JcopeObcGenerator, write_elevation_nc,
-                       write_tsobc_nc)
+from xfvcom.io import (
+    FullDomainSource,
+    JcopeGrid,
+    JcopeObcGenerator,
+    write_elevation_nc,
+    write_tsobc_nc,
+)
 
 
 def parse_year_spec(spec: str) -> list[int]:
@@ -165,6 +170,7 @@ def _process_year(
     profiles are loaded from / saved to the cache (skipping the 27 GB read on a
     hit); the output is identical either way.
     """
+    # jsasaki 2026-11-04: region_nc may be a (picklable) FullDomainSource
     grid = JcopeGrid(basic_nc)
     gen = JcopeObcGenerator(
         grid=grid,
@@ -225,6 +231,22 @@ def main() -> int:
         default=None,
         help="path to jcopetda_region_YYYY.nc time-series archive "
         "(single-year mode; mutually exclusive with --region-pattern)",
+    )
+    # jsasaki 2026-11-04: read the daily full-domain archive instead of region files
+    parser.add_argument(
+        "--archive-root",
+        type=Path,
+        default=None,
+        help="root of the full-domain archive (YYYY/jcopetda_YYYYMMDD.nc), e.g. "
+        "$DATA_DIR/jcopetda_provisional; replaces --region-nc/--region-pattern. Each year of "
+        "--year/--years is read whole (Jan 1 - Dec 31); the profile cache is not used.",
+    )
+    parser.add_argument(
+        "--missing",
+        choices=("error", "interpolate"),
+        default="error",
+        help="archive mode: what to do with hours the archive declares missing "
+        "(default error; the provisional tree has none)",
     )
     parser.add_argument(
         "--region-pattern",
@@ -340,7 +362,16 @@ def main() -> int:
     if not years:
         sys.exit("no years to process")
 
-    if len(years) == 1 and args.region_nc is not None:
+    if args.archive_root is not None:
+        # jsasaki 2026-11-04: one FullDomainSource per calendar year
+        region_paths: list = [
+            FullDomainSource(
+                args.archive_root, f"{y}-01-01", f"{y}-12-31", missing=args.missing
+            )
+            for y in years
+        ]
+        args.profile_cache_dir = None
+    elif len(years) == 1 and args.region_nc is not None:
         region_paths = [args.region_nc]
     elif args.region_pattern is not None:
         region_paths = [Path(args.region_pattern.format(year=y)) for y in years]
@@ -390,16 +421,26 @@ def main() -> int:
         h_sub, next_ids = substituted_obc_depths(
             mesh.x, mesh.y, mesh.nv, obc_ids, h_all
         )
-        print("[obc-depth-control] sampling at OBC_DEPTH_CONTROL_ON=T substituted "
-              "depths (a-priori NEXT_OBC; endpoints keep own depth):")
+        print(
+            "[obc-depth-control] sampling at OBC_DEPTH_CONTROL_ON=T substituted "
+            "depths (a-priori NEXT_OBC; endpoints keep own depth):"
+        )
         for i, n in enumerate(obc_ids):
-            mark = "" if next_ids[i] == n else \
-                f" <- NEXT_OBC {next_ids[i]}" + \
-                (f" (dH {h_sub[i] - obc_h_fvcom[i]:+.2f} m)"
-                 if abs(h_sub[i] - obc_h_fvcom[i]) > 0.005 else " (equal depth)")
+            mark = (
+                ""
+                if next_ids[i] == n
+                else f" <- NEXT_OBC {next_ids[i]}"
+                + (
+                    f" (dH {h_sub[i] - obc_h_fvcom[i]:+.2f} m)"
+                    if abs(h_sub[i] - obc_h_fvcom[i]) > 0.005
+                    else " (equal depth)"
+                )
+            )
             print(f"  node {n:6d}: h {obc_h_fvcom[i]:8.2f} -> {h_sub[i]:8.2f}{mark}")
-        print("  NOTE: contract-check these depths against a run's output h "
-              "(build_dep_obcsub.py harvest) before production use.")
+        print(
+            "  NOTE: contract-check these depths against a run's output h "
+            "(build_dep_obcsub.py harvest) before production use."
+        )
         obc_h_fvcom = h_sub.astype(obc_h_fvcom.dtype)
 
     # ---- optional SADAPT / sigma-z per-node vertical coordinate ----
@@ -532,7 +573,11 @@ def main() -> int:
     print()
 
     label = format_year_label(years)
-    source_files = [Path(p).name for p in region_paths]
+    # jsasaki 2026-11-04: a FullDomainSource carries its own label
+    source_files = [
+        p.name if isinstance(p, FullDomainSource) else Path(p).name
+        for p in region_paths
+    ]
 
     if not args.no_tsobc:
         time_mjd = np.concatenate([mjd_by_year[y] for y in years])

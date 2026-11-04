@@ -41,6 +41,9 @@ import xarray as xr
 from numpy.typing import ArrayLike, NDArray
 
 from ..grid.sigma import vertical_interp
+
+# jsasaki 2026-11-04: full-domain archive source (FullDomainSource)
+from .jcope_fulldomain import FullDomainSource
 from .jcope_grid import JcopeGrid
 from .netcdf_utils import to_mjd
 
@@ -112,7 +115,8 @@ class JcopeObcGenerator:
         self,
         *,
         grid: JcopeGrid,
-        region_nc: str | Path,
+        # jsasaki 2026-11-04: full-domain archive source (FullDomainSource)
+        region_nc: "str | Path | FullDomainSource",
         obc_nodes: Sequence[int] | NDArray[np.integer],
         obc_lat: ArrayLike,
         obc_lon: ArrayLike,
@@ -122,8 +126,18 @@ class JcopeObcGenerator:
         siglev_per_node: ArrayLike | None = None,
     ) -> None:
         self.grid = grid
-        self.region_nc_path = Path(region_nc).expanduser().resolve()
-        self._region_ds: xr.Dataset = xr.open_dataset(self.region_nc_path)
+        # jsasaki 2026-11-04: the source may be a FullDomainSource (the daily full-domain archive)
+        # instead of a jcopetda_region_YYYY.nc path; the region path is unchanged.
+        self._src: FullDomainSource | None = None
+        self._region_ds: xr.Dataset | None = None
+        if isinstance(region_nc, FullDomainSource):
+            self._src = region_nc
+            self.region_nc_path = region_nc.root
+            self.source_name = region_nc.name
+        else:
+            self.region_nc_path = Path(region_nc).expanduser().resolve()
+            self._region_ds = xr.open_dataset(self.region_nc_path)
+            self.source_name = self.region_nc_path.name
 
         self.obc_nodes = np.asarray(obc_nodes, dtype=np.int32)
         self.obc_lat = np.asarray(obc_lat, dtype=np.float64)
@@ -209,16 +223,28 @@ class JcopeObcGenerator:
         self._jr, self._ir = self._locate_in_region()
 
         # Time axis converted to MJD float64 once
-        time_index = pd.DatetimeIndex(self._region_ds["time"].values)
+        # jsasaki 2026-11-04: full-domain archive source (FullDomainSource)
+        time_index = pd.DatetimeIndex(
+            self._src.time_index if self._src is not None else self._ds["time"].values
+        )
         self.mjd: NDArray[np.float64] = to_mjd(time_index)
         # Back-compat alias for code that referenced the underscored name.
         self._mjd = self.mjd
+
+    @property
+    def _ds(self) -> xr.Dataset:
+        """The open region dataset (region-file mode only)."""
+        # jsasaki 2026-11-04: _region_ds is None in full-domain mode
+        assert self._region_ds is not None
+        return self._region_ds
 
     # ---------- lifecycle ---------- #
 
     def close(self) -> None:
         """Close the region NetCDF handle."""
-        self._region_ds.close()
+        # jsasaki 2026-11-04: full-domain archive source (FullDomainSource)
+        if self._region_ds is not None:
+            self._region_ds.close()
 
     def __enter__(self) -> "JcopeObcGenerator":
         return self
@@ -236,9 +262,13 @@ class JcopeObcGenerator:
         the region's local axes. This guarantees the same physical cell
         is sampled for both depth/σ metadata and time-series values.
         """
-        # Region's local axes
-        r_lat = np.asarray(self._region_ds["lat"].values)
-        r_lon = np.asarray(self._region_ds["lon"].values)
+        # jsasaki 2026-11-04: full-domain archive source (FullDomainSource)
+        # Region's local axes (the full-domain archive's axes are the grid's own)
+        if self._src is not None:
+            r_lat, r_lon = self._src.lat, self._src.lon
+        else:
+            r_lat = np.asarray(self._ds["lat"].values)
+            r_lon = np.asarray(self._ds["lon"].values)
 
         # Region offset in the global grid: where does the region start?
         j0, i0 = self.grid.index_of(r_lat[0], r_lon[0])
@@ -274,7 +304,10 @@ class JcopeObcGenerator:
             entries from the source are preserved; downstream interpolation
             (``vertical_interp``) drops them.
         """
-        da = self._region_ds[name]
+        # jsasaki 2026-11-04: full-domain archive source (FullDomainSource)
+        if self._src is not None:
+            return self._src.read_profile(name, self._jr, self._ir)
+        da = self._ds[name]
         if da.ndim != 4:
             raise ValueError(
                 f"{name!r} is not a 4-D (time, level, lat, lon) field " f"in region_nc"
@@ -296,7 +329,10 @@ class JcopeObcGenerator:
 
         Returns ``(n_time, n_obc)`` float32.
         """
-        da = self._region_ds[name]
+        # jsasaki 2026-11-04: full-domain archive source (FullDomainSource)
+        if self._src is not None:
+            return self._src.read_2d(name, self._jr, self._ir)
+        da = self._ds[name]
         if da.ndim != 3:
             raise ValueError(
                 f"{name!r} is not a 3-D (time, lat, lon) field in region_nc"
@@ -439,7 +475,8 @@ class JcopeObcGenerator:
             siglay=self.siglay,
             fields=fields,
             title=title,
-            source_files=[self.region_nc_path.name],
+            # jsasaki 2026-11-04: source label of either archive kind
+            source_files=[self.source_name],
         )
 
     def write_elevation(
@@ -455,7 +492,8 @@ class JcopeObcGenerator:
             obc_nodes=self.obc_nodes,
             elevation=self.build_elevation_array(),
             title=title,
-            source_files=[self.region_nc_path.name],
+            # jsasaki 2026-11-04: source label of either archive kind
+            source_files=[self.source_name],
         )
 
 
