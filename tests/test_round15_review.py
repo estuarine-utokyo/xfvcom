@@ -260,5 +260,6 @@ def test_round15_header_beyond_scan_file_limit_is_refused(tmp_path):
     f = _mesh(
         tmp_path, "Cell Number = 1\n" + pad + "Node Number = 3\n" + _ELEM + _NODES
     )
-    with pytest.raises(ValueError, match="first 200 lines"):
+    # jsasaki 2026-11-05: review round 16 #2: the limit is line 201 (header here on line 202)
+    with pytest.raises(ValueError, match="beyond line 201"):
         read_dat(f)

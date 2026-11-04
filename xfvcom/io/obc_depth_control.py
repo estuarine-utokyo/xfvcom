@@ -18,7 +18,10 @@ OBC-node list alone — no FVCOM run is needed:
    supplies the orientation (``CROSS = sign((c-p) x (q-p))``) and the edge
    normal ``(CROSS*dyn, -CROSS*dxn)/|edge|`` points *into* the domain.
 3. ``NEXT_OBC`` is the edge-neighbour that is NOT an OBC node maximising the
-   dot product of its unit direction with the inward normal.
+   dot product of its unit direction with the inward normal;
+   neighbours are scanned in FVCOM's own order (``NBSN`` from ``tge.F``, on
+   the reversed connectivity) and the FIRST maximum is kept, so tied
+   candidates resolve as in FVCOM.
 
 Cartesian (UTM) meshes only — mirrors the ``#else`` (non-SPHERICAL) branch.
 
@@ -87,6 +90,57 @@ def _topology(nv: NDArray[np.int_]):
         cells_of[n2].append(c)
         cells_of[n3].append(c)
     return neighbours, cells_of
+
+
+# ---> jsasaki 2026-11-05: review round 16 #1: FVCOM's ordered neighbour list, so ties resolve as in FVCOM
+def _fvcom_boundary_neighbours(
+    p: int, nv: NDArray[np.int_], cells: list[int]
+) -> list[int]:
+    """Neighbours of boundary node ``p`` in FVCOM's ``NBSN`` order (0-based, ``p`` excluded).
+
+    Port of the boundary-node (``ISONB /= 0``) branch of ``TRIANGLE_GRID_EDGE``
+    (``tge.F``) on FVCOM's own connectivity, which ``READ_COLDSTART_GRID``
+    (``mod_input.F``) stores REVERSED: file record ``N1 N2 N3`` becomes
+    ``NV = (N1, N3, N2)``.  In each surrounding cell, with ``p`` at position
+    ``JJ``, call ``nxt`` the vertex at ``JJ+1`` and ``prv`` the one at ``JJ+2``
+    (cyclic).  The walk starts at the ONE cell whose edge ``(p, nxt)`` is a
+    boundary edge, steps to the cell across edge ``(p, prv)``, and lists
+    ``nxt`` of every cell in walk order followed by ``prv`` of the last cell:
+    ``NBSN(p,:) = p, nxt(e1), ..., nxt(eN), prv(eN), p``.  ``SETUP_OBC``
+    (``mod_obcs.F``) scans ``NBSN(p, 1:NTSN-1)`` and keeps the FIRST maximum
+    of the dot product, so this order decides ties.
+    """
+    nxt: dict[int, int] = {}
+    prv: dict[int, int] = {}
+    for c in cells:
+        # FVCOM's NV row: file order (n1, n2, n3) -> (n1, n3, n2)
+        verts = (int(nv[0, c]), int(nv[2, c]), int(nv[1, c]))
+        jj = verts.index(p)
+        nxt[c] = verts[(jj + 1) % 3]
+        prv[c] = verts[(jj + 2) % 3]
+
+    def _cells_on_edge(q: int) -> list[int]:
+        return [c for c in cells if q in (nxt[c], prv[c])]
+
+    start = [c for c in cells if len(_cells_on_edge(nxt[c])) == 1]
+    if len(start) != 1:
+        raise ValueError(
+            f"OBC node {p + 1}: {len(start)} cells start a boundary walk around it "
+            "(tge.F stops with 'ERROR IN TGE DETERMINING ISONB'; expected 1)"
+        )
+    walk = [start[0]]
+    while len(walk) < len(cells):
+        across = [c for c in _cells_on_edge(prv[walk[-1]]) if c != walk[-1]]
+        if len(across) != 1 or across[0] in walk:
+            raise ValueError(
+                f"OBC node {p + 1}: the cells around it do not form one fan "
+                "(FVCOM's neighbour walk in tge.F would fail)"
+            )
+        walk.append(across[0])
+    return [nxt[c] for c in walk] + [prv[walk[-1]]]
+
+
+# <--- jsasaki 2026-11-05
 
 
 #: accepted values of ``endpoint_rule`` (the first is the default)
@@ -181,14 +235,17 @@ def next_obc_nodes(
         nrm = float(np.hypot(acc_x, acc_y))
         nx, ny = acc_x / nrm, acc_y / nrm
 
-        best_dot, best = -2.0, -1
-        for j in neighbours[p]:
+        # ---> jsasaki 2026-11-05: review round 16 #1: scan neighbours in FVCOM's NBSN order and keep
+        # the FIRST maximum (SETUP_OBC: DOTMAX = -1.0, IF(DOT > DOTMAX)), so ties resolve as in FVCOM
+        best_dot, best = -1.0, -1
+        for j in _fvcom_boundary_neighbours(p, nv, cells_of[p]):
             if j in obcset:
                 continue
             dx = x[j] - x[p]
             dy = y[j] - y[p]
             ln = float(np.hypot(dx, dy))
-            dot = (dx * nx + dy * ny) / ln
+            dot = (dx / ln) * nx + (dy / ln) * ny
+            # <--- jsasaki 2026-11-05
             if dot > best_dot:
                 best_dot, best = dot, j
         if best < 0:

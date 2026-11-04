@@ -47,8 +47,12 @@ def read_dep(path: str | Path) -> DepData:
     if not path.is_file():
         raise FileNotFoundError(path)
 
+    # jsasaki 2026-11-05: review round 16 #3: drop each line's '!' comment before tokenising
+    # ('10.0!survey'), keeping the physical line number for the diagnostics
     with path.open() as fp:
-        lines = [ln.strip() for ln in fp if ln.strip()]
+        numbered = [(n, ln.split("!", 1)[0].strip()) for n, ln in enumerate(fp, 1)]
+    linenos = [n for n, ln in numbered if ln]
+    lines = [ln for _n, ln in numbered if ln]
 
     node: int | None = None
     idx = 0
@@ -84,7 +88,9 @@ def read_dep(path: str | Path) -> DepData:
             continue
         read += 1
     if read != node:
-        raise ValueError(f"{path}: depth block ended prematurely ({read}/{node})")
+        # jsasaki 2026-11-05: review round 16 #3: name the last line read
+        last = f" (last line read: {linenos[idx - 1]})" if idx > 0 else ""
+        raise ValueError(f"{path}: depth block ended prematurely ({read}/{node}){last}")
 
     return DepData(x=x, y=y, h=h)
 

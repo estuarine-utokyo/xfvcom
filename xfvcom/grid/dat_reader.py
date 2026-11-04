@@ -28,8 +28,9 @@ def _is_int(tok: str) -> bool:
 
 
 # ---> jsasaki 2026-11-05: review round 15 #2 #3 #5: strict count headers, records after the blocks
-#: FVCOM's SCAN_FILE gives up after this many lines (mod_utils.F, NLINE > 200).
-_SCAN_FILE_LINES = 200
+# jsasaki 2026-11-05: review round 16 #2: SCAN_FILE tests NLINE > 200 BEFORE reading, so line 201 is read
+#: The last physical line FVCOM's SCAN_FILE reads (mod_utils.F checks NLINE > 200, then reads line NLINE+1).
+_SCAN_FILE_LINES = 201
 #: The value of a count header: ONE unsigned integer, optional '+', spaces and a trailing '!'
 #: comment (FVCOM's GET_VALUE strips the comment and reads an integer; '3.5' is typed 'float' and
 #: refused by SCAN_FILE(ISCAL=...)).
@@ -48,9 +49,16 @@ def _header_count(raw: str, lineno: int, path: Path) -> int:
     return int(m[1])
 
 
+# jsasaki 2026-11-05: review round 16 #3: a record is the text before its first '!' (attached comments too)
+def _body(raw: str) -> str:
+    """The record part of a line: everything before the first ``!`` comment marker."""
+    return raw.split("!", 1)[0]
+
+
 def _is_comment(raw: str) -> bool:
-    """A comment-only line (``!`` first); blank lines are dropped before this is asked."""
-    return raw.lstrip().startswith("!")
+    """A comment-only line (nothing but blanks before ``!``); blank lines are dropped before this is asked."""
+    # jsasaki 2026-11-05: review round 16 #3: same definition as the record body
+    return not _body(raw).strip()
 
 
 # <--- jsasaki 2026-11-05
@@ -82,11 +90,13 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     # (rewinding), so 'Cell Number' may precede 'Node Number'.  The connectivity block starts at the
     # first record that reads as four integers (READ_COLDSTART_GRID); both headers must come before it
     # and within the 200 lines SCAN_FILE scans.
+    # jsasaki 2026-11-05: review round 16 #3: tokenise the record without its '!' comment
     start = next(
         (
             k
             for k, (_n, ln) in enumerate(lines)
-            if len(ln.split()) >= 4 and all(_is_int(t) for t in ln.split()[:4])
+            if len(_body(ln).split()) >= 4
+            and all(_is_int(t) for t in _body(ln).split()[:4])
         ),
         len(lines),
     )
@@ -106,9 +116,10 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
                 f"of the connectivity block (line {lines[start][0]})"
             )
         if lineno > _SCAN_FILE_LINES:
+            # jsasaki 2026-11-05: review round 16 #2: name the last line SCAN_FILE reads (201)
             raise ValueError(
-                f"{path}: line {lineno}: count header {raw.strip()!r} lies beyond the "
-                f"first {_SCAN_FILE_LINES} lines that FVCOM's SCAN_FILE reads"
+                f"{path}: line {lineno}: count header {raw.strip()!r} lies beyond line "
+                f"{_SCAN_FILE_LINES}, the last line that FVCOM's SCAN_FILE reads"
             )
         if key in counts:
             raise ValueError(
@@ -128,7 +139,8 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     seen_elem: NDArray[np.bool_] = np.zeros(nele, dtype=bool)
     while read_elem < nele and idx < len(lines):
         # jsasaki 2026-11-05: review round 15 #3: lines carry their line numbers
-        parts = lines[idx][1].split()
+        # jsasaki 2026-11-05: review round 16 #3: tokenise the record without its '!' comment
+        parts = _body(lines[idx][1]).split()
         idx += 1
         # jsasaki 2026-11-05: review round 12 #3: FVCOM reads J,N1,N2,N3; extra columns are unused
         if len(parts) < 4 or not all(_is_int(t) for t in parts[:4]):
@@ -165,7 +177,8 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     # record is reported by the node block's own order check below.
     if not allow_unordered:
         nxt = next((ln for ln in lines[idx:] if not _is_comment(ln[1])), None)
-        tok = nxt[1].split()[:4] if nxt is not None else []
+        # jsasaki 2026-11-05: review round 16 #3: tokenise the record without its '!' comment
+        tok = _body(nxt[1]).split()[:4] if nxt is not None else []
         if len(tok) == 4 and all(_is_int(t) for t in tok) and int(tok[0]) != 1:
             assert nxt is not None
             raise ValueError(
@@ -184,7 +197,8 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     seen: NDArray[np.bool_] = np.zeros(node, dtype=bool)
     while read_node < node and idx < len(lines):
         # jsasaki 2026-11-05: review round 15 #3: lines carry their line numbers
-        parts = lines[idx][1].split()
+        # jsasaki 2026-11-05: review round 16 #3: tokenise the record without its '!' comment
+        parts = _body(lines[idx][1]).split()
         idx += 1
         # jsasaki 2026-11-05: review round 12 #3: FVCOM reads J,X1,Y1; extra columns are unused
         if len(parts) < 3 or not _is_int(parts[0]):
