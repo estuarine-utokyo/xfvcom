@@ -9,6 +9,9 @@ from typing import TypedDict
 import numpy as np
 from numpy.typing import NDArray
 
+# jsasaki 2026-11-05: review round 14 #2: FVCOM reads coordinates list-directed (D/E/Q exponents)
+from ..fortran_numbers import fortran_real
+
 __all__ = ["read_dat"]
 
 
@@ -49,7 +52,8 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     idx = 0
 
     while idx < len(lines):
-        ln = lines[idx]
+        # jsasaki 2026-11-05: review round 14 #3: FVCOM's SCAN_FILE matches ADJUSTL(TLINE); spaces only
+        ln = lines[idx].lstrip(" ")
         low = ln.lower()
 
         if low.startswith("node number"):
@@ -121,8 +125,9 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
         if len(parts) < 3 or not _is_int(parts[0]):
             continue
         try:
-            xv = float(parts[1])
-            yv = float(parts[2])
+            # jsasaki 2026-11-05: review round 14 #2: Fortran real literals ('4.0D+5', '1.0-3')
+            xv = fortran_real(parts[1])
+            yv = fortran_real(parts[2])
         except ValueError:
             continue
         nid = int(parts[0])

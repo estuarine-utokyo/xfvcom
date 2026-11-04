@@ -31,11 +31,13 @@ Example (a slope-adaptive Tokyo-Bay header)::
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+
+# jsasaki 2026-11-05: review round 14 #2: shared helper, re-exported for existing imports
+from ..fortran_numbers import _FORTRAN_REAL, fortran_real  # noqa: F401
 
 # jsasaki 2026-11-05: review round 11 #2: FVCOM's 32-bit INTEGER range
 from ..grid.gtsz import FORTRAN_INT_MAX, FORTRAN_INT_MIN, GtszSpec
@@ -190,36 +192,8 @@ def _check_int32(path: Path, key: str, val: str, iv: int) -> None:
 
 # ---> jsasaki 2026-11-05: review round 13 #2: one Fortran real-literal
 # conversion shared by the numeric-line validator and the active readers
-#: A real literal as Fortran's list-directed READ accepts it (checked against
-#: gfortran and Intel ifx): optional sign, a mantissa with at least one digit
-#: and at most one decimal point, and an optional exponent written either with
-#: a letter (E/D/Q, any case, optional sign) or as a bare SIGNED integer
-#: ('1.0-3' = 0.001, '1.0+3' = 1000).  'E'/'D'/'Q' without digits ('1e') is
-#: refused: gfortran stops on it (ifx reads 1.0), so it is not portable.
-_FORTRAN_REAL = re.compile(
-    r"(?P<mant>[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+))"
-    r"(?:(?P<letter>[EeDdQq])(?P<lexp>[+-]?[0-9]+)|(?P<sexp>[+-][0-9]+))?"
-)
-
-
-def fortran_real(tok: str) -> float:
-    """Convert one token the way Fortran's list-directed ``READ`` into a
-    ``REAL(DP)`` does, or raise :class:`ValueError`.
-
-    Accepts implicit-exponent forms (``1.0-3``, ``1.0+3``, ``.5-1``), ``D``/``Q``
-    exponents (``1.0d-3``) and signs; refuses what the Fortran runtime refuses
-    (``1.0.0``, ``abc``, ``1e``, ``1.0e+``, ``.``) and a value that overflows
-    ``REAL(DP)`` (Intel Fortran stops on it, gfortran reads Infinity).  An
-    underflow reads as zero, as in Fortran.
-    """
-    m = _FORTRAN_REAL.fullmatch(tok)
-    if m is None:
-        raise ValueError(f"'{tok}' is not a Fortran real literal")
-    exp = m["lexp"] if m["letter"] else m["sexp"]
-    x = float(m["mant"] + ("" if exp is None else "e" + exp))
-    if not np.isfinite(x):
-        raise ValueError(f"'{tok}' is not finite (overflows REAL(DP))")
-    return x
+# jsasaki 2026-11-05: review round 14 #2: fortran_real() now lives in xfvcom/fortran_numbers.py
+# (shared with the mesh and depth readers) and is re-exported by the import at the top
 
 
 def _with_point(tok: str) -> str:

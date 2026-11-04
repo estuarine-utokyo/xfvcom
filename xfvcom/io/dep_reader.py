@@ -22,6 +22,9 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
+# jsasaki 2026-11-05: review round 14 #2: FVCOM reads depth records list-directed
+from ..fortran_numbers import fortran_real
+
 __all__ = ["DepData", "read_dep", "write_dep"]
 
 
@@ -71,10 +74,11 @@ def read_dep(path: str | Path) -> DepData:
         if len(parts) < 3:
             continue
         try:
+            # jsasaki 2026-11-05: review round 14 #2: Fortran real literals ('1.0D+1', '1.0-3')
             x[read], y[read], h[read] = (
-                float(parts[0]),
-                float(parts[1]),
-                float(parts[2]),
+                fortran_real(parts[0]),
+                fortran_real(parts[1]),
+                fortran_real(parts[2]),
             )
         except ValueError:
             continue

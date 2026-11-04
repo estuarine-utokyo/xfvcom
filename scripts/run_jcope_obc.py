@@ -34,6 +34,8 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+# jsasaki 2026-11-05: review round 14 #2: shared Fortran real-literal conversion
+from xfvcom.fortran_numbers import fortran_real
 from xfvcom.grid.grid_obj import FvcomGrid
 from xfvcom.io import (
     FullDomainSource,
@@ -139,7 +141,8 @@ def parse_dep_dat(path: Path, node_xy: np.ndarray | None = None) -> np.ndarray:
         try:
             if len(parts) != 3:
                 raise ValueError
-            rows[k] = [float(x) for x in parts]
+            # jsasaki 2026-11-05: review round 14 #2: Fortran real literals ('1.0D+1', '1.0-3')
+            rows[k] = [fortran_real(x) for x in parts]
         except ValueError:
             raise ValueError(f"{path}: malformed depth record {line!r}") from None
     if not np.isfinite(rows).all():
