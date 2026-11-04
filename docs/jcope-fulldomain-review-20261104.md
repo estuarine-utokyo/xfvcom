@@ -1539,3 +1539,71 @@ VERDICT: FAIL (0 blocker, 0 major, 5 minor, 0 nit)
 ### Triage
 
 All 5 findings accepted (minor; #3 was a round-9 regression). xfvcom ff73281 (21 tests, 17 failed on the old code): #1 the continuation check is applied to the line cut to FVCOM's 400-byte buffer (mod_utils.F INPLINE) and the writer rejects comment lines over 400 characters, #2 build_gtsz(model_precision='double'|'single'): the LOWSIG startup checks are recomputed in float32 for 'single' (default 'double' = the TB-FVCOM build, unchanged), #3 suggest_zlev keeps the rounded levels only while they stay strictly negative and descending, #4 non-finite numeric conversions are rejected by the reader and GtszSpec.validate() requires finite ZLEV/LOWFRAC, #5 compare_jcope_sources sets sys.path before importing run_jcope_obc (python -m scripts.compare_jcope_sources works). All 2,993 *sigma*.dat files parse identically.
+
+## Round 11 (commit ff77148 reviewed; fixes in 4e137cb)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `ff77148` (fixes in `ff73281`) and jcopetda `41c46e4`. No files were modified.
+
+| Round-10 finding | Status | Reason |
+|---|---|---|
+| 1. Truncated continuations/comments | RESOLVED | The exposed suffix is rejected; writer comments exceeding 400 bytes are rejected. |
+| 2. LOWSIG model precision | PARTIAL | The reported LOWFRAC collapse is rejected, but upper-band calculations still bypass model precision; finding 1 below. |
+| 3. Suggested z-level rounding | RESOLVED | Both reported cases retain valid, unrounded levels. |
+| 4. Nonfinite numeric values | RESOLVED | Overflowed literals and nonfinite ZLEV/LOWFRAC values are rejected. |
+| 5. Comparison module invocation | RESOLVED | Path initialization precedes the import; module argument parsing succeeds. |
+
+Round-10 cases were replayed with read-only adaptations. Production-day checks covered uniform, SADAPT, LOWSIG, NPZ identity handling, depth control, both provisional repair days, and diskless NetCDF writers. All five source variables matched the regional archive within packing tolerance. No additional regression was substantiated in the exercised FvcomGrid or regional paths. The full suite and annual builds were not rerun.
+
+1. **Minor — The single-precision startup check still misses upper-band collapse.**  
+   Location: [gtsz_builder.py:321](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/gtsz_builder.py:321). Incomplete round-10 fix.
+
+   **Reproduction:** On a triangle with three 10 m depths:
+
+   ```python
+   spec = GtszSpec(
+       kb=31, base=3, k1=10, sadapt=True, lowsig=True,
+       l1=10.0, l2=10.0,
+   )
+   build_gtsz(mesh, spec, model_precision="single")
+   ```
+
+   Construction succeeds, with minimum returned thickness approximately **5.1512e-5 m**.
+
+   The check computes `sband_reshape()` in float64 and casts its completed result. FVCOM evaluates the hyperbolic shape, subtraction and normalization in `REAL(SP)`. Reproducing those expressions in float32 using `libm.tanhf` makes the first two interfaces both zero, triggering FVCOM’s nonpositive-thickness startup failure.
+
+   **Fix:** Evaluate the base shape and SBAND normalization in the selected model precision, including parameter conversion. Add this hyperbolic saturation case to regression coverage.
+
+2. **Minor — Sigma-file integer overflow passes reading, construction and serialization.**  
+   Location: [sigma_dat.py:165](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:165). Pre-existing.
+
+   **Reproduction:** This file reads successfully:
+
+   ```text
+   NUMBER OF SIGMA LEVELS = 5
+   SIGMA COORDINATE TYPE = SIGMAZ
+   GTSZ BASE = 1
+   GTSZ NZ = 0
+   GTSZ K1 = 2147483648
+   ```
+
+   `build_gtsz()` produces `[0, -0.25, -0.5, -0.75, -1]`, and `gtsz_to_lines()` emits the overflowing K1 unchanged.
+
+   FVCOM scans K1 even when NZ is zero. `GET_VALUE` reads it into the default 32-bit `INTEGER` buffer using an internal `READ` without `IOSTAT`; the value exceeds that type’s range and terminates reading.
+
+   **Fix:** Check integer literals against the model’s INTEGER range before accepting or emitting them. Apply the same check to integer-form DREF.
+
+3. **Nit — Precision documentation contradicts the supported double-precision configuration.**  
+   Location: [gtsz.py:36](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/gtsz.py:36). Pre-existing.
+
+   **Evidence:** The module states that FVCOM uses single precision internally and therefore agreement is limited to approximately `1e-5`. FVCOM’s `mod_prec.F` selects double-precision `SP` under `DOUBLE_PRECISION`, which is also the configuration documented as the builder’s default.
+
+   **Fix:** Describe agreement separately for single- and double-precision builds.
+
+## Verdict
+VERDICT: FAIL (0 blocker, 0 major, 2 minor, 1 nit)
+
+### Triage
+
+All 3 findings accepted (2 minor, 1 nit). xfvcom 4e137cb (tests/test_round11_review.py): #1 _sband_sp evaluates SBAND in float32 in FVCOM's operation order for the single-precision startup check (numpy float32 tanh/pow stands in for tanhf/powf; the reviewer's saturating case raises in 'single', builds in 'double'), #2 32-bit INTEGER range checks in the reader, validate() and the writer (decimal-less DREF that cannot be read as an integer is now rejected), #3 precision documentation. All 2,993 *sigma*.dat files parse identically.
