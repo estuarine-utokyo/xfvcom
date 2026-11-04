@@ -1785,3 +1785,76 @@ VERDICT: FAIL (0 blocker, 1 major, 2 minor, 0 nit)
 ### Triage
 
 #2 and #3 accepted. #1 (major, pre-existing: the --obc-depth-control endpoint rule) is REBUTTED as a default and answered with an explicit option: the rule 'boundary-string endpoints keep their own depth' was measured, not assumed (TB-FVCOM b9 mesh, 60-rank production run: the runtime h at all 13 OBC nodes is reproduced; see the module docstring of xfvcom/io/obc_depth_control.py and TB-FVCOM hydro/docs/obc_depth_consistency.md section 6), and the reviewer's rule is derived from the Fortran source only. xfvcom 87a8593 (tests/test_round13_review.py): endpoint_rule='observed' (default) | 'source' (literal mod_obcs.F/mod_startup.F reading; reproduces the reviewer's numbers: node 3150 28.869 vs 56.402 m, node 3015 9.200 vs 9.287 m), CLI --obc-depth-control-endpoints, the rule is printed and written to the file history; #2 a shared Fortran real-literal parser (implicit exponents like 1.0-3, E/D/Q exponents; grammar checked with gfortran and ifx, strict where they disagree: '1e' and overflow are rejected). jcopetda cd384ac: #3 a dangling static link is refused. All 3,756 *sigma*.dat files parse identically.
+
+## Round 14 (commit 030eab9 reviewed; fixes in 88ff803, jcopetda 96f429f)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `030eab9` and jcopetda `cd384ac`. No files were modified.
+
+| Round-13 finding | Status | Reason |
+|---|---|---|
+| #1: Endpoint depth rule | RESOLVED | **I concede the rebuttal concerning the default.** Source inspection alone does not invalidate the measured 60-rank runtime depths. Both rules are now selectable, printed and recorded in T/S history. I found no mechanism explaining endpoint retention; the documented configuration-specific contract check remains necessary. |
+| #2: Implicit-exponent literals | RESOLVED | The validator and active readers share `fortran_real()`. The reported literals parse correctly; invalid syntax and overflow remain rejected. |
+| #3: Dangling `static/` alias | RESOLVED | A mocked execution rejects the dangling source link before publication. |
+
+Verification included 45 passing round-13 text/depth cases, diskless history serialization, production-day comparisons for all five variables at all 13 OBC nodes, SADAPT generation, both endpoint rules, NPZ row reordering and reads from both provisional repair days. No additional regression was substantiated in the exercised regional or FvcomGrid paths. The full suite and annual builds were not run.
+
+1. **Minor — The provisional-tree lock can truncate an archive file through an alias.**
+
+   Location: [make_provisional_tree.py:218](/home/pj24001722/ku40000343/Github/jcopetda/tools/make_provisional_tree.py:218). Pre-existing.
+
+   **Reproduction:** With otherwise separate source and output roots, create:
+
+   ```text
+   /output/.provtree.lock -> /source/2020/jcopetda_20200101.nc
+   ```
+
+   `open(..., "w")` follows this link and truncates the source day file **before** acquiring the lock or executing alias preflight. A later validation failure cannot recover those bytes. A filesystem-mocked execution of `main()` confirmed that the truncating open is reached without examining the lock entry.
+
+   **Fix:** Open the lock without truncation, using `os.open()` with `O_RDWR | O_CREAT | O_NOFOLLOW`, validate the descriptor as a regular file, then acquire `flock`. Keep this lock inode stable.
+
+2. **Minor — Mesh and depth readers reject valid Fortran real literals.**
+
+   Locations: [dat_reader.py:124](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:124), [run_jcope_obc.py:142](/home/pj24001722/ku40000343/Github/xfvcom/scripts/run_jcope_obc.py:142), [dep_reader.py:76](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/dep_reader.py:76). Pre-existing.
+
+   **Reproduction:** In an otherwise valid mesh, spell coordinates using standard double-precision exponents:
+
+   ```text
+   1 4.0D+5 3.9D+6
+   2 4.01D+5 3.9D+6
+   3 4.0D+5 3.901D+6
+   ```
+
+   `read_dat()` skips these records and raises `Node block ended prematurely (0/3)`. Likewise, this depth record is rejected as malformed:
+
+   ```text
+   400000.0 3900000.0 1.0D+1
+   ```
+
+   FVCOM’s coordinate and depth routines use list-directed real reads, which accept these literals. The new sigma parser supports them, but the mesh/depth paths still use Python’s `float()`.
+
+   **Fix:** Reuse the Fortran-real conversion for mesh coordinates and depth records, including the reader reached by `--sigma-dat`, while retaining finiteness and mesh-identity checks.
+
+3. **Minor — Indented mesh headers are rejected despite being valid for FVCOM.**
+
+   Location: [dat_reader.py:53](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:53). Pre-existing.
+
+   **Reproduction:** Add two leading spaces to both count headers of an otherwise accepted mesh:
+
+   ```text
+     Node Number = 3
+     Cell Number = 1
+   ```
+
+   `read_dat()` raises `Node/Cell counts not found in DAT file`. It preserves leading whitespace and applies `startswith()` directly. FVCOM’s `SCAN_FILE` passes `ADJUSTL(TLINE)` into its key parser, so the indentation is accepted there. This blocks both ordinary runner loading and the `--sigma-dat` mesh path.
+
+   **Fix:** Remove leading spaces before matching count headers; preserve the existing record-order and connectivity validation.
+
+## Verdict
+
+VERDICT: FAIL (0 blocker, 0 major, 3 minor, 0 nit)
+
+### Triage
+
+The reviewer CONCEDED the round-13 rebuttal (default endpoint rule stays 'observed'; both rules selectable and recorded). All 3 new findings (minor) accepted. xfvcom 88ff803 (tests/test_round14_review.py, 14 tests): #2 fortran_real() moved to xfvcom/fortran_numbers.py (neutral module; xfvcom/io/sigma_dat.py re-exports it) and used for mesh coordinates, read_dep and parse_dep_dat; read_dat/read_dep no longer accept nan/inf/overflow through float(); #3 leading spaces (not tabs) stripped before the count headers; 20 grid files and 30 depth files read identically. jcopetda 96f429f: #1 the lock file is opened without truncation and without following links (O_NOFOLLOW, regular file checked).
