@@ -1213,3 +1213,119 @@ VERDICT: FAIL (0 blocker, 2 major, 5 minor, 0 nit)
 ### Triage
 
 All 7 findings accepted (2 major, 5 minor; all on the sigma-z / siglev-npz / SIGMAZ-file path or the jcopetda tool, pre-existing except #7). xfvcom 294c361 (32 tests, 26 failed on the old code): #1 load_siglev_npz reorders by obc_node and checks the npz depths against the OBC depths (largest difference 347.18 m for the wrong depth file, 6e-6 m for the intended one; --siglev-npz-ignore-depth), #2 the sigma.dat reader types values like FVCOM's SCAN_FILE/GET_VALUE and REJECTS what FVCOM would read differently (e.g. 'GTSZ P1 = 4'), the writer always writes a decimal point (before, ZLEV was written '-2 -4', which FVCOM treats as missing); mirroring was not chosen because several cases are ambiguous; all 51 existing SIGMAZ files under ~/Github still parse to the same spec, #3 LOWFRAC normalised, #4 validate() mirrors FVCOM's startup checks (P1 > 0, SMOOTH >= 0, ...), #6 grassfire raises when it does not converge (the production case converges in 11 sweeps), #7 start_index must hold exactly one value. jcopetda 41c46e4: #5 individual source day files are preflighted.
+
+## Round 8 (commit b154467 reviewed; fixes in 9748876)
+
+### Final answer (verbatim)
+
+No files were modified. Twenty file-free round-7 tests passed. All five variables matched the regional archive within packing tolerance for 2020-01-01 at all 13 production OBC nodes. Uniform, SADAPT, NPZ and depth-control builds produced finite forcing for 2020-12-15. The full suite was not rerun.
+
+**Round-7 status**
+
+| Finding | Status | Verification |
+|---|---|---|
+| 1. NPZ identity/depth | RESOLVED | Production rows reorder correctly; the wrong depth file is rejected. Missing metadata produces explicit warnings. |
+| 2. FVCOM numeric parsing | PARTIAL | Reported decimal-less values are rejected and floating literals are emitted correctly. Findings 2–5 below identify remaining scanner mismatches. |
+| 3. LOWFRAC normalization | RESOLVED | The reported fractions produce the same coordinate as explicitly normalized fractions. |
+| 4. GTSZ startup validation | PARTIAL | Reported shape-parameter cases are rejected. Additional model-invalid configurations remain accepted; see finding 6. |
+| 5. Source-day aliases | RESOLVED | The reported alias is rejected by the actual tool’s preflight in a filesystem mock. |
+| 6. Grassfire exhaustion | RESOLVED | Injecting `max_sweep=1` raises; the production mesh converges normally. |
+| 7. `start_index` cardinality | RESOLVED | Empty and multivalued attributes are rejected; supported single-valued forms work. |
+
+**Findings**
+
+1. **Minor — Element aperture fractions use an obsolete FVCOM formula.**  
+   Location: [gtsz.py:521](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/gtsz.py:521). Pre-existing.
+
+   **Evidence:** Build `tb_sz_m7prod_k30_s02_sigma.dat` on `TokyoBay_grd.dat` with `TokyoBay_dep_m7001tp_rfac0p2_cap300.dat`. At one-based element **5309**, Python returns `frac1=0.9160873153`; the current FVCOM depth-weighted formula gives **0.8947629271**. The corresponding apertures are **134.504935 m** and **131.373972 m**.
+
+   Current FVCOM computes `sum(H_i * f_i) / sum(H_i)`, where `f_i=-Z_i[KBP1]`; Python averages the fractions without depth weighting. This executes during boundary generation, although the runner does not use `frac1` to interpolate T/S.
+
+   **Fix:** Pass node depths into `compute_kbp1_frac1()` and reproduce the depth-weighted formula in `FVCOM/src/mod_setup.F`.
+
+2. **Minor — Comma normalization silently turns true logical values into false.**  
+   Locations: [sigma_dat.py:183](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:183), [sigma_dat.py:118](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:118). **Round-7 regression.**
+
+   **Reproduction:** Read an otherwise valid SIGMAZ file containing:
+
+   ```text
+   GTSZ SADAPT = T,
+   GTSZ LOWSIG = T,
+   ```
+
+   Both flags become `False`. `_fvcom_type()` replaces commas before recognizing a logical, but `_get_bool()` compares the original `T,` with `T`. FVCOM replaces commas before interpreting the value and reads both flags as true. Python consequently accepts a different coordinate.
+
+   The integer reader has the related inconsistency: `NUMBER OF SIGMA LEVELS = 31,` passes type classification but then fails integer conversion.
+
+   **Fix:** Normalize commas once and use the normalized value consistently for classification and conversion.
+
+3. **Minor — Trimming tabs still permits scientifically different numeric interpretations.**  
+   Location: [sigma_dat.py:239](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:239). Pre-existing; round-7 parsing fix remains incomplete.
+
+   **Reproduction:** In a pure SIGMAZ file, set the value to a literal tab followed by `4.0`:
+
+   ```python
+   "GTSZ P1 = \t4.0\n"
+   ```
+
+   Python strips the tab and uses `P1=4`. FVCOM’s `ADJUSTL` removes spaces, while `GET_VALUE` treats the retained tab as a string character; the floating request fails and uses `P1=2`. The reproduced interface difference reaches **37.2859 m** in a 300 m column.
+
+   **Fix:** Apply FVCOM’s space-only trimming semantics, or explicitly reject tabs and other whitespace that FVCOM interprets differently.
+
+4. **Minor — Coordinate-type capitalization accepts files FVCOM rejects.**  
+   Location: [sigma_dat.py:261](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:261). Pre-existing.
+
+   **Reproduction:** Change `SIGMA COORDINATE TYPE = SIGMAZ` to `SIGMA COORDINATE TYPE = sigmaz`. Python uppercases it and successfully builds the coordinate. FVCOM selects the type case-sensitively and terminates through its default case.
+
+   **Fix:** Reject noncanonical type values instead of silently uppercasing them.
+
+5. **Minor — Scanner limits are ignored, including by the expanded floating-value writer.**  
+   Locations: [sigma_dat.py:229](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:229), [sigma_dat.py:371](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:371). Reader defect is pre-existing; longer writer output is a **round-7 regression**.
+
+   **Evidence:**
+   - Put mandatory keys near the start, then 201 comment lines, then `GTSZ P1 = 4.0`. Python uses 4; FVCOM exhausts its header search and defaults to 2.
+   - Serialize `GtszSpec(kb=91, k1=20, k2=91, nz=70, zlev=tuple(-float(i) for i in range(1,71)))`. The new ZLEV line is **422 characters**, exceeding FVCOM’s 400-character physical input buffer. Its former representation was 282 characters.
+   - Python also permits numeric lists beyond FVCOM’s 150-value token buffer.
+
+   **Fix:** Validate scanner limits before accepting or emitting a file. Support bounded continuations consistently in both reader and writer where possible; otherwise reject unsupported files explicitly.
+
+6. **Minor — Additional FVCOM startup constraints remain unchecked.**  
+   Locations: [gtsz_builder.py:281](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/gtsz_builder.py:281), [sigma_dat.py:296](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:296). Pre-existing.
+
+   **Reproductions:**
+   - `GtszSpec(kb=5, mask=True)` validates and builds despite having no z-band; FVCOM explicitly rejects this combination.
+   - On a constant 10 m triangle, `GtszSpec(kb=5, base=1, k1=2, k2=5, nz=2, zlev=(-1.,-2.), mask=True, sadapt=True)` builds successfully with `kbp=[1,1,1]`. FVCOM rejects masked columns having only one active layer.
+   - A SIGMAZ file containing `BPG REF NZ = -1` is accepted and converted to an empty reference list. FVCOM rejects counts outside `0..500`.
+
+   **Fix:** Check the mask/z-band relationship, reject generated masked columns with fewer than two active layers, and validate the BPG count before discarding its representation.
+
+7. **Minor — Minimum layer counts disagree across supported entrypoints and with FVCOM.**  
+   Locations: [gtsz.py:133](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/gtsz.py:133), [jcope_obc_generator.py:668](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:668). Pre-existing.
+
+   **Evidence:** `GtszSpec(kb=3).validate()` rejects a valid two-layer coordinate. FVCOM’s `CHECK_LAYER_COUNT` accepts three levels, and its base coordinate is `[0,-0.5,-1]`.
+
+   Conversely, explicit interfaces `[0,-1]` and centre `[-0.5]` pass the shared sigma validator, so the NPZ path and writer accept a one-layer T/S coordinate that ordinary 3-D FVCOM rejects. The uniform generator already requires two layers.
+
+   **Fix:** Use a consistent minimum of three interfaces/two layers for these 3-D paths.
+
+8. **Minor — Relative archive roots change meaning after construction.**  
+   Location: [jcope_fulldomain.py:105](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_fulldomain.py:105). Pre-existing.
+
+   **Reproduction:** From `/home/pj24001722/share/Data`, construct:
+
+   ```python
+   src = FullDomainSource(
+       "jcopetda_provisional", "2020-01-01", "2020-01-01"
+   )
+   ```
+
+   Change directory to the repository, then call `src.read_2d("EGT", [0], [0])`. Construction has successfully inspected the archive, but reading raises `FileNotFoundError` because paths are resolved against the new working directory. Another matching relative tree could instead supply uninspected payloads.
+
+   **Fix:** Resolve the expanded root to an absolute path during construction.
+
+## Verdict
+VERDICT: FAIL (0 blocker, 0 major, 8 minor, 0 nit)
+
+### Triage
+
+All 8 findings accepted (all minor; #2 was a round-7 regression, #8 a relative-root bug of FullDomainSource, the rest FVCOM-compatibility details of the sigma.dat reader/writer and GTSZ checks). xfvcom 9748876 (22 tests): #1 depth-weighted FRAC1 as in mod_setup.F (compute_kbp1_frac1 now takes H), #2 commas normalised once, #3 space-only trimming (tabs rejected), #4 case-sensitive coordinate type, #5 scanner limits (201 header lines, 400 characters, 150 values) enforced by reader and writer (the writer shortens list literals so the 70-level ZLEV fits), #6 MASK needs a z-band, masked columns need >= 2 layers, BPG REF NZ in 0..500, #7 one minimum (3 levels / 2 layers), #8 absolute root. All 3756 *sigma*.dat files under ~/Github parse to the same spec as before.
