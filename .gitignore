@@ -221,3 +221,6 @@ examples/frames/
 # pjsub test-runner job logs (kept out of git; regenerate by re-submitting)
 xfvcom_*_tests.*.out
 *.pjsub.*.out
+
+# Review transcripts and scratch output (kept locally; the lasting results are in docs/)
+scratch/
