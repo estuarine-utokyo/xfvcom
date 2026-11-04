@@ -22,8 +22,12 @@ Plus helpers to *design* a spec from a target geometry: :func:`active_zlev_count
 
 from __future__ import annotations
 
+# jsasaki 2026-11-05: review round 12 #1: ctypes for the C library's tanhf / powf
+import ctypes
+import ctypes.util
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Callable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -285,6 +289,63 @@ _MODEL_DTYPES: dict[str, type[np.floating]] = {
 }
 
 
+# ---> jsasaki 2026-11-05: review round 12 #1: the single-precision check uses the
+# C math library's tanhf / powf (what a single-precision FVCOM build calls) when
+# it can be loaded, and numpy's float32 functions otherwise
+def _load_libm_f32() -> (
+    tuple[Callable[[float], float], Callable[[float, float], float]] | None
+):
+    """``(tanhf, powf)`` from the C math library via :mod:`ctypes`, or ``None``."""
+    names = [ctypes.util.find_library("m"), "libm.so.6", "libm.dylib"]
+    for name in names:
+        if not name:
+            continue
+        try:
+            lib = ctypes.CDLL(name)
+            tanhf, powf = lib.tanhf, lib.powf
+        except (OSError, AttributeError):
+            continue
+        tanhf.restype, tanhf.argtypes = ctypes.c_float, [ctypes.c_float]
+        powf.restype, powf.argtypes = ctypes.c_float, [ctypes.c_float, ctypes.c_float]
+        return tanhf, powf
+    return None
+
+
+_LIBM_F32 = _load_libm_f32()
+
+#: interface separations below this many float32 units in the last place (of
+#: the operands of the subtraction that forms them) are refused in a
+#: single-precision check: the runtime's tanhf/powf and the compiler (operation
+#: order, fused multiply-add) can move a value by an ulp or more, so such a
+#: separation may be zero or negative in the model
+SP_MIN_ULP = 16
+
+
+def _tanh_sp(x: Any, dt: type[np.floating]) -> Any:
+    """``TANH`` of ``REAL(SP)`` values (scalar or array) in precision ``dt``."""
+    if dt is np.float32 and _LIBM_F32 is not None:
+        f = _LIBM_F32[0]
+        a = np.asarray(x, dtype=dt)
+        out = np.array([f(float(v)) for v in a.ravel()], dtype=dt).reshape(a.shape)
+        return dt(out[()]) if out.ndim == 0 else out
+    return np.tanh(np.asarray(x, dtype=dt)) if np.ndim(x) else dt(np.tanh(dt(x)))
+
+
+def _pow_sp(x: Any, y: Any, dt: type[np.floating]) -> Any:
+    """Scalar ``X**Y`` (real exponent) in precision ``dt``."""
+    if dt is np.float32 and _LIBM_F32 is not None:
+        return dt(_LIBM_F32[1](float(x), float(y)))
+    return dt(dt(x) ** dt(y))
+
+
+def _ulp(x: Any) -> Any:
+    """float32 spacing at ``|x|`` (elementwise)."""
+    return np.spacing(np.abs(np.asarray(x, dtype=np.float32)))
+
+
+# <--- jsasaki 2026-11-05
+
+
 # jsasaki 2026-11-05: review round 11 #1: new helper (SBAND in model precision)
 def _sband_sp(spec: GtszSpec, dtype: type[np.floating]) -> NDArray[np.floating]:
     """``SBAND(1:K1)`` of ``mod_setup.F::SIGMA_GTSZ`` evaluated in ``REAL(SP)``
@@ -292,34 +353,65 @@ def _sband_sp(spec: GtszSpec, dtype: type[np.floating]) -> NDArray[np.floating]:
     guard, and the normalisation ``SBAND(K)/SAK1``, operation by operation in the
     Fortran order with ``GTSZ P1/L1/L2`` converted to ``dtype``.
 
-    numpy's float32 ``tanh`` / power stand in for the Fortran runtime's ``tanhf`` /
-    ``powf``; they can differ from a given libm by one unit in the last place,
-    which in principle matters only for a case sitting exactly at the boundary
-    where the A3 shape saturates (two interfaces rounding to the same value).
+    In float32 the C library's ``tanhf`` / ``powf`` are used when available
+    (numpy's float32 functions otherwise).  Another runtime can still differ by
+    an ulp, so in float32 each upper-band separation ``SBAND(K-1) - SBAND(K)``
+    must exceed :data:`SP_MIN_ULP` ulps of the operands it is formed from (for
+    the A3 shape the ``tanh`` values near 1); a :class:`ValueError` otherwise.
     """
     dt = dtype
     kb, k1 = spec.kb, spec.k1
     p1, l1, l2 = dt(spec.p1), dt(spec.l1), dt(spec.l2)
     khalf = (kb + 1) // 2
     sb = np.empty(k1, dtype=dt)
+    # jsasaki 2026-11-05: review round 12 #1: magnitude of the operands behind each SBAND(K)
+    mag = np.empty(k1, dtype=dt)
     with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        # jsasaki 2026-11-05: review round 12 #1: tanhf / powf of the C library
+        tl1, tl2 = _tanh_sp(l1, dt), _tanh_sp(l2, dt)
         for k in range(1, k1 + 1):
             if spec.base == 1:
                 sb[k - 1] = dt(1 - k) / dt(kb - 1)
+                mag[k - 1] = abs(sb[k - 1])
             elif spec.base == 2:
                 if k <= khalf:
-                    sb[k - 1] = dt(-0.5) * (dt(2 * k - 2) / dt(kb - 1)) ** p1
+                    pw = _pow_sp(dt(2 * k - 2) / dt(kb - 1), p1, dt)
+                    sb[k - 1] = dt(-0.5) * pw
+                    mag[k - 1] = abs(sb[k - 1])
                 else:
-                    sb[k - 1] = dt(0.5) * (dt(2 * kb - 2 * k) / dt(kb - 1)) ** p1 - dt(
-                        1.0
-                    )
+                    pw = _pow_sp(dt(2 * kb - 2 * k) / dt(kb - 1), p1, dt)
+                    sb[k - 1] = dt(0.5) * pw - dt(1.0)
+                    mag[k - 1] = dt(1.0)
             else:
-                num = np.tanh((dt(1 - k) * l1 + dt(kb - k) * l2) / dt(kb - 1))
-                sb[k - 1] = (num - np.tanh(l2)) / (np.tanh(l1) + np.tanh(l2))
+                num = _tanh_sp((dt(1 - k) * l1 + dt(kb - k) * l2) / dt(kb - 1), dt)
+                sb[k - 1] = (num - tl2) / (tl1 + tl2)
+                mag[k - 1] = max(abs(num), abs(tl2))
         sak1 = sb[k1 - 1]
         if abs(sak1) < dt(SMALL):
             sak1 = dt(-SMALL)
         out: NDArray[np.floating] = (sb / sak1).astype(dt)
+    # ---> jsasaki 2026-11-05: review round 12 #1: a separation within a few ulps
+    # of the operands can vanish under another tanhf/powf or compiler
+    if dt is np.float32 and k1 >= 2:
+        # interface 1 is set to exactly 0 by FVCOM (no rounding uncertainty)
+        unc = (SP_MIN_ULP // 2) * _ulp(mag)
+        unc[0] = 0.0
+        gap = np.abs(np.diff(sb.astype(np.float64)))
+        lim = unc[:-1].astype(np.float64) + unc[1:].astype(np.float64)
+        bad = np.flatnonzero(~(gap > lim))
+        if bad.size:
+            k = int(bad[0]) + 1
+            raise ValueError(
+                f"build_gtsz: in single precision (model_precision='single') the "
+                f"upper-band interfaces {k} and {k + 1} (GTSZ BASE = {spec.base}) are "
+                f"separated by {gap[k - 1]:.3g}, within {SP_MIN_ULP} float32 ulps of the "
+                "values they are computed from; the runtime's tanhf/powf or the "
+                "compiler can collapse them (a single-precision FVCOM then stops at "
+                "startup in mod_setup.F SIGMA_GTSZ) -- use a less saturated shape "
+                "(smaller GTSZ L1/L2 or P1), fewer upper layers (GTSZ K1) or a "
+                "double-precision build"
+            )
+    # <--- jsasaki 2026-11-05
     return out
 
 
@@ -348,7 +440,8 @@ def _lowsig_thickness_sp(
     dup = beta_up * H
     if spec.smooth > 0.0:
         sm = dt(spec.smooth)
-        w = dt(0.5) * (dt(1.0) + np.tanh((dup - hr) / sm))
+        # jsasaki 2026-11-05: review round 12 #1: the C library's tanhf in float32
+        w = dt(0.5) * (dt(1.0) + _tanh_sp((dup - hr) / sm, dt))
         dup = w * hr + (dt(1.0) - w) * dup
     else:
         dup = np.minimum(hr, dup)
@@ -384,6 +477,28 @@ def _lowsig_thickness_sp(
         Z[:, 0] = dt(0.0)
         Z[:, kb - 1] = dt(-1.0)
         dz: NDArray[np.floating] = (Z[:, :-1] - Z[:, 1:]) * H[:, None]
+    # ---> jsasaki 2026-11-05: review round 12 #1: a positive float32 separation of
+    # only a few ulps of the interface values may vanish in the model (another
+    # tanhf, operation order, fused multiply-add); non-positive ones are left to
+    # the caller's message
+    if dt is np.float32 and Z.size:
+        gap = Z[:, :-1].astype(np.float64) - Z[:, 1:].astype(np.float64)
+        ref = np.maximum(np.abs(Z[:, :-1]), np.abs(Z[:, 1:]))
+        lim = SP_MIN_ULP * _ulp(ref).astype(np.float64)
+        thin = (gap > 0.0) & ~(gap > lim)
+        if thin.any():
+            badn = np.flatnonzero(thin.any(axis=1))
+            kk = int(np.flatnonzero(thin[badn[0]])[0]) + 1
+            raise ValueError(
+                f"build_gtsz: in single precision (model_precision='single') "
+                f"GTSZ_LOWSIG interfaces {kk} and {kk + 1} are within {SP_MIN_ULP} "
+                f"float32 ulps of each other at {badn.size} node(s) (first node "
+                f"{int(badn[0]) + 1} 1-based); rounding differences of the model's "
+                "runtime or compiler can collapse the layer and a single-precision "
+                "FVCOM then stops at startup (mod_setup.F SIGMA_GTSZ) -- use thicker "
+                "layers or a double-precision build"
+            )
+    # <--- jsasaki 2026-11-05
     return dz
 
 

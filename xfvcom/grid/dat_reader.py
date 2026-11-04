@@ -78,7 +78,8 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     while read_elem < nele and idx < len(lines):
         parts = lines[idx].split()
         idx += 1
-        if len(parts) != 5 or not _is_int(parts[0]):
+        # jsasaki 2026-11-05: review round 12 #3: FVCOM reads J,N1,N2,N3; extra columns are unused
+        if len(parts) < 4 or not all(_is_int(t) for t in parts[:4]):
             continue
         ids = [int(parts[1]), int(parts[2]), int(parts[3])]
         # jsasaki 2026-11-05: review round 3 #19: node ids are 1-based; 0 would become index -1
@@ -116,7 +117,8 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     while read_node < node and idx < len(lines):
         parts = lines[idx].split()
         idx += 1
-        if len(parts) != 4 or not _is_int(parts[0]):
+        # jsasaki 2026-11-05: review round 12 #3: FVCOM reads J,X1,Y1; extra columns are unused
+        if len(parts) < 3 or not _is_int(parts[0]):
             continue
         try:
             xv = float(parts[1])

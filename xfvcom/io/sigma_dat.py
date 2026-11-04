@@ -187,6 +187,82 @@ def _check_int32(path: Path, key: str, val: str, iv: int) -> None:
         )
 
 
+# jsasaki 2026-11-05: review round 12 #5: new helper
+def _with_point(tok: str) -> str:
+    """``tok`` with a decimal point in its mantissa ('8' -> '8.0', '8e-4' ->
+    '8.0e-4'), the literal FVCOM types as 'float' with the same value."""
+    i = min((j for j in (tok.find("e"), tok.find("E")) if j >= 0), default=len(tok))
+    return f"{tok[:i]}.0{tok[i:]}"
+
+
+# jsasaki 2026-11-05: review round 12 #2: new helper
+def _check_numeric_line(path: Path, lineno: int, key: str, val: str) -> None:
+    """Reject a numeric key/value line FVCOM's ``GET_VALUE`` cannot read.
+
+    ``SCAN_FILE`` (mod_utils.F) calls ``GET_VALUE`` on every line it passes
+    BEFORE comparing the key, and ``GET_VALUE`` converts every token of a
+    numeric value with an internal list-directed ``READ`` without ``IOSTAT``:
+    into the 32-bit ``INTEGER`` buffer when the value has no decimal point, into
+    the ``REAL(DP)`` buffer otherwise.  A token that does not convert therefore
+    stops FVCOM's reader even when its key is never used (an inactive
+    ``GTSZ ZLEV`` / ``GTSZ LOWFRAC``, an unknown key).
+    """
+    typ = _fvcom_type(val)
+    if typ not in ("integer", "float"):
+        return
+    why = (
+        "; FVCOM's SCAN_FILE converts every numeric line it passes before "
+        "matching the key, so it stops here even when the key is unused"
+    )
+    for tok in val.split():
+        if typ == "integer":
+            try:
+                iv = int(tok)
+            except ValueError:
+                hint = ""
+                try:
+                    float(tok)
+                    hint = (
+                        f" -- for a floating value write it with a decimal point, "
+                        f"e.g. '{_with_point(tok)}'"
+                    )
+                except ValueError:
+                    pass
+                raise _bad(
+                    path,
+                    key,
+                    val,
+                    f"line {lineno}: '{tok}' is not a valid integer (a value without "
+                    f"a decimal point is read as an INTEGER){why}{hint}",
+                ) from None
+            if not FORTRAN_INT_MIN <= iv <= FORTRAN_INT_MAX:
+                raise _bad(
+                    path,
+                    key,
+                    val,
+                    f"line {lineno}: '{tok}' is outside FVCOM's 32-bit INTEGER "
+                    f"range [{FORTRAN_INT_MIN}, {FORTRAN_INT_MAX}] (a value without "
+                    f"a decimal point is read as an INTEGER){why}",
+                )
+        else:
+            try:
+                x = float(tok)
+            except ValueError:
+                raise _bad(
+                    path,
+                    key,
+                    val,
+                    f"line {lineno}: '{tok}' is not a valid floating value{why}",
+                ) from None
+            if not np.isfinite(x):
+                raise _bad(
+                    path,
+                    key,
+                    val,
+                    f"line {lineno}: '{tok}' is not finite (overflow?){why}",
+                )
+
+
 #: FVCOM's fallback for a floating key it cannot read (mod_input.F)
 _FLOAT_DEFAULTS = {
     "GTSZ P1": 2.0,
@@ -225,7 +301,9 @@ def _get_float(path: Path, pairs: dict[str, str], key: str) -> float | None:
             (
                 "FVCOM reads this key as ONE floating value and only recognises it "
                 "when it contains a decimal point; without one FVCOM silently uses "
-                f"its default {_FLOAT_DEFAULTS[key]} instead -- write e.g. '{lit}.0'"
+                # jsasaki 2026-11-05: review round 12 #5: decimal point in the mantissa
+                f"its default {_FLOAT_DEFAULTS[key]} instead -- write e.g. "
+                f"'{_with_point(lit)}'"
                 if typ == "integer" and len(toks) == 1
                 else "FVCOM reads this key as ONE floating value with a decimal point"
             ),
@@ -381,6 +459,9 @@ def read_sigma_dat(path: str | Path) -> SigmaFile:
                 f"GET_VALUE holds at most {_MAX_VALUES} (fewer for strings) and "
                 "stops with a FATAL_ERROR"
             )
+        # jsasaki 2026-11-05: review round 12 #2: every reachable numeric line is converted
+        if lineno <= _MAX_HEADER_LINE:
+            _check_numeric_line(path, lineno, key, val)
         norm = " ".join(key.split()).upper()
         if norm in known_norm and key != known_norm[norm]:
             raise ValueError(
