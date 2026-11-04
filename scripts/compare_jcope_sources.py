@@ -45,6 +45,41 @@ STEP = {"TT": 0.01, "ST": 0.01, "UT": 0.001, "VT": 0.001, "EGT": 0.001}
 AXIS_ATOL = 1e-6
 
 
+# ---> jsasaki 2026-11-05: review round 15 #1: each compared variable must lie on the canonical
+# dimensions (the checked coordinates), not merely have a matching shape
+REGION_DIMS = {
+    "TT": ("time", "level", "lat", "lon"),
+    "ST": ("time", "level", "lat", "lon"),
+    "UT": ("time", "level", "lat", "lon"),
+    "VT": ("time", "level", "lat", "lon"),
+    "EGT": ("time", "lat", "lon"),
+}
+
+
+def region_columns(reg, name: str, pos, rj, ri) -> np.ndarray:
+    """The region file's ``name`` at time positions ``pos`` and cells (rj, ri): (time, [level,] n).
+
+    The variable must use exactly the canonical dimension names (in any order); it is transposed
+    to the canonical order explicitly, so a field on another vertical (or horizontal) dimension is
+    refused instead of being compared by array position.
+    """
+    want = REGION_DIMS[name]
+    da = reg[name]
+    if len(da.dims) != len(want) or set(da.dims) != set(want):
+        sys.exit(
+            f"region variable {name} has dimensions {da.dims}; expected {want} (in any order)"
+        )
+    da = da.transpose(*want)
+    sub = da.isel(time=pos).isel(
+        lat=xr.DataArray(np.asarray(rj), dims="n"),
+        lon=xr.DataArray(np.asarray(ri), dims="n"),
+    )
+    return sub.transpose("time", ..., "n").values
+
+
+# <--- jsasaki 2026-11-05
+
+
 def check_region_block(grid, reg) -> tuple[int, int]:
     """The region file's axes must be a contiguous block of the grid's; return its (j0, i0) offset."""
     # ---> jsasaki 2026-11-05: review round 3 #16: rtol=0 and an explicit absolute tolerance
@@ -132,12 +167,6 @@ def main() -> int:
         sys.exit("an OBC cell lies outside the region file")
     # jsasaki 2026-11-05: review round 2 #19: alignment checked before any value
     pos = check_alignment(src, grid, reg)
-    pts = dict(
-        lat=xr.DataArray(jj - int(j0), dims="n"),
-        lon=xr.DataArray(ii - int(i0), dims="n"),
-    )
-    # jsasaki 2026-11-05: review round 2 #19: select by the exact positions checked above
-    tsel = dict(time=pos)
     bad = 0
     for name in ("TT", "ST", "UT", "VT", "EGT"):
         got = (
@@ -145,10 +174,13 @@ def main() -> int:
             if name != "EGT"
             else src.read_2d(name, jj, ii)
         )
-        # jsasaki 2026-11-05: review round 2 #19: positional time selection
-        sub = reg[name].isel(**tsel).isel(**pts)
-        ref = sub.transpose("time", ..., "n").values
-        assert got.shape == ref.shape, (name, got.shape, ref.shape)
+        # jsasaki 2026-11-05: review round 15 #1: canonical dimensions checked, explicit transpose
+        ref = region_columns(reg, name, pos, rj, ri)
+        # jsasaki 2026-11-05: review round 15 #1: an explicit error, not an assertion
+        if got.shape != ref.shape:
+            sys.exit(
+                f"{name}: archive columns {got.shape} and region columns {ref.shape} differ in shape"
+            )
         both = np.isfinite(got) & np.isfinite(ref)
         if not both.any():
             print(

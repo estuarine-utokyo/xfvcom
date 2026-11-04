@@ -46,8 +46,10 @@ from xfvcom.io import (
 )
 
 # jsasaki 2026-11-05: review round 2 #2 #11 #12: constants of the strict parsers / time-axis check
-_OBC_HEADER = re.compile(r"^OBC Node Number\s*=\s*(\d+)$")
-_DEP_HEADER = re.compile(r"^Node Number\s*=\s*(\d+)$")
+# jsasaki 2026-11-05: review round 15 #4: a trailing '!' comment is allowed (FVCOM's GET_VALUE)
+_OBC_HEADER = re.compile(r"^OBC Node Number\s*=\s*(\d+)\s*(?:!.*)?$")
+# jsasaki 2026-11-05: review round 15 #4: a trailing '!' comment is allowed (FVCOM's GET_VALUE)
+_DEP_HEADER = re.compile(r"^Node Number\s*=\s*(\d+)\s*(?:!.*)?$")
 DEP_XY_ATOL = 1e-3  # depth-file coordinates are written with 6 decimals
 _HOUR = 1.0 / 24.0  # days
 _STEP_TOL = 1e-6  # days (0.09 s)
@@ -100,22 +102,38 @@ def _declared_block(path: Path, header: re.Pattern) -> tuple[int, list[str]]:
     return n, records
 
 
+# ---> jsasaki 2026-11-05: review round 15 #4: comment-stripped record fields
+def _record_fields(line: str) -> list[str]:
+    """The whitespace-separated fields of a record before any '!' comment.
+
+    A comment-only line yields no fields, so it is refused as a malformed record: FVCOM's
+    list-directed read would count it as a (bad) row of the block.
+    """
+    return line.split("!", 1)[0].split()
+
+
+# <--- jsasaki 2026-11-05
+
+
 def parse_obc_dat(path: Path) -> np.ndarray:
     """Return the 1-based OBC node IDs from a FVCOM ``*_obc.dat`` file.
 
-    The file is ``OBC Node Number = N`` followed by exactly N records ``index node_id type`` (three
-    integers); anything else is an error.
+    The file is ``OBC Node Number = N`` followed by exactly N records starting ``index node_id type``
+    (three integers; a trailing ``!`` comment and further columns are ignored, as in FVCOM's
+    list-directed read); anything else is an error.
     """
     # ---> jsasaki 2026-11-05: review round 2 #11: one recognised header, its count enforced, every
     # record (the first included) parsed strictly
     _n, records = _declared_block(Path(path), _OBC_HEADER)
     nodes: list[int] = []
     for line in records:
-        parts = line.split()
+        # jsasaki 2026-11-05: review round 15 #4: FVCOM reads the leading N1,N2,N3 list-directed;
+        # a trailing '!' comment and unused further columns are ignored
+        parts = _record_fields(line)
         try:
-            if len(parts) != 3:
+            if len(parts) < 3:
                 raise ValueError
-            _idx, node, _type = (int(x) for x in parts)
+            _idx, node, _type = (int(x) for x in parts[:3])
         except ValueError:
             raise ValueError(f"{path}: malformed OBC record {line!r}") from None
         nodes.append(node)
@@ -128,7 +146,8 @@ def parse_obc_dat(path: Path) -> np.ndarray:
 def parse_dep_dat(path: Path, node_xy: np.ndarray | None = None) -> np.ndarray:
     """Return the bathymetry column from a FVCOM ``*_dep.dat`` file.
 
-    The file is ``Node Number = N`` followed by exactly N records ``x y h``. With ``node_xy``
+    The file is ``Node Number = N`` followed by exactly N records starting ``x y h`` (a trailing
+    ``!`` comment and further columns are ignored, as in FVCOM's list-directed read). With ``node_xy``
     (``(N, 2)``, the mesh's node coordinates in the grid file's order) the depth file's coordinates
     must match them row by row (within ``DEP_XY_ATOL`` coordinate units), so a reordered depth file
     or one of another mesh is refused instead of putting depths on the wrong nodes.
@@ -137,12 +156,14 @@ def parse_dep_dat(path: Path, node_xy: np.ndarray | None = None) -> np.ndarray:
     _n, records = _declared_block(Path(path), _DEP_HEADER)
     rows: NDArray[np.float64] = np.empty((len(records), 3), dtype=np.float64)
     for k, line in enumerate(records):
-        parts = line.split()
+        # jsasaki 2026-11-05: review round 15 #4: FVCOM reads the leading X,Y,H list-directed; a
+        # trailing '!' comment and unused further columns are ignored (as xfvcom.io.read_dep does)
+        parts = _record_fields(line)
         try:
-            if len(parts) != 3:
+            if len(parts) < 3:
                 raise ValueError
             # jsasaki 2026-11-05: review round 14 #2: Fortran real literals ('1.0D+1', '1.0-3')
-            rows[k] = [fortran_real(x) for x in parts]
+            rows[k] = [fortran_real(x) for x in parts[:3]]
         except ValueError:
             raise ValueError(f"{path}: malformed depth record {line!r}") from None
     if not np.isfinite(rows).all():
