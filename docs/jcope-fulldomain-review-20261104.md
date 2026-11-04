@@ -2019,3 +2019,91 @@ VERDICT: FAIL (0 blocker, 0 major, 3 minor, 0 nit)
 ### Triage
 
 All 3 findings accepted (minor; #2 a round-15 regression). xfvcom 0f0a28d (tests/test_round16_review.py): #1 NEXT_OBC selection now follows FVCOM's ordered boundary-neighbour traversal (port of the boundary-node branch of tge.F with the reversed connectivity; first maximum kept with a strict '>' from DOTMAX=-1 as in SETUP_OBC; the reviewer's tie example now selects node 5 / 100 m; an error is raised when the cells around a node do not form a single fan); on TokyoBay the substituted depths and NEXT_OBC ids are identical to the previous implementation for both endpoint rules; #2 header search reaches physical line 201 (line 202 rejected); #3 '!' comments are stripped before tokenisation in read_dat and read_dep. 19 grid and 85 depth files read identically.
+
+## Round 17 (commit d1cb370 reviewed; fixes in a87bf3d)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `d1cb370` and jcopetda `96f429f`. No files were modified.
+
+| Round-16 finding | Status | Evidence |
+|---|---|---|
+| #1: NEXT_OBC tie order | PARTIAL | The reported `.dat` fan now selects node 5 / 100 m. Native FVCOM-output connectivity remains affected; see finding 1. |
+| #2: Header line limit | RESOLVED | Physical line 201 is accepted; line 202 is rejected. |
+| #3: Attached comments | RESOLVED | Attached comments work in connectivity, coordinates, and depths, including `load_mesh()`. |
+
+All 10 round-16 regression cases passed using in-memory file adapters. Production checks covered all 13 Tokyo Bay OBC nodes, both provisional repair days, and runner paths for uniform sigma, SADAPT, NPZ, and both depth-control rules. The runner checks used one production day and diskless NetCDF writes; full annual builds and the full suite were not run. The actual comparison script returned `0`, with all five variables within packing tolerance.
+
+No separate round-16 regression was substantiated on the exercised production or regional paths.
+
+1. **Minor — The tie fix assumes file-order connectivity for every `FvcomGrid`.**
+
+   Location: [obc_depth_control.py:117](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/obc_depth_control.py:117).
+
+   **Reproduction:** Reuse the fan from `tests/test_round16_review.py`, but construct a `FvcomGrid.from_dataset()` using native FVCOM connectivity:
+
+   ```python
+   native_nv = _NV[[0, 2, 1], :] + 1
+   ```
+
+   Put this on dimensions `("three", "nele")`, with the test’s `_X` and `_Y`. Calling `substituted_obc_depths()` on the resulting grid selects node **4 / 10 m** at the middle OBC node. FVCOM selects node **5 / 100 m**.
+
+   FVCOM reverses file connectivity when reading it and exports that native ordering through `SET_FVCOM_GRID`. `FvcomGrid.from_dataset()` preserves its winding. The new helper unconditionally reverses it again, reversing the neighbor scan and therefore the tie winner.
+
+   **Fix:** Normalize connectivity winding using `x/y` before constructing FVCOM’s traversal, or expose an explicit connectivity-order argument. Test equivalent grids loaded from `.dat` and native FVCOM output.
+
+2. **Minor — Unrecognized mesh count-header names are accepted as model-readable headers.**
+
+   Location: [dat_reader.py:106](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:106). Pre-existing.
+
+   **Reproduction:** In an in-memory copy of production `TokyoBay_grd.dat`, independently make any of these substitutions:
+
+   ```text
+   Node Number → node number
+   Node Number → Node Number unused
+   Cell Number → Elem Number
+   ```
+
+   `FvcomGrid.from_dat()` accepts every variant and returns 3,210 nodes and 5,645 elements.
+
+   FVCOM’s `SCAN_FILE` compares the complete key case-sensitively against `Node Number` and `Cell Number`; these replacements leave a required header undiscoverable. Lowercasing, prefix matching, and the undocumented alias conceal that incompatibility.
+
+   **Fix:** Match complete, case-sensitive keys after FVCOM’s permitted leading-space adjustment. Keep broader compatibility behind an explicit mode if needed.
+
+3. **Minor — Mesh headers beyond FVCOM’s character buffer are silently accepted.**
+
+   Location: [dat_reader.py:128](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:128). Pre-existing.
+
+   **Reproduction:** In production `TokyoBay_grd.dat`, insert 400 spaces immediately after `Node Number`, leaving `= 3210` afterward. `FvcomGrid.from_dat()` succeeds with the unchanged mesh.
+
+   FVCOM reads header lines into `CHARACTER(LEN=400) :: INPLINE`. The assignment and count disappear beyond that buffer, so FVCOM cannot find the node count. The physical-line limit does not protect against this character truncation.
+
+   **Fix:** Reject count headers whose interpretation depends on characters beyond FVCOM’s 400-character input buffer. Add tests at the character boundary.
+
+4. **Minor — Valid comma-separated FVCOM records are rejected across the boundary-input readers.**
+
+   Locations: [dat_reader.py:98](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:98), [run_jcope_obc.py:112](/home/pj24001722/ku40000343/Github/xfvcom/scripts/run_jcope_obc.py:112), and [dep_reader.py:76](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/dep_reader.py:76). Pre-existing.
+
+   **Reproduction:** Preserve the production mesh headers and join each data record’s tokens with `", "`. `FvcomGrid.from_dat()` raises:
+
+   ```text
+   Element block ended prematurely (0/5645)
+   ```
+
+   Likewise, this valid list-directed depth record is rejected by the runner:
+
+   ```text
+   400000.0, 3900000.0, 10.0
+   ```
+
+   FVCOM’s list-directed reads accept comma separators. These readers tokenize only on whitespace, leaving commas attached to numeric tokens. OBC records encounter the same restriction.
+
+   **Fix:** Support comma separators consistently in mesh, depth, and OBC record tokenization, while preserving comment handling, declared counts, ordering, and coordinate checks.
+
+## Verdict
+
+VERDICT: FAIL (0 blocker, 0 major, 4 minor, 0 nit)
+
+### Triage
+
+All 4 findings accepted (minor, pre-existing; #1 an incompleteness of the round-16 fix). xfvcom a87bf3d (26 new tests): #1 the NEXT_OBC traversal normalises each cell to FVCOM's native clockwise winding from x/y signed areas, so .dat-built and native-FVCOM grids give the same result (zero-area cells raise); TokyoBay unchanged for both endpoint rules; #2 count-header keys match exactly and case-sensitively as in SCAN_FILE/GET_VALUE; #3 header lines over 400 characters are refused; #4 commas separate fields in mesh, depth and OBC records (null values refused). 19 grid, 85 depth and OBC files read identically (223 same, 0 diff).
