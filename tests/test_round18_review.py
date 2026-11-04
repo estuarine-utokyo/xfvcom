@@ -231,7 +231,11 @@ def test_round18_list_fields_repetition():
         "0*5",
         "*5",
     ]  # not repetitions: no conversion accepts them
-    assert len(list_fields("1 " + "9" * 40 + "*0")) == MAX_LIST_FIELDS
+    # jsasaki 2026-11-05: review round 19 #2: no silent cap -- an oversized count is an explicit error
+    with pytest.raises(ValueError, match="exceeds 200000000"):
+        list_fields("1 " + "9" * 40 + "*0")
+    with pytest.raises(ValueError, match="is not supported"):
+        list_fields(f"1 {MAX_LIST_FIELDS}*0")
 
 
 def test_round18_repetition_in_records(tmp_path):

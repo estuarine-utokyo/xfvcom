@@ -9,12 +9,14 @@ from typing import TypedDict
 import numpy as np
 from numpy.typing import NDArray
 
+# jsasaki 2026-11-05: review round 18 #1 #2 #5 #6: shared FVCOM header scanner
+# jsasaki 2026-11-05: review round 19 #1 #3 #4 #5: READ-based header search and records
+from ..fvcom_input import INT, REAL, list_read, locate_records, scan_count_headers
+
 # jsasaki 2026-11-05: review round 14 #2: FVCOM reads coordinates list-directed (D/E/Q exponents)
 # jsasaki 2026-11-05: review round 17 #4: list-directed fields (commas separate like blanks)
-from ..fortran_numbers import fortran_real, list_fields
+# jsasaki 2026-11-05: review round 19 #4: conversion now inside the shared list_read
 
-# jsasaki 2026-11-05: review round 18 #1 #2 #5 #6: shared FVCOM header scanner
-from ..fvcom_input import scan_count_headers
 
 __all__ = ["read_dat"]
 
@@ -25,10 +27,6 @@ class _GridData(TypedDict):
     nv: np.ndarray  # (3, nele)
     zone: int | None
     northern: bool
-
-
-def _is_int(tok: str) -> bool:
-    return tok.lstrip("+-").isdigit()
 
 
 # ---> jsasaki 2026-11-05: review round 15 #2 #3 #5: strict count headers, records after the blocks
@@ -53,12 +51,7 @@ def _is_comment(raw: str) -> bool:
     return not _body(raw).strip()
 
 
-# jsasaki 2026-11-05: review round 17 #4: FVCOM reads records list-directed; commas separate fields
-def _fields(raw: str) -> list[str]:
-    """The list-directed fields of a record (comment removed, commas and blanks as separators)."""
-    return list_fields(_body(raw))
-
-
+# jsasaki 2026-11-05: review round 19 #4: _fields/_is_int replaced by the shared list_read
 # <--- jsasaki 2026-11-05
 
 
@@ -80,8 +73,9 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
 
     # -------------------------------------------------- read non-blank lines
     # jsasaki 2026-11-05: review round 15 #3: keep physical line numbers for the error messages
+    # jsasaki 2026-11-05: review round 19 #4 #5: all physical lines, blanks included (READs span them)
     with path.open() as fp:
-        lines = [(n, ln.rstrip("\n")) for n, ln in enumerate(fp, 1) if ln.strip()]
+        lines = [(n, ln.rstrip("\n")) for n, ln in enumerate(fp, 1)]
 
     # ---------------------------------------- locate counts (node / nele)
     # ---> jsasaki 2026-11-05: review round 15 #5: FVCOM's SCAN_FILE looks each header up on its own
@@ -90,14 +84,10 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     # and within the 200 lines SCAN_FILE scans.
     # jsasaki 2026-11-05: review round 16 #3: tokenise the record without its '!' comment
     # jsasaki 2026-11-05: review round 17 #4: commas separate fields like blanks
-    start = next(
-        (
-            k
-            for k, (_n, ln) in enumerate(lines)
-            if len(_fields(ln)) >= 4 and all(_is_int(t) for t in _fields(ln)[:4])
-        ),
-        len(lines),
-    )
+    # jsasaki 2026-11-05: review round 19 #1 #4 #5: the block starts where FVCOM's header search first
+    # READs J,N1,N2,N3 successfully (possibly over several lines), its NHEADER rewind checked
+    elem_types = (INT, INT, INT, INT)
+    start = locate_records(path, lines, elem_types, block="connectivity block")
     # jsasaki 2026-11-05: review round 18 #1 #2 #5 #6: one shared FVCOM-aware header scanner
     counts = scan_count_headers(
         path, lines, _COUNT_KEYS, start, block="connectivity block"
@@ -118,13 +108,16 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     # jsasaki 2026-11-05: review round 5 #6: element records are placed by their own id (1..nele, unique)
     seen_elem: NDArray[np.bool_] = np.zeros(nele, dtype=bool)
     while read_elem < nele and idx < len(lines):
-        # jsasaki 2026-11-05: review round 15 #3: lines carry their line numbers
-        # jsasaki 2026-11-05: review round 17 #4: list-directed fields of the comment-free record
-        parts = _fields(lines[idx][1])
-        idx += 1
+        # jsasaki 2026-11-05: review round 19 #4: one record = one list-directed READ of J,N1,N2,N3
+        # (it may continue onto further lines); a READ that fails is passed over as before
+        rd = list_read(lines, idx, elem_types)
+        if rd.status == "eof":
+            break
+        idx = rd.end + 1
         # jsasaki 2026-11-05: review round 12 #3: FVCOM reads J,N1,N2,N3; extra columns are unused
-        if len(parts) < 4 or not all(_is_int(t) for t in parts[:4]):
+        if rd.status != "ok":
             continue
+        parts = [str(v) for v in rd.values]
         ids = [int(parts[1]), int(parts[2]), int(parts[3])]
         # jsasaki 2026-11-05: review round 3 #19: node ids are 1-based; 0 would become index -1
         if min(ids) < 1 or max(ids) > node:
@@ -156,14 +149,12 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     # reads as an element (four integers) and is not node 1 is reported here; any other misplaced
     # record is reported by the node block's own order check below.
     if not allow_unordered:
-        nxt = next((ln for ln in lines[idx:] if not _is_comment(ln[1])), None)
-        # jsasaki 2026-11-05: review round 16 #3: tokenise the record without its '!' comment
-        # jsasaki 2026-11-05: review round 17 #4: list-directed fields of the comment-free record
-        tok = _fields(nxt[1])[:4] if nxt is not None else []
-        if len(tok) == 4 and all(_is_int(t) for t in tok) and int(tok[0]) != 1:
-            assert nxt is not None
+        # jsasaki 2026-11-05: review round 19 #4: the next READ of J,N1,N2,N3, as FVCOM's loop does it
+        nxt = list_read(lines, idx, elem_types)
+        if nxt.status == "ok" and nxt.values[0] != 1:
+            text = " / ".join(raw.strip() for _n, raw in lines[nxt.start : nxt.end + 1])
             raise ValueError(
-                f"{path}: line {nxt[0]}: record {nxt[1].strip()!r} follows the {nele} "
+                f"{path}: line {nxt.last_line}: record {text.strip(' /')!r} follows the {nele} "
                 "declared connectivity records, but the node block must start with "
                 "node 1 (more records than the Cell Number header declares?)"
             )
@@ -177,20 +168,18 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     # (validated 1..node and unique), not by row position
     seen: NDArray[np.bool_] = np.zeros(node, dtype=bool)
     while read_node < node and idx < len(lines):
-        # jsasaki 2026-11-05: review round 15 #3: lines carry their line numbers
-        # jsasaki 2026-11-05: review round 17 #4: list-directed fields of the comment-free record
-        parts = _fields(lines[idx][1])
-        idx += 1
+        # jsasaki 2026-11-05: review round 19 #4: one record = one list-directed READ of J,X1,Y1 (it
+        # may continue onto further lines; Fortran real literals as in review round 14 #2); a READ
+        # that fails is passed over as before
+        rd = list_read(lines, idx, (INT, REAL, REAL))
+        if rd.status == "eof":
+            break
+        idx = rd.end + 1
         # jsasaki 2026-11-05: review round 12 #3: FVCOM reads J,X1,Y1; extra columns are unused
-        if len(parts) < 3 or not _is_int(parts[0]):
+        if rd.status != "ok":
             continue
-        try:
-            # jsasaki 2026-11-05: review round 14 #2: Fortran real literals ('4.0D+5', '1.0-3')
-            xv = fortran_real(parts[1])
-            yv = fortran_real(parts[2])
-        except ValueError:
-            continue
-        nid = int(parts[0])
+        xv, yv = float(rd.values[1]), float(rd.values[2])  # type: ignore[arg-type]
+        nid = int(rd.values[0])  # type: ignore[arg-type]
         if nid < 1 or nid > node:
             raise ValueError(f"node record id {nid} outside 1..{node} (1-based)")
         if seen[nid - 1]:

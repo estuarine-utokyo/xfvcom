@@ -22,18 +22,29 @@ Headers (``Node Number = 3210``, ``OBC Node Number = 13``):
   overlong comment after the value is harmless, a key, ``=`` or value beyond byte 400 is
   refused.
 
-Records (list-directed ``READ(unit,*)``): blanks and commas separate values; ``r*value``
-repeats a value (expanded here, boundedly); a null value is an empty field that no numeric
-conversion accepts.
+Records (list-directed ``READ(unit,*)``, review round 19): modelled as READs, not lines
+(:func:`list_read`).  Blanks and commas separate values; ``r*value`` repeats a value (up to
+gfortran's limit, consumed lazily); a null value or an early ``/`` leaves an item unset; a READ
+continues onto further lines until its list is satisfied and ignores the rest of that line.  The
+data block starts where FVCOM's header search first READs successfully, and its NHEADER rewind is
+checked (:func:`locate_records`).
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
-from .fortran_numbers import _FORTRAN_REAL, fortran_real, list_fields
+# jsasaki 2026-11-05: review round 19 #2 #4: unexpanded list items and the repeat-count limit
+from .fortran_numbers import (
+    _FORTRAN_REAL,
+    MAX_REPEAT,
+    fortran_real,
+    list_fields,
+    list_items,
+)
 
 __all__ = [
     "SCAN_FILE_LINES",
@@ -44,7 +55,13 @@ __all__ = [
     "fvcom_type",
     "check_numeric_line",
     "scan_count_headers",
-    "first_record_index",
+    # jsasaki 2026-11-05: review round 19 #1 #4 #5: READ-based record scanning
+    "INT",
+    "REAL",
+    "ListRead",
+    "list_read",
+    "read_all",
+    "locate_records",
     "record_body",
     "is_comment_only",
     "record_fields",
@@ -313,10 +330,182 @@ def record_fields(raw: str) -> list[str]:
     return list_fields(record_body(raw))
 
 
-def first_record_index(lines: Sequence[tuple[int, str]]) -> int:
-    """Index of the first data record in a depth / OBC file: the first line that is
-    neither comment-only nor a ``key = value`` header line (``len(lines)`` if none)."""
-    for k, (_n, raw) in enumerate(lines):
-        if not is_comment_only(raw) and "=" not in record_body(raw):
-            return k
-    return len(lines)
+# ---> jsasaki 2026-11-05: review round 19 #1 #3 #4 #5: FVCOM's list-directed READs modelled as
+# reads (not physical lines): the header search for the first READ that succeeds, the NHEADER rewind,
+# '/' terminators and records continued onto further lines
+#: The item types of a list-directed READ list.
+INT, REAL = "integer", "real"
+_INT_LITERAL = re.compile(r"[+-]?[0-9]+")
+
+
+@dataclass(frozen=True)
+class ListRead:
+    """One list-directed ``READ(unit,*,IOSTAT=IOS) v1, v2, ...`` over the physical lines.
+
+    ``status`` is ``"ok"`` (IOS = 0, every item set), ``"unset"`` (IOS = 0 but a null value or a
+    ``/`` left an item unchanged), ``"error"`` (IOS > 0, a conversion error; FVCOM's data loops
+    count such a READ as a row) or ``"eof"`` (IOS < 0).  ``start`` / ``end`` are the indices of
+    the first and last line consumed (``end`` inclusive; the next READ starts at ``end + 1``), and
+    ``first_line`` / ``last_line`` their physical line numbers.
+    """
+
+    status: str
+    start: int
+    end: int
+    first_line: int
+    last_line: int
+    values: tuple[int | float | None, ...]
+    message: str = ""
+
+
+def _convert(tok: str, typ: str) -> int | float:
+    if typ == INT:
+        if _INT_LITERAL.fullmatch(tok) is None:
+            raise ValueError(f"'{tok}' is not a valid integer")
+        iv = int(tok)
+        if not FORTRAN_INT_MIN <= iv <= FORTRAN_INT_MAX:
+            raise ValueError(f"'{tok}' is outside the 32-bit INTEGER range")
+        return iv
+    return fortran_real(tok)
+
+
+def list_read(
+    lines: Sequence[tuple[int, str]], pos: int, types: Sequence[str]
+) -> ListRead:
+    """Model one list-directed READ of ``types`` starting at ``lines[pos]``.
+
+    ``lines`` are ALL physical lines as ``(line number, text)``, blank ones included.  As in the
+    Fortran runtime (checked with gfortran 8.5 and ifx 2025.1, 2026-11-05): a READ that still needs
+    values continues onto the next line (blank lines included); once the list is satisfied the rest
+    of the line is ignored; a conversion error ends the READ (IOS > 0) and the next READ starts on
+    the following line; ``/`` (attached or separated) ends the READ, leaving the remaining items
+    unchanged; a null value leaves its item unchanged; end of file before the list is satisfied is
+    IOS < 0.  A ``!`` comment is not list-directed syntax: once the list is satisfied it is ignored
+    with the rest of the line (as these readers always did), but a ``!`` reached while values are
+    still needed is read as a value and fails, as in Fortran.  A repetition ``r*v`` above
+    :data:`~xfvcom.fortran_numbers.MAX_REPEAT` is a conversion error (gfortran refuses it).
+    """
+    vals: list[int | float | None] = []
+    need = len(types)
+    first = lines[pos][0] if pos < len(lines) else 0
+
+    def done(status: str, k: int, msg: str = "") -> ListRead:
+        return ListRead(status, pos, k, first, lines[k][0], tuple(vals), msg)
+
+    for k in range(pos, len(lines)):
+        raw = lines[k][1]
+        body = record_body(raw)
+        has_comment = len(body) < len(raw)
+        pre, slash, _rest = body.partition("/")
+        for r, tok in list_items(pre):
+            if r > MAX_REPEAT:
+                return done(
+                    "error",
+                    k,
+                    f"repetition count {r} exceeds {MAX_REPEAT}, the largest the Fortran "
+                    "runtime (gfortran) accepts; it stops on this record",
+                )
+            for _ in range(min(r, need - len(vals))):
+                if tok == "":
+                    vals.append(None)
+                    continue
+                try:
+                    vals.append(_convert(tok, types[len(vals)]))
+                except ValueError as exc:
+                    return done(
+                        "error",
+                        k,
+                        f"{exc} (item {len(vals) + 1} is {types[len(vals)]})",
+                    )
+            if len(vals) == need:
+                if any(v is None for v in vals):
+                    return done("unset", k, "a null value leaves an item unset")
+                return done("ok", k)
+        if slash:
+            return done(
+                "unset",
+                k,
+                f"'/' ends the READ after {len(vals)} of the {need} values it needs",
+            )
+        if has_comment:
+            return done(
+                "error",
+                k,
+                f"the '!' comment is read as a value after only {len(vals)} of the {need} "
+                "values (a list-directed READ has no comments)",
+            )
+    end = len(lines) - 1
+    return ListRead("eof", pos, end, first, lines[end][0] if lines else 0, tuple(vals))
+
+
+def read_all(
+    lines: Sequence[tuple[int, str]], start: int, types: Sequence[str]
+) -> tuple[list[ListRead], ListRead]:
+    """The READs of FVCOM's data loop from ``start`` to end of file: every READ with IOS >= 0
+    (``ok``, ``unset`` and ``error`` alike, as READ_COLDSTART_OBC_GRID / _DEPTH count them) and
+    the final end-of-file READ (whose ``values`` are non-empty for an incomplete last record).
+    """
+    reads: list[ListRead] = []
+    pos = start
+    while True:
+        r = list_read(lines, pos, types)
+        if r.status == "eof":
+            return reads, r
+        reads.append(r)
+        pos = r.end + 1
+
+
+def locate_records(
+    path: Path,
+    lines: Sequence[tuple[int, str]],
+    types: Sequence[str],
+    block: str,
+    failed_out: list[ListRead] | None = None,
+) -> int:
+    """Index in ``lines`` (all physical lines) where FVCOM's data loop starts reading ``block``.
+
+    FVCOM's header search (mod_input.F READ_COLDSTART_GRID / _OBC_GRID / _DEPTH, the
+    ``lwang intel23@20230710`` loops) repeats ``READ(unit,*,IOSTAT=IOS)`` of the record's items
+    until one succeeds (IOS = 0; a title, a ``key = value`` line or a comment simply fails and is
+    passed), counting the failed READs in NHEADER; it then REWINDs and skips NHEADER lines with
+    ``READ(unit,*)``.  A failed READ that consumed more than one line (a blank line, or a line
+    that supplied some of the values, before the line it failed on) makes NHEADER smaller than the
+    number of header lines, so the data loop would start inside the header and read a header line
+    as a data row: such input is refused here, naming the lines.  Returns ``len(lines)`` when no
+    READ succeeds.  The failed header READs are appended to ``failed_out`` when it is given (a
+    malformed FIRST record is one of them: FVCOM's search passes it as a header line).
+    """
+    pos = 0
+    failed: list[ListRead] = [] if failed_out is None else failed_out
+    while True:
+        r = list_read(lines, pos, types)
+        if r.status == "eof":
+            return len(lines)
+        if r.status in ("ok", "unset"):
+            break
+        failed.append(r)
+        pos = r.end + 1
+    start, nheader = r.start, len(failed)
+    stray = [n for n, raw in lines[nheader:start] if raw.strip()]
+    if stray:
+        why = []
+        for f in failed:
+            if f.end > f.start:
+                kinds = ", ".join(
+                    f"{'blank line' if not raw.strip() else 'line'} {n}"
+                    for n, raw in lines[f.start : f.end]
+                )
+                why.append(
+                    f"{kinds} (absorbed into the failed READ of line {f.last_line})"
+                )
+        raise ValueError(
+            f"{path}: {'; '.join(why)}: FVCOM's header search reads such lines together with "
+            f"the next one as ONE failed READ and counts one header line (NHEADER = {nheader}) "
+            f"for them, so after the rewind it starts the {block} at line "
+            f"{lines[nheader][0]} and reads header line {stray[0]} as a data row -- remove the "
+            "blank line(s) before the header lines"
+        )
+    return start
+
+
+# <--- jsasaki 2026-11-05

@@ -38,10 +38,15 @@ from numpy.typing import NDArray
 # jsasaki 2026-11-05: review round 17 #4: list-directed fields (commas separate like blanks)
 # jsasaki 2026-11-05: review round 18 #1-#7: list_fields now reached through the shared scanner
 from xfvcom.fortran_numbers import fortran_real
+
+# jsasaki 2026-11-05: review round 19 #1 #3 #4 #5: READ-based header search and records
 from xfvcom.fvcom_input import (
-    first_record_index,
+    INT,
+    REAL,
+    ListRead,
     is_comment_only,
-    record_fields,
+    locate_records,
+    read_all,
     scan_count_headers,
 )
 from xfvcom.grid.grid_obj import FvcomGrid
@@ -97,23 +102,27 @@ def format_year_label(years: list[int]) -> str:
     return f"{min(years)}-{max(years)}"
 
 
-# ---> jsasaki 2026-11-05: review round 18 #1-#7: the count header through the shared FVCOM scanner,
-# the records after it as FVCOM's READ_COLDSTART_* loops see them
-def _declared_block(path: Path, key: str) -> tuple[int, list[tuple[int, str]]]:
-    """The count N of the ``<key> = N`` header and the N records of the block that follows.
+# jsasaki 2026-11-05: review round 18 #1-#7: the count header through the shared FVCOM scanner
+# jsasaki 2026-11-05: review round 19 #1 #3 #4 #5: records are FVCOM's list-directed READs, not lines
+def _declared_block(
+    path: Path, key: str, types: tuple[str, ...], what: str
+) -> list[ListRead]:
+    """The N READs of the block declared by the ``<key> = N`` header, each with its values.
 
-    Comment-only and ``key = value`` lines before the first record are header lines (FVCOM's
-    header-skip loop passes over them); the header is looked up as SCAN_FILE does
-    (:func:`xfvcom.fvcom_input.scan_count_headers`).  Blank lines are not records (a list-directed
-    READ passes over them).  A comment-only line INSIDE the record block is refused: FVCOM's
-    list-directed ``READ(unit,*,IOSTAT=IOS)`` fails on the '!' (gfortran IOSTAT 5010, ifx 59,
-    checked 2026-11-05), and READ_COLDSTART_OBC_GRID / READ_COLDSTART_DEPTH count every READ that
-    does not hit end-of-file as one row, so the row count no longer matches the header.
+    The block starts where FVCOM's header search first READs ``types`` successfully: comment,
+    title and ``key = value`` lines before it are failed READs, i.e. header lines
+    (:func:`xfvcom.fvcom_input.locate_records`, which also refuses a blank line that would make
+    FVCOM's NHEADER rewind start inside the header).  The header is looked up as SCAN_FILE does
+    (:func:`xfvcom.fvcom_input.scan_count_headers`).  A record may continue onto further lines
+    and may end with ``/`` once its values are supplied; blank lines are not records.
+    READ_COLDSTART_OBC_GRID / READ_COLDSTART_DEPTH count every READ that does not hit end-of-file
+    as one row, a failed one included, so a READ that fails (a comment-only line inside the block:
+    gfortran IOSTAT 5010, ifx 59) or leaves an item unset (a null value, an early ``/``) is refused,
+    as is a count that differs from the header's.
     """
-    lines = [
-        (n, s) for n, s in enumerate(path.read_text().splitlines(), 1) if s.strip()
-    ]
-    start = first_record_index(lines)
+    lines = list(enumerate(path.read_text().splitlines(), 1))
+    skipped: list[ListRead] = []
+    start = locate_records(path, lines, types, block="record block", failed_out=skipped)
     counts = scan_count_headers(path, lines, {key: "n"}, start, block="record block")
     if "n" not in counts:
         raise ValueError(
@@ -121,50 +130,64 @@ def _declared_block(path: Path, key: str) -> tuple[int, list[tuple[int, str]]]:
             f"looks up the exact, case-sensitive key '{key}')"
         )
     n = counts["n"]
-    records = lines[start:]
-    for lineno, raw in records:
-        if is_comment_only(raw):
+    reads, eof = read_all(lines, start, types)
+    for rd in reads:
+        if rd.status == "error" and is_comment_only(lines[rd.end][1]):
             raise ValueError(
-                f"{path}: line {lineno}: comment-only line inside the record block; FVCOM's "
-                "list-directed READ fails on it and counts it as one more row, so the header "
-                f"declares {n} record(s) but FVCOM reads {len(records)} -- move the comment "
-                "above the first record or after a record on the same line"
+                f"{path}: line {rd.last_line}: comment-only line inside the record block; "
+                "FVCOM's list-directed READ fails on it and counts it as one more row, so the "
+                f"header declares {n} record(s) but FVCOM reads {len(reads)} -- move the "
+                "comment above the first record or after a record on the same line"
             )
-    if len(records) != n:
+    if eof.values:
         raise ValueError(
-            f"{path}: the header declares {n} record(s), the file holds {len(records)}"
+            f"{path}: lines {eof.first_line}-{eof.last_line}: incomplete {what} record at the "
+            f"end of the file ({len(eof.values)} of {len(types)} values)"
         )
-    return n, records
 
+    def malformed(rd: ListRead, note: str = "") -> ValueError:
+        span = (
+            f"line {rd.first_line}"
+            if rd.first_line == rd.last_line
+            else f"lines {rd.first_line}-{rd.last_line}"
+        )
+        text = " / ".join(raw.strip() for _n, raw in lines[rd.start : rd.end + 1])
+        return ValueError(
+            f"{path}: {span}: malformed {what} record {text!r}: {rd.message}{note}"
+        )
 
-# <--- jsasaki 2026-11-05
+    for rd in reads:
+        if rd.status != "ok":
+            raise malformed(rd)
+    if len(reads) != n:
+        # a READ that converted some values before failing, among the lines FVCOM's header search
+        # passed over, is most likely a broken record (the search took it for a header line)
+        broken = [rd for rd in skipped if rd.values]
+        if broken:
+            raise malformed(
+                broken[-1],
+                f"; FVCOM's header search passes it over as a header line, so the block "
+                f"holds {len(reads)} record(s) for the {n} the header declares",
+            )
+        raise ValueError(
+            f"{path}: the header declares {n} record(s), the file holds {len(reads)} "
+            "(records counted as FVCOM's list-directed READs)"
+        )
+    return reads
 
 
 def parse_obc_dat(path: Path) -> np.ndarray:
     """Return the 1-based OBC node IDs from a FVCOM ``*_obc.dat`` file.
 
-    The file is ``OBC Node Number = N`` followed by exactly N records starting ``index node_id type``
-    (three integers; a trailing ``!`` comment and further columns are ignored, as in FVCOM's
-    list-directed read); anything else is an error.
+    The file is ``OBC Node Number = N`` followed by exactly N records ``index node_id type``
+    (three integers read list-directed: a record may continue onto the next line or end with
+    ``/``; a trailing ``!`` comment and further columns are ignored); anything else is an error.
     """
-    # ---> jsasaki 2026-11-05: review round 2 #11: one recognised header, its count enforced, every
+    # jsasaki 2026-11-05: review round 2 #11: one recognised header, its count enforced, every
     # record (the first included) parsed strictly
-    # jsasaki 2026-11-05: review round 18 #3 #4: shared header scanner, numbered records
-    _n, records = _declared_block(Path(path), _OBC_KEY)
-    nodes: list[int] = []
-    for _lineno, line in records:
-        # jsasaki 2026-11-05: review round 15 #4: FVCOM reads the leading N1,N2,N3 list-directed;
-        # a trailing '!' comment and unused further columns are ignored
-        # jsasaki 2026-11-05: review round 18 #7: shared fields with 'r*value' repetition expanded
-        parts = record_fields(line)
-        try:
-            if len(parts) < 3:
-                raise ValueError
-            _idx, node, _type = (int(x) for x in parts[:3])
-        except ValueError:
-            raise ValueError(f"{path}: malformed OBC record {line!r}") from None
-        nodes.append(node)
-    # <--- jsasaki 2026-11-05
+    # jsasaki 2026-11-05: review round 19 #4: one record = one READ of N1,N2,N3 (FVCOM's loop)
+    reads = _declared_block(Path(path), _OBC_KEY, (INT, INT, INT), "OBC")
+    nodes = [int(rd.values[1]) for rd in reads]  # type: ignore[arg-type]
     if min(nodes) < 1 or len(set(nodes)) != len(nodes):
         raise ValueError(f"{path}: OBC node IDs must be unique and >= 1")
     return np.asarray(nodes, dtype=np.int32)
@@ -173,28 +196,17 @@ def parse_obc_dat(path: Path) -> np.ndarray:
 def parse_dep_dat(path: Path, node_xy: np.ndarray | None = None) -> np.ndarray:
     """Return the bathymetry column from a FVCOM ``*_dep.dat`` file.
 
-    The file is ``Node Number = N`` followed by exactly N records starting ``x y h`` (a trailing
-    ``!`` comment and further columns are ignored, as in FVCOM's list-directed read). With ``node_xy``
-    (``(N, 2)``, the mesh's node coordinates in the grid file's order) the depth file's coordinates
-    must match them row by row (within ``DEP_XY_ATOL`` coordinate units), so a reordered depth file
-    or one of another mesh is refused instead of putting depths on the wrong nodes.
+    The file is ``Node Number = N`` followed by exactly N records ``x y h`` (read list-directed:
+    a record may continue onto the next line or end with ``/``; a trailing ``!`` comment and
+    further columns are ignored). With ``node_xy`` (``(N, 2)``, the mesh's node coordinates in the
+    grid file's order) the depth file's coordinates must match them row by row (within
+    ``DEP_XY_ATOL`` coordinate units), so a reordered depth file or one of another mesh is refused
+    instead of putting depths on the wrong nodes.
     """
-    # ---> jsasaki 2026-11-05: review round 2 #12: the whole declared block, strictly, with coordinates
-    # jsasaki 2026-11-05: review round 18 #3 #4: shared header scanner, numbered records
-    _n, records = _declared_block(Path(path), _DEP_KEY)
-    rows: NDArray[np.float64] = np.empty((len(records), 3), dtype=np.float64)
-    for k, (_lineno, line) in enumerate(records):
-        # jsasaki 2026-11-05: review round 15 #4: FVCOM reads the leading X,Y,H list-directed; a
-        # trailing '!' comment and unused further columns are ignored (as xfvcom.io.read_dep does)
-        # jsasaki 2026-11-05: review round 18 #7: shared fields with 'r*value' repetition expanded
-        parts = record_fields(line)
-        try:
-            if len(parts) < 3:
-                raise ValueError
-            # jsasaki 2026-11-05: review round 14 #2: Fortran real literals ('1.0D+1', '1.0-3')
-            rows[k] = [fortran_real(x) for x in parts[:3]]
-        except ValueError:
-            raise ValueError(f"{path}: malformed depth record {line!r}") from None
+    # jsasaki 2026-11-05: review round 2 #12: the whole declared block, strictly, with coordinates
+    # jsasaki 2026-11-05: review round 19 #4: one record = one READ of X1,Y1,HDEP (FVCOM's loop)
+    reads = _declared_block(Path(path), _DEP_KEY, (REAL, REAL, REAL), "depth")
+    rows: NDArray[np.float64] = np.array([rd.values for rd in reads], dtype=np.float64)
     if not np.isfinite(rows).all():
         raise ValueError(f"{path}: non-finite coordinate or depth")
     if node_xy is not None:
@@ -211,7 +223,6 @@ def parse_dep_dat(path: Path, node_xy: np.ndarray | None = None) -> np.ndarray:
                 f"({xy[k, 0]}, {xy[k, 1]}): the depth file does not belong to this mesh / node order"
             )
     return rows[:, 2].astype(np.float32)
-    # <--- jsasaki 2026-11-05
 
 
 def check_time_axis(

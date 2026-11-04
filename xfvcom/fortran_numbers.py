@@ -13,7 +13,7 @@ import re
 
 import numpy as np
 
-__all__ = ["fortran_real", "list_fields"]
+__all__ = ["fortran_real", "list_fields", "list_items", "MAX_REPEAT"]
 
 #: A real literal as Fortran's list-directed READ accepts it (checked against
 #: gfortran and Intel ifx): optional sign, a mantissa with at least one digit
@@ -55,6 +55,37 @@ _REPEAT = re.compile(r"(?P<r>[0-9]+)\*(?P<val>.*)")
 #: Upper bound on the fields one record expands to (callers use only the first few).
 MAX_LIST_FIELDS = 4096
 # <--- jsasaki 2026-11-05
+# jsasaki 2026-11-05: review round 19 #2: the largest repeat count the gfortran runtime accepts
+# (libgfortran list_read.c MAX_REPEAT; 'Repeat count overflow' above it, checked 2026-11-05 with
+# gfortran 8.5: 200000000*1 reads, 200000001*1 fails).  ifx accepts larger counts, so this is the
+# portable limit.
+MAX_REPEAT = 200_000_000
+
+
+def list_items(body: str) -> list[tuple[int, str]]:
+    """The list-directed items of a record body (comment and any '/' already removed) as
+    ``(repeat count, value)`` pairs, NOT expanded: ``3 2*7`` -> ``[(1, '3'), (2, '7')]``.
+
+    A null value is ``(1, '')``; ``r*`` is ``(r, '')``.  A malformed repetition ('0*5', '*5')
+    is kept as one literal value, which no conversion accepts.  Counts are not checked here:
+    a reader checks a count against :data:`MAX_REPEAT` only when it consumes the item (Fortran
+    never looks at the items after the ones its READ list needs).
+    """
+    s = body.strip()
+    if not s:
+        return []
+    fields = _LIST_SEPARATOR.split(s)
+    if fields and fields[-1] == "" and s.endswith(","):
+        fields.pop()
+    out: list[tuple[int, str]] = []
+    for f in fields:
+        m = _REPEAT.fullmatch(f)
+        rs = m["r"].lstrip("0") if m is not None else ""
+        if m is not None and rs:
+            out.append((int(rs), m["val"]))
+        else:
+            out.append((1, f))
+    return out
 
 
 def list_fields(body: str) -> list[str]:
@@ -67,28 +98,22 @@ def list_fields(body: str) -> list[str]:
     leave-unchanged semantics for null values is refused by the caller.  A
     trailing comma ends the record and adds no field.  A repeated value
     ``r*value`` becomes ``r`` fields (``1*3150`` -> ``3150``, ``2*`` -> two null
-    values), bounded by ``MAX_LIST_FIELDS``.
+    values); a count above :data:`MAX_REPEAT` or an expansion beyond ``MAX_LIST_FIELDS``
+    raises :class:`ValueError` (review round 19 #2).
     """
-    s = body.strip()
-    if not s:
-        return []
-    fields = _LIST_SEPARATOR.split(s)
-    if fields and fields[-1] == "" and s.endswith(","):
-        fields.pop()
-    # ---> jsasaki 2026-11-05: review round 18 #7: expand 'r*value' (r >= 1) into r copies, at most
-    # MAX_LIST_FIELDS fields in all; 'r*' alone is r null values (empty fields, refused by every
-    # conversion), and '0*5' or '*5' stay as they are (no conversion accepts them either)
+    # jsasaki 2026-11-05: review round 19 #2: a count the Fortran runtime refuses, or one that would
+    # expand beyond MAX_LIST_FIELDS, is an explicit error (no silent substitution of a smaller count)
     out: list[str] = []
-    for f in fields:
-        m = _REPEAT.fullmatch(f)
-        rs = m["r"].lstrip("0") if m is not None else ""
-        if m is not None and rs:
-            # a count of more than 18 digits is only needed up to the bound
-            r = int(rs) if len(rs) <= 18 else MAX_LIST_FIELDS
-            out.extend([m["val"]] * min(r, MAX_LIST_FIELDS - len(out)))
-        else:
-            out.append(f)
-        if len(out) >= MAX_LIST_FIELDS:
-            break
+    for r, val in list_items(body):
+        if r > MAX_REPEAT:
+            raise ValueError(
+                f"repetition count {r} exceeds {MAX_REPEAT}, the largest the Fortran runtime "
+                "(gfortran) accepts"
+            )
+        if len(out) + r > MAX_LIST_FIELDS:
+            raise ValueError(
+                f"repetition count {r} is not supported (a record may expand to at most "
+                f"{MAX_LIST_FIELDS} fields here)"
+            )
+        out.extend([val] * r)
     return out
-    # <--- jsasaki 2026-11-05

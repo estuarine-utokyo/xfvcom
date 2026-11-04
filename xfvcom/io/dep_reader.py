@@ -26,7 +26,9 @@ from numpy.typing import NDArray
 # jsasaki 2026-11-05: review round 17 #4: list-directed fields (commas separate like blanks)
 # jsasaki 2026-11-05: review round 18 #1-#7: list_fields reached through the shared scanner
 from ..fortran_numbers import fortran_real
-from ..fvcom_input import first_record_index, record_fields, scan_count_headers
+
+# jsasaki 2026-11-05: review round 19 #1 #3 #4 #5: READ-based header search and records
+from ..fvcom_input import REAL, locate_records, read_all, scan_count_headers
 
 __all__ = ["DepData", "read_dep", "write_dep"]
 
@@ -50,46 +52,42 @@ def read_dep(path: str | Path) -> DepData:
     if not path.is_file():
         raise FileNotFoundError(path)
 
-    # ---> jsasaki 2026-11-05: review round 18 #1-#7: the header through the shared FVCOM scanner
-    # (exact key 'Node Number', one positive integer, the 400-byte buffer, GET_VALUE conversion of
-    # the traversed lines); records as list-directed fields with 'r*value' expanded.  Comment-only
-    # lines are skipped and malformed records passed over, as this reader always did.
+    # jsasaki 2026-11-05: review round 18 #1-#7: the header through the shared FVCOM scanner (exact key
+    # 'Node Number', one positive integer, the 400-byte buffer, GET_VALUE conversion of the traversed lines)
+    # ---> jsasaki 2026-11-05: review round 19 #1 #3 #4 #5: all physical lines (blanks included);
+    # the depth block starts where FVCOM's header search first READs X,Y,H successfully (a free-text
+    # title is a failed READ, i.e. a header line), with its NHEADER rewind checked; records are
+    # list-directed READs that may continue onto further lines or end with '/'.  READs that fail
+    # (or leave an item unset) are passed over, as this reader always did.
     with path.open() as fp:
-        lines = [(n, ln.rstrip("\n")) for n, ln in enumerate(fp, 1) if ln.strip()]
-    start = first_record_index(lines)
+        lines = [(n, ln.rstrip("\n")) for n, ln in enumerate(fp, 1)]
+    types = (REAL, REAL, REAL)
+    start = locate_records(path, lines, types, block="depth records")
     counts = scan_count_headers(
         path, lines, {"Node Number": "node"}, start, block="depth records"
     )
     if "node" not in counts:
         raise ValueError(f"{path}: 'Node Number = N' header not found")
     node = counts["node"]
-    idx = start
 
     x: NDArray[np.float64] = np.empty(node, dtype=np.float64)
     y: NDArray[np.float64] = np.empty(node, dtype=np.float64)
     h: NDArray[np.float64] = np.empty(node, dtype=np.float64)
+    reads, _eof = read_all(lines, start, types)
     read = 0
-    while read < node and idx < len(lines):
-        parts = record_fields(lines[idx][1])
-        idx += 1
-        if len(parts) < 3:
+    last = 0
+    for rd in reads:
+        if read == node:
+            break
+        last = rd.last_line
+        if rd.status != "ok":
             continue
-        try:
-            # jsasaki 2026-11-05: review round 14 #2: Fortran real literals ('1.0D+1', '1.0-3')
-            x[read], y[read], h[read] = (
-                fortran_real(parts[0]),
-                fortran_real(parts[1]),
-                fortran_real(parts[2]),
-            )
-        except ValueError:
-            continue
+        x[read], y[read], h[read] = (float(v) for v in rd.values)  # type: ignore[arg-type]
         read += 1
-    linenos = [n for n, _ln in lines]
-    # <--- jsasaki 2026-11-05
     if read != node:
-        # jsasaki 2026-11-05: review round 16 #3: name the last line read
-        last = f" (last line read: {linenos[idx - 1]})" if idx > 0 else ""
-        raise ValueError(f"{path}: depth block ended prematurely ({read}/{node}){last}")
+        tail = f" (last line read: {last})" if last else ""
+        raise ValueError(f"{path}: depth block ended prematurely ({read}/{node}){tail}")
+    # <--- jsasaki 2026-11-05
 
     return DepData(x=x, y=y, h=h)
 
