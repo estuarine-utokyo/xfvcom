@@ -665,9 +665,11 @@ def _validate_sigma(
             f"per-node siglay/siglev second dim must be n_obc={n_obc} "
             f"(got {sl.shape[1]}, {sv.shape[1]})"
         )
-    if sv.shape[0] != sl.shape[0] + 1 or sl.shape[0] < 1:
+    # jsasaki 2026-11-05: review round 8 #7: a 3-D FVCOM grid needs two layers (CHECK_LAYER_COUNT)
+    if sv.shape[0] != sl.shape[0] + 1 or sl.shape[0] < 2:
         raise ValueError(
-            f"siglev rows ({sv.shape[0]}) must be siglay rows ({sl.shape[0]}) + 1, siglay rows >= 1"
+            f"siglev rows ({sv.shape[0]}) must be siglay rows ({sl.shape[0]}) + 1, siglay rows >= 2 "
+            "(FVCOM refuses a 3-D grid with fewer than two layers)"
         )
     if not (np.isfinite(sv).all() and np.isfinite(sl).all()):
         raise ValueError("siglev / siglay must be finite")

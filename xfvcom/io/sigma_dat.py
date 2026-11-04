@@ -46,7 +46,8 @@ class SigmaFile:
     """A parsed ``*_sigma.dat`` header."""
 
     kb: int  #: NUMBER OF SIGMA LEVELS
-    stype: str  #: SIGMA COORDINATE TYPE (upper-case)
+    # jsasaki 2026-11-05: review round 8 #4: exact FVCOM spelling (no upper-casing)
+    stype: str  #: SIGMA COORDINATE TYPE (one of FVCOM's case-sensitive names)
     gtsz: GtszSpec | None = None  #: the GTSZ spec when ``stype == 'SIGMAZ'``
     raw: dict[str, str] | None = None  #: all parsed KEY -> raw-value strings
 
@@ -82,10 +83,29 @@ _KNOWN_KEYS = (
     + _FVEC_KEYS
 )
 
+# ---> jsasaki 2026-11-05: review round 8 #3 #4 #5: FVCOM scanner limits and
+# the coordinate types it accepts (mod_utils.F SCAN_FILE / GET_VALUE,
+# mod_input.F READ_COLDSTART_SIGMA, mod_main.F STYPE_*)
+#: physical line buffer of SCAN_FILE (CHARACTER(LEN=400) INPLINE): READ '(a)'
+#: silently truncates a longer line
+_MAX_LINE = 400
+#: SCAN_FILE gives up ("Read 200 lines of header...") once NLINE > 200, after
+#: having read line 201: a key on line 202 or later is never found
+_MAX_HEADER_LINE = 201
+#: GET_VALUE's REALVAL/INTVAL token buffers (a longer list is a FATAL_ERROR)
+_MAX_VALUES = 150
+#: GET_VALUE's VARNAME is CHARACTER(LEN=40): longer key text is truncated
+_MAX_KEY = 40
+#: SIGMA COORDINATE TYPE values FVCOM selects (case-sensitive SELECT CASE)
+_STYPES = ("UNIFORM", "GEOMETRIC", "TANH", "GENERALIZED", "S_COORDINATE", "SIGMAZ")
+# <--- jsasaki 2026-11-05
+
 
 def _fvcom_type(val: str) -> str:
-    """The type FVCOM's ``GET_VALUE`` assigns to a (comment-stripped) value."""
-    val = val.replace(",", " ").strip()
+    """The type FVCOM's ``GET_VALUE`` assigns to a value already normalised by
+    :func:`read_sigma_dat` (commas blanked, comment removed, space-trimmed)."""
+    # jsasaki 2026-11-05: review round 8 #2: the value arrives normalised ONCE
+    # (commas -> blanks) and the same text is used for typing and conversion
     if val in ("T", "F"):
         return "logical"
     if any(c not in _NUMCHARS for c in val):
@@ -106,7 +126,8 @@ def _get_int(path: Path, pairs: dict[str, str], key: str) -> int | None:
     val = _scan(pairs, key)
     if val is None:
         return None
-    if _fvcom_type(val) != "integer" or len(val.replace(",", " ").split()) != 1:
+    # jsasaki 2026-11-05: review round 8 #2: val is already comma-normalised
+    if _fvcom_type(val) != "integer" or len(val.split()) != 1:
         raise _bad(
             path,
             key,
@@ -135,7 +156,8 @@ def _get_float(path: Path, pairs: dict[str, str], key: str) -> float | None:
     val = _scan(pairs, key)
     if val is None:
         return None
-    toks = val.replace(",", " ").split()
+    # jsasaki 2026-11-05: review round 8 #2: val is already comma-normalised
+    toks = val.split()
     typ = _fvcom_type(val)
     # FVCOM re-scans a decimal-less GTSZ DREF as an integer (mod_input.F), so
     # DREF accepts the integer form.  For the other keys FVCOM falls back to its
@@ -180,14 +202,16 @@ def _get_bool(path: Path, pairs: dict[str, str], key: str) -> bool | None:
             "FVCOM recognises only a bare 'T' or 'F' here; any other form "
             "silently becomes F",
         )
-    return val.strip() == "T"
+    # jsasaki 2026-11-05: review round 8 #2: compare the normalised value ("T," is T)
+    return val == "T"
 
 
 def _get_fvec(path: Path, pairs: dict[str, str], key: str) -> tuple[float, ...] | None:
     val = _scan(pairs, key)
     if val is None:
         return None
-    toks = val.replace(",", " ").split()
+    # jsasaki 2026-11-05: review round 8 #2: val is already comma-normalised
+    toks = val.split()
     if _fvcom_type(val) != "float":
         raise _bad(
             path,
@@ -216,8 +240,10 @@ def read_sigma_dat(path: str | Path) -> SigmaFile:
     Values are typed as FVCOM's ``SCAN_FILE`` types them; a SIGMAZ value
     that FVCOM would not read as written (a decimal-less floating value, a
     decimal integer, a logical other than ``T``/``F``, a one-value list, a key
-    differing from FVCOM's spelling only in case/spacing, a repeated key) raises
-    :class:`ValueError` naming the key and the fix.
+    differing from FVCOM's spelling only in case/spacing, a repeated key, a tab
+    or carriage return in a key/value line, a coordinate type not spelled
+    exactly as FVCOM's, a key beyond line 201, a line over 400 characters, a
+    list over 150 values) raises :class:`ValueError` naming the key and the fix.
     """
     path = Path(path)
     if not path.is_file():
@@ -225,32 +251,73 @@ def read_sigma_dat(path: str | Path) -> SigmaFile:
 
     known_norm = {k: k for k in _KNOWN_KEYS}
     pairs: dict[str, str] = {}
-    with path.open() as fp:
-        for line in fp:
-            # strip comments (everything from the first '!')
-            bang = line.find("!")
-            if bang >= 0:
-                line = line[:bang]
-            if "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            # FVCOM matches the key text exactly (leading/trailing blanks aside)
-            key = key.strip()
-            val = val.strip()
-            if not key or not val:
-                continue  # GET_VALUE: "no data"
-            norm = " ".join(key.split()).upper()
-            if norm in known_norm and key != known_norm[norm]:
-                raise ValueError(
-                    f"{path}: key '{key}' is not spelled exactly '{known_norm[norm]}'; "
-                    "FVCOM matches keys case- and space-exactly and would ignore it"
-                )
-            if key in pairs:
-                raise ValueError(
-                    f"{path}: key '{key}' appears more than once "
-                    "(FVCOM uses only the first occurrence)"
-                )
-            pairs[key] = val
+    # ---> jsasaki 2026-11-05: review round 8 #2 #3 #5: reproduce SCAN_FILE /
+    # GET_VALUE line handling: physical lines as FVCOM reads them (no newline
+    # translation, so a CR is seen), commas blanked ONCE for the whole line,
+    # trimming of SPACES only (ADJUSTL / TRIM), the 400-character line buffer,
+    # the 201-line header search and the 150-value token buffers.  Forms that
+    # FVCOM reads differently from Python are rejected.
+    with path.open(newline="") as fp:
+        text_lines = fp.read().split("\n")
+    if text_lines and text_lines[-1] == "":
+        text_lines.pop()
+    for lineno, raw_line in enumerate(text_lines, start=1):
+        lead = raw_line.lstrip(" ")
+        if not lead.rstrip(" ") or lead.startswith("!"):
+            continue  # GET_VALUE: blank or comment line
+        bang = raw_line.find("!")
+        body = raw_line if bang < 0 else raw_line[:bang]
+        if "=" not in body:
+            continue  # GET_VALUE: no '=' -> "no data"
+        if len(raw_line.encode()) > _MAX_LINE:
+            raise ValueError(
+                f"{path}: line {lineno} is {len(raw_line.encode())} characters long; "
+                f"FVCOM's SCAN_FILE reads only the first {_MAX_LINE} and would "
+                "silently truncate it"
+            )
+        if any(c.isspace() and c != " " for c in body):
+            raise ValueError(
+                f"{path}: line {lineno} contains a tab, carriage return or other "
+                "non-space whitespace; FVCOM trims only spaces and reads such a "
+                "character as part of the key or value (a numeric value becomes a "
+                "string and is silently replaced by the default) -- use spaces and "
+                "Unix line endings"
+            )
+        body = body.replace(",", " ").lstrip(" ")
+        key, _, val = body.partition("=")
+        # VARNAME = TEXT_LINE(1:EQLOC-1) into CHARACTER(40), compared after TRIM
+        key = key[:_MAX_KEY].rstrip(" ")
+        val = val.strip(" ")
+        if not key or not val:
+            continue  # GET_VALUE: "no data"
+        ntok = len(val.split())
+        if lineno <= _MAX_HEADER_LINE and (
+            ntok > _MAX_VALUES or (ntok >= _MAX_VALUES and _fvcom_type(val) == "string")
+        ):
+            raise ValueError(
+                f"{path}: line {lineno} ('{key}') carries {ntok} values; FVCOM's "
+                f"GET_VALUE holds at most {_MAX_VALUES} (fewer for strings) and "
+                "stops with a FATAL_ERROR"
+            )
+        norm = " ".join(key.split()).upper()
+        if norm in known_norm and key != known_norm[norm]:
+            raise ValueError(
+                f"{path}: key '{key}' is not spelled exactly '{known_norm[norm]}'; "
+                "FVCOM matches keys case- and space-exactly and would ignore it"
+            )
+        if key in known_norm and lineno > _MAX_HEADER_LINE:
+            raise ValueError(
+                f"{path}: key '{key}' is on line {lineno}; FVCOM's SCAN_FILE stops "
+                f"searching after line {_MAX_HEADER_LINE} and would not find it -- "
+                "move the keys to the top of the file"
+            )
+        if key in pairs:
+            raise ValueError(
+                f"{path}: key '{key}' appears more than once "
+                "(FVCOM uses only the first occurrence)"
+            )
+        pairs[key] = val
+    # <--- jsasaki 2026-11-05
 
     if "NUMBER OF SIGMA LEVELS" not in pairs:
         raise ValueError(f"{path}: missing 'NUMBER OF SIGMA LEVELS'")
@@ -258,7 +325,21 @@ def read_sigma_dat(path: str | Path) -> SigmaFile:
         raise ValueError(f"{path}: missing 'SIGMA COORDINATE TYPE'")
     kb = _get_int(path, pairs, "NUMBER OF SIGMA LEVELS")
     assert kb is not None
-    stype = pairs["SIGMA COORDINATE TYPE"].strip().upper()
+    # jsasaki 2026-11-05: review round 8 #7: mod_input.F CHECK_LAYER_COUNT
+    if kb < 3:
+        raise ValueError(
+            f"{path}: NUMBER OF SIGMA LEVELS = {kb}; FVCOM needs at least 3 levels "
+            "(two layers) for a 3-D run"
+        )
+    # ---> jsasaki 2026-11-05: review round 8 #4: FVCOM selects the type
+    # case-sensitively and stops on any other spelling; do not upper-case it
+    stype = pairs["SIGMA COORDINATE TYPE"]
+    if stype not in _STYPES:
+        raise ValueError(
+            f"{path}: 'SIGMA COORDINATE TYPE = {stype}' is not one of FVCOM's "
+            f"types {', '.join(_STYPES)} (case-sensitive); FVCOM would stop"
+        )
+    # <--- jsasaki 2026-11-05
 
     gtsz: GtszSpec | None = None
     if stype == "SIGMAZ":
@@ -294,6 +375,11 @@ def read_sigma_dat(path: str | Path) -> SigmaFile:
                 raise ValueError(f"{path}: missing 'GTSZ ZLEV' (GTSZ NZ > 0)")
             zlev = zl
         bpg_nz = _get_int(path, pairs, "BPG REF NZ") or 0
+        # jsasaki 2026-11-05: review round 8 #6: mod_input.F range check
+        if not 0 <= bpg_nz <= 500:
+            raise ValueError(
+                f"{path}: FVCOM requires 0 <= BPG REF NZ <= 500 (got {bpg_nz})"
+            )
         bpg: tuple[float, ...] = ()
         if bpg_nz > 0:
             bz = _get_fvec(path, pairs, "BPG REF ZLEV")
@@ -343,9 +429,53 @@ def _ffmt(x: float) -> str:
     return s
 
 
-def _fmt_zlev(zlev: tuple[float, ...]) -> str:
-    # jsasaki 2026-11-05: review round 7 #2: decimal literals ('-2.0', not '-2')
-    return " ".join(_ffmt(z) for z in zlev)
+def _compact_token(tok: str) -> str:
+    """The shortest spelling of a decimal token with the same value
+    ('-2.0' -> '-2', '0.500000' -> '0.5', '1.5e-05' unchanged)."""
+    mant, e, exp = tok.partition("e")
+    if "." in mant:
+        mant = mant.rstrip("0").rstrip(".")
+        if mant in ("", "-", "+"):
+            mant += "0"
+    return mant + e + exp
+
+
+def _list_line(key: str, toks: list[str]) -> str:
+    """``KEY = v1 v2 ...`` for a floating list, within FVCOM's scanner limits.
+
+    FVCOM's GET_VALUE types a whole list as floating when the value holds a
+    decimal point ANYWHERE, and then reads every token list-directed into a
+    real, so '-2' inside such a list is read as -2.0.  When the list with a
+    decimal point on every token is longer than SCAN_FILE's 400-character line
+    buffer, the tokens are written in their shortest exact spelling with one
+    decimal point kept.  A list that still does not fit, or that has more than
+    150 values, raises :class:`ValueError`: SCAN_FILE's backslash line
+    continuation is compiler-dependent (ENDLINE differs between ifort and other
+    compilers in mod_utils.F), so it is not emitted.
+    """
+    # ---> jsasaki 2026-11-05: review round 8 #5: never emit a line FVCOM
+    # truncates (400 characters) or a list it cannot hold (150 values)
+    if len(toks) > _MAX_VALUES:
+        raise ValueError(
+            f"{key}: {len(toks)} values; FVCOM's GET_VALUE reads at most "
+            f"{_MAX_VALUES} values per key"
+        )
+    line = f"{key} = {' '.join(toks)}"
+    if len(line) <= _MAX_LINE:
+        return line
+    short = [_compact_token(t) for t in toks]
+    if not any("." in t for t in short):
+        mant, e, exp = short[0].partition("e")
+        short[0] = f"{mant}.0{e}{exp}"
+    line = f"{key} = {' '.join(short)}"
+    if len(line) > _MAX_LINE:
+        raise ValueError(
+            f"{key}: the value list needs {len(line)} characters even in its "
+            f"shortest exact form; FVCOM's SCAN_FILE reads only {_MAX_LINE} "
+            "characters per line -- use fewer levels or shorter values"
+        )
+    return line
+    # <--- jsasaki 2026-11-05
 
 
 def gtsz_to_lines(spec: GtszSpec, *, header_comment: str | None = None) -> list[str]:
@@ -368,7 +498,8 @@ def gtsz_to_lines(spec: GtszSpec, *, header_comment: str | None = None) -> list[
     lines.append(f"GTSZ L2 = {_ffmt(spec.l2)}")
     lines.append(f"GTSZ NZ = {spec.nz}")
     if spec.nz > 0:
-        lines.append(f"GTSZ ZLEV = {_fmt_zlev(spec.zlev)}")
+        # jsasaki 2026-11-05: review round 8 #5: within the scanner limits
+        lines.append(_list_line("GTSZ ZLEV", [_ffmt(z) for z in spec.zlev]))
     if spec.smooth != 0.0:
         # jsasaki 2026-11-05: review round 7 #2: always a decimal point
         lines.append(f"GTSZ SMOOTH = {_ffmt(spec.smooth)}")
@@ -384,12 +515,24 @@ def gtsz_to_lines(spec: GtszSpec, *, header_comment: str | None = None) -> list[
     # jsasaki 2026-11-05: review round 7 #2: FVCOM ignores a one-value list
     # (a single lower-band layer has fraction 1 either way)
     if len(spec.lowfrac) >= 2:
-        lines.append(f"GTSZ LOWFRAC = {' '.join(f'{f:.6f}' for f in spec.lowfrac)}")
+        # jsasaki 2026-11-05: review round 8 #5: within the scanner limits
+        lines.append(_list_line("GTSZ LOWFRAC", [f"{f:.6f}" for f in spec.lowfrac]))
     if spec.dye_nowall:
         lines.append("GTSZ DYE_NOWALL = T")
     if spec.bpg_ref_zlev:
         lines.append(f"BPG REF NZ = {len(spec.bpg_ref_zlev)}")
-        lines.append(f"BPG REF ZLEV = {_fmt_zlev(spec.bpg_ref_zlev)}")
+        # jsasaki 2026-11-05: review round 8 #5: within the scanner limits
+        lines.append(_list_line("BPG REF ZLEV", [_ffmt(z) for z in spec.bpg_ref_zlev]))
+    # ---> jsasaki 2026-11-05: review round 8 #5: every key must sit within
+    # SCAN_FILE's 201-line header search (a long header comment pushes it out)
+    for n, ln in enumerate(lines, start=1):
+        if not ln.startswith("!") and n > _MAX_HEADER_LINE:
+            raise ValueError(
+                f"'{ln.partition('=')[0].strip()}' would be on line {n}; FVCOM's "
+                f"SCAN_FILE searches only the first {_MAX_HEADER_LINE} lines -- "
+                "shorten the header comment"
+            )
+    # <--- jsasaki 2026-11-05
     return lines
 
 

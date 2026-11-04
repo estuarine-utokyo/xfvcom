@@ -130,8 +130,11 @@ class GtszSpec:
         """Replicate the Fortran startup ``FATAL_ERROR`` checks (mod_setup.F /
         mod_input.F), so a malformed spec is rejected here rather than at FVCOM
         startup."""
-        if self.kb < 4:
-            raise ValueError(f"GtszSpec: KB={self.kb} too small (need >= 4)")
+        # jsasaki 2026-11-05: review round 8 #7: FVCOM CHECK_LAYER_COUNT accepts KB >= 3 (two layers)
+        if self.kb < 3:
+            raise ValueError(
+                f"GtszSpec: KB={self.kb} too small (need >= 3 levels, i.e. two layers)"
+            )
         if self.base not in (1, 2, 3):
             raise ValueError(f"GtszSpec: GTSZ BASE must be 1/2/3, got {self.base}")
         if not (0 <= self.nz <= 500):
@@ -156,6 +159,13 @@ class GtszSpec:
             raise ValueError(
                 f"GtszSpec: GTSZ SMOOTH must be finite and >= 0 (got {self.smooth})"
             )
+        # ---> jsasaki 2026-11-05: review round 8 #6: mod_setup.F SIGMA_GTSZ
+        # "GTSZ_MASK=T requires a z-band (set GTSZ NZ > 0)"
+        if self.mask and not self.have_zband:
+            raise ValueError(
+                "GtszSpec: GTSZ MASK=T requires a z-band (set GTSZ NZ > 0)"
+            )
+        # <--- jsasaki 2026-11-05
         if len(self.zlev) != self.nz:
             raise ValueError(f"GtszSpec: len(ZLEV)={len(self.zlev)} != NZ={self.nz}")
         # mod_input.F:5166-5173 ZLEV contract (checked at parse time in FVCOM,
@@ -504,21 +514,36 @@ def element_average(
 
 
 def compute_kbp1_frac1(
-    Z: NDArray[np.float64], nv: NDArray[np.int64], kbp: NDArray[np.int64]
+    Z: NDArray[np.float64],
+    nv: NDArray[np.int64],
+    kbp: NDArray[np.int64],
+    H: NDArray[np.float64],
 ) -> tuple[NDArray[np.int64], NDArray[np.float64]]:
     """Per-element active-layer count ``GTSZ_KBP1`` (= min of the element's 3
-    node KBP) and active sigma-fraction ``GTSZ_FRAC1 = -Z1(KBP1+1)``.
+    node KBP) and active sigma-fraction ``GTSZ_FRAC1``.
 
-    Port of ``mod_setup.F::SIGMA_GTSZ`` lines 1400-1407.
+    Port of ``mod_setup.F::SIGMA_GTSZ`` (consistency review 2026-07-19): the
+    depth-weighted element aperture fraction
+
+        FRAC1 = sum_i H_i * (-Z_i(KBP1+1)) / max(sum_i H_i, 1e-6)
+
+    over the element's three nodes ``i``, where ``Z_i(KBP1+1)`` is each NODE's
+    sigma at the element's (1-based) level ``KBP1+1``, so that at rest
+    ``D1*FRAC1 = avg(H_i*f_i)`` reproduces the rim depth.  ``H`` is the (M,)
+    node depth.
     """
     nv = np.asarray(nv)
     if nv.shape[0] == 3 and nv.shape[1] != 3:
         nv = nv.T
-    Z1 = element_average(Z, nv)  # (N, KB)
     kbp1 = kbp[nv].min(axis=1)  # (N,)
-    # Fortran FRAC1 = -Z1(I, KBP1+1) (1-indexed level KBP1+1 == 0-indexed KBP1,
-    # since KBP1 is the layer count). Z1(1)=0 -> FRAC1=1 for a full column.
-    frac1 = -Z1[np.arange(Z1.shape[0]), kbp1]
+    # ---> jsasaki 2026-11-05: review round 8 #1: FVCOM's current depth-weighted
+    # sum(H_i*f_i)/sum(H_i), not the obsolete plain average -Z1(KBP1+1) of the
+    # node fractions.  1-based level KBP1+1 == 0-based index KBP1 (KBP1 is the
+    # layer count); Z(1)=0 -> FRAC1=1 for a full column.
+    Hn = np.asarray(H, dtype=np.float64)[nv]  # (N, 3)
+    f = -np.take_along_axis(Z[nv], kbp1[:, None, None], axis=2)[:, :, 0]  # (N, 3)
+    frac1 = (Hn * f).sum(axis=1) / np.maximum(Hn.sum(axis=1), 1.0e-6)
+    # <--- jsasaki 2026-11-05
     return kbp1.astype(np.int64), frac1.astype(np.float64)
 
 

@@ -28,6 +28,8 @@ and the ``provisional_fill`` notes of the extra files that supplied endpoints ar
 
 from __future__ import annotations
 
+# jsasaki 2026-11-05: review round 8 #8: os.path.abspath for the archive root
+import os
 import re
 from pathlib import Path
 
@@ -102,7 +104,12 @@ class FullDomainSource:
             raise ValueError(
                 f"missing must be 'error' or 'interpolate' (got {missing!r})"
             )
-        self.root = Path(root).expanduser()
+        # ---> jsasaki 2026-11-05: review round 8 #8: an absolute root fixed at construction, so a later
+        # chdir cannot redirect the reads to another (uninspected) tree; the label keeps the name given
+        given = Path(os.path.abspath(Path(root).expanduser()))
+        self._label = given.name
+        self.root = given.resolve()
+        # <--- jsasaki 2026-11-05
         self.missing = missing
         d0, d1 = _utc_day(start), _utc_day(end)
         if d1 < d0:
@@ -349,7 +356,8 @@ class FullDomainSource:
 
     @property
     def name(self) -> str:
-        return f"{self.root.name}[{self.start:%Y%m%d}-{self.end:%Y%m%d}]"
+        # jsasaki 2026-11-05: review round 8 #8: the name given, not that of a resolved symlink target
+        return f"{self._label}[{self.start:%Y%m%d}-{self.end:%Y%m%d}]"
 
     def exists(self) -> bool:
         return True

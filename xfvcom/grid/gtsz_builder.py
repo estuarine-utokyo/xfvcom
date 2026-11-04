@@ -280,7 +280,20 @@ def build_gtsz(mesh: MeshInputs, spec: GtszSpec) -> GtszCoordinate:
     Z = build_coordinate(mesh.h, spec, href=href)
     if spec.mask:
         kbp = compute_kbp(Z, spec.kbm1)
-        kbp1, frac1 = compute_kbp1_frac1(Z, mesh.nv, kbp)
+        # ---> jsasaki 2026-11-05: review round 8 #6: mod_setup.F SIGMA_GTSZ
+        # refuses a masked column with fewer than two active layers (KBP = 1:
+        # the vertical diffusion solvers need two; KBP = 0: division by zero)
+        if kbp.size and int(kbp.min()) < 2:
+            bad = np.flatnonzero(kbp < 2)
+            raise ValueError(
+                f"build_gtsz: {bad.size} GTSZ_MASK column(s) keep fewer than two "
+                f"active layers (min KBP = {int(kbp.min())}, first node "
+                f"{int(bad[0]) + 1} 1-based); FVCOM stops at startup -- raise "
+                "GTSZ K1 or review ZLEV so every column keeps two active layers"
+            )
+        # <--- jsasaki 2026-11-05
+        # jsasaki 2026-11-05: review round 8 #1: node depths for the depth-weighted FRAC1
+        kbp1, frac1 = compute_kbp1_frac1(Z, mesh.nv, kbp, mesh.h)
     else:
         kbp = np.full(mesh.n_node, spec.kbm1, dtype=np.int64)
         kbp1 = np.full(mesh.n_elem, spec.kbm1, dtype=np.int64)

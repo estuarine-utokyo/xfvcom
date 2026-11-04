@@ -307,7 +307,8 @@ def test_kbp1_frac1_full_column():
     Z = build_coordinate(H, spec)
     kbp = compute_kbp(Z, spec.kbm1)
     assert np.all(kbp == spec.kbm1)
-    kbp1, frac1 = compute_kbp1_frac1(Z, nv, kbp)
+    # jsasaki 2026-11-05: review round 8 #1: node depths (depth-weighted FRAC1)
+    kbp1, frac1 = compute_kbp1_frac1(Z, nv, kbp, H)
     assert np.all(kbp1 == spec.kbm1)
     np.testing.assert_allclose(frac1, 1.0)
 
