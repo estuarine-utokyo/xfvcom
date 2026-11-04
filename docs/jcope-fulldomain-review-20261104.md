@@ -1947,3 +1947,75 @@ VERDICT: FAIL (0 blocker, 0 major, 5 minor, 0 nit)
 ### Triage
 
 No round-14 regression; all 5 new findings (minor, pre-existing, mesh/depth file parsing and the comparison script) accepted. xfvcom 2133600 (tests/test_round15_review.py, 29 cases): #1 variables are matched by dimension NAME and transposed (wrong_level refused), #2 count headers are one positive integer (duplicates refused), #3 extra data records after a declared block are refused, #4 trailing '!' comments and extra columns in depth/OBC records, #5 the two count headers in either order, connectivity starts at the first four-integer line as in READ_COLDSTART_GRID. 18 grid and 18 depth files read identically.
+
+## Round 16 (commit 363cd67 reviewed; fixes in 0f0a28d)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `363cd67` and jcopetda `96f429f`. No files were modified.
+
+| Round-15 finding | Status | Verification |
+|---|---|---|
+| #1: Comparison dimensions | RESOLVED | Incorrect dimension names are refused; permuted canonical dimensions produce identical columns. |
+| #2: Count-header values | RESOLVED | Reported malformed values and duplicate headers are rejected. |
+| #3: Extra mesh records | RESOLVED | Reported extra connectivity/node records are rejected, including unordered mode where applicable. |
+| #4: Depth/OBC comments and extra columns | RESOLVED | Both runner parsers handle the reported records while retaining validation. |
+| #5: Header order | RESOLVED | Both orders work. The added search limit has a separate regression below. |
+
+All 29 round-15 cases passed using in-memory file adapters. Production checks covered all five variables at all 13 Tokyo Bay OBC nodes, regional/archive agreement within packing tolerance, SADAPT, NPZ, both depth-control rules, both provisional repair days, and diskless writer serialization. The full suite and annual builds were not run.
+
+1. **Minor — Depth-control ties can select a different sampling depth from FVCOM.**
+
+   Location: [obc_depth_control.py:185](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/obc_depth_control.py:185). Pre-existing; requires tied geometry.
+
+   **Reproduction:** Use these relative coordinates, optionally scaled and translated into UTM:
+
+   ```python
+   x = [0, -2, 2, 1, -1]
+   y = [0,  0, 0, 1,  1]
+   triangles = [[1, 3, 4], [1, 4, 5], [1, 5, 2]]  # 1-based, CCW
+   obc_ids = [2, 1, 3]
+   h = [20, 20, 20, 10, 100]
+   ```
+
+   At interior OBC node 1, inward candidates 4 and 5 have identical dot products, `0.7071067811865475`. Python iterates an unordered neighbor set and selects node 4: **10 m**.
+
+   An in-memory port of [FVCOM’s TGE traversal](/home/pj24001722/ku40000343/Github/FVCOM/src/tge.F:343), including its connectivity reversal, produces neighbor order `[1,2,5,4,3,1]`. [SETUP_OBC](/home/pj24001722/ku40000343/Github/FVCOM/src/mod_obcs.F:1180) retains the first maximum, selecting node 5: **100 m**. Both Python endpoint options exhibit the interior-node mismatch.
+
+   This is source-based evidence; no FVCOM simulation was run. It is separate from the conceded endpoint-rule discussion.
+
+   **Fix:** Reproduce FVCOM’s ordered neighbor traversal, or reject ambiguous maxima and require verified effective depths.
+
+2. **Minor — The new mesh-header limit rejects FVCOM’s reachable line 201.**
+
+   Location: [dat_reader.py:108](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:108). Round-15 regression.
+
+   **Reproduction:** Put `Cell Number = 1` on line 1, followed by 199 comment lines, then `Node Number = 3` on line 201 and an otherwise valid mesh. `read_dat()` rejects the node header.
+
+   [FVCOM’s scanner](/home/pj24001722/ku40000343/Github/FVCOM/src/mod_utils.F:2893) checks `NLINE > 200` **before** incrementing and reading, so it processes line 201. The repository’s sigma parser already models that boundary as 201.
+
+   **Fix:** Allow headers through physical line 201. Add boundary tests accepting line 201 and rejecting line 202.
+
+3. **Minor — Attached inline comments still fail in the shared mesh/depth readers.**
+
+   Locations: [dep_reader.py:72](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/dep_reader.py:72), [dat_reader.py:89](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:89). Pre-existing.
+
+   **Reproduction:** In a valid three-node depth file, change one depth record to:
+
+   ```text
+   400000.0 3900000.0 10.0!survey
+   ```
+
+   `parse_dep_dat()` returns all three depths. However, `load_mesh()`, reached by `--sigma-dat`, skips that record and raises `depth block ended prematurely (2/3)`.
+
+   Likewise, changing a valid connectivity record to `1 1 2 3!triangle` produces `Element block ended prematurely (0/1)`. These are valid Fortran inline comments; separating `!` with whitespace avoids both failures.
+
+   **Fix:** Strip the `!` comment before tokenization in `read_dep()` and throughout `read_dat()`, including connectivity-block discovery. Preserve count and correspondence checks.
+
+## Verdict
+
+VERDICT: FAIL (0 blocker, 0 major, 3 minor, 0 nit)
+
+### Triage
+
+All 3 findings accepted (minor; #2 a round-15 regression). xfvcom 0f0a28d (tests/test_round16_review.py): #1 NEXT_OBC selection now follows FVCOM's ordered boundary-neighbour traversal (port of the boundary-node branch of tge.F with the reversed connectivity; first maximum kept with a strict '>' from DOTMAX=-1 as in SETUP_OBC; the reviewer's tie example now selects node 5 / 100 m; an error is raised when the cells around a node do not form a single fan); on TokyoBay the substituted depths and NEXT_OBC ids are identical to the previous implementation for both endpoint rules; #2 header search reaches physical line 201 (line 202 rejected); #3 '!' comments are stripped before tokenisation in read_dat and read_dep. 19 grid and 85 depth files read identically.
