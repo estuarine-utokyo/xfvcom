@@ -585,6 +585,17 @@ def main() -> int:
         "assumed depths against a run's output h before production use "
         "(see xfvcom.io.obc_depth_control).",
     )
+    # jsasaki 2026-11-05: review round 13 #1: explicit endpoint rule for --obc-depth-control
+    parser.add_argument(
+        "--obc-depth-control-endpoints",
+        choices=("observed", "source"),
+        default="observed",
+        help="boundary-string endpoint rule for --obc-depth-control: 'observed' "
+        "(default) keeps each endpoint's own depth, as the runtime h of the "
+        "TB-FVCOM b9 60-rank production run shows; 'source' follows mod_obcs.F "
+        "SETUP_OBC / mod_startup.F SET_WATER_DEPTH literally (endpoints also "
+        "take their NEXT_OBC neighbour's depth)",
+    )
     parser.add_argument("--tag", default="jcope", help="filename tag (default: jcope)")
     parser.add_argument(
         "--jobs",
@@ -707,6 +718,11 @@ def main() -> int:
     obc_lon = np.asarray(mesh.lon)[idx0]
     obc_h_fvcom = h_all[idx0]
 
+    # jsasaki 2026-11-05: review round 13 #1: OBC-depth provenance for the T/S history
+    tsobc_history_note: str | None = None
+    # jsasaki 2026-11-05: review round 13 #1: the endpoint rule is meaningless without depth control
+    if args.obc_depth_control_endpoints != "observed" and not args.obc_depth_control:
+        sys.exit("--obc-depth-control-endpoints requires --obc-depth-control")
     if args.obc_depth_control:
         if args.sigma_dat is not None or args.siglev_npz is not None:
             sys.exit(
@@ -715,13 +731,26 @@ def main() -> int:
             )
         from xfvcom.io.obc_depth_control import substituted_obc_depths
 
+        # ---> jsasaki 2026-11-05: review round 13 #1: endpoint rule chosen explicitly,
+        # printed and recorded in the T/S file's history
+        rule = args.obc_depth_control_endpoints
         h_sub, next_ids = substituted_obc_depths(
-            mesh.x, mesh.y, mesh.nv, obc_ids, h_all
+            mesh.x, mesh.y, mesh.nv, obc_ids, h_all, endpoint_rule=rule
+        )
+        rule_text = (
+            "endpoints keep own depth (observed runtime rule)"
+            if rule == "observed"
+            else "endpoints take their NEXT_OBC depth (mod_obcs.F source rule)"
+        )
+        tsobc_history_note = (
+            "OBC depths: OBC_DEPTH_CONTROL_ON=T substitution (a-priori NEXT_OBC), "
+            f"endpoint rule '{rule}': {rule_text}"
         )
         print(
             "[obc-depth-control] sampling at OBC_DEPTH_CONTROL_ON=T substituted "
-            "depths (a-priori NEXT_OBC; endpoints keep own depth):"
+            f"depths (a-priori NEXT_OBC; endpoint rule '{rule}': {rule_text}):"
         )
+        # <--- jsasaki 2026-11-05
         for i, n in enumerate(obc_ids):
             mark = (
                 ""
@@ -899,6 +928,8 @@ def main() -> int:
             siglay=siglay,
             fields=fields_concat,
             source_files=source_files_ts,  # jsasaki 2026-11-05: review round 2 #18: T/S provenance
+            # jsasaki 2026-11-05: review round 13 #1: endpoint rule in the history
+            history_note=tsobc_history_note,
         )
 
     if not args.no_elevation:

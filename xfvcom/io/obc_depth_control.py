@@ -42,6 +42,28 @@ trusting a production OBC file on a new mesh or a new rank count.
 
 Validated against the TB-FVCOM b9 production mesh: with the endpoint rule,
 the substituted depths reproduce the runtime ``h`` at all 13 OBC nodes.
+
+**Endpoint rule option** (``endpoint_rule``, added after gpt-6.1-sol review
+round 13 #1).  The reviewer derived from the Fortran source that FVCOM makes
+no endpoint exception: ``SETUP_OBC`` (``mod_obcs.F``) builds the inward
+normal of an endpoint from its single boundary edge, picks ``NEXT_OBC`` among
+its non-OBC edge-neighbours like any other OBC node, and ``SET_WATER_DEPTH``
+(``mod_startup.F``) copies that neighbour's depth unconditionally.  Two rules
+are therefore offered:
+
+* ``"observed"`` (DEFAULT): endpoints keep their own depth, as above.  It is
+  the default because the runtime ``h`` of the 60-rank TB-FVCOM b9
+  production run matches it at all 13 OBC nodes (TB-FVCOM
+  ``hydro/docs/obc_depth_consistency.md`` §6).
+* ``"source"``: the literal source rule; endpoints also take their
+  ``NEXT_OBC`` neighbour's depth.
+
+On the TokyoBay mesh (TB-FVCOM ``input/goto2023/grid/TokyoBay_grd/obc/dep.dat``,
+checked 2026-11-05) the two rules differ at
+the endpoints only: node 3150 is sampled at 28.87 m (observed) vs 56.40 m
+(source, from node 3158), node 3015 at 9.20 m vs 9.29 m (from node 3023).
+Which rule a given build/decomposition follows is settled only by comparing
+with a run's output ``h`` (contract check above).
 """
 
 from __future__ import annotations
@@ -67,11 +89,24 @@ def _topology(nv: NDArray[np.int_]):
     return neighbours, cells_of
 
 
+#: accepted values of ``endpoint_rule`` (the first is the default)
+ENDPOINT_RULES = ("observed", "source")
+
+
+def _check_endpoint_rule(endpoint_rule: str) -> None:
+    if endpoint_rule not in ENDPOINT_RULES:
+        raise ValueError(
+            f"endpoint_rule must be one of {ENDPOINT_RULES}; got {endpoint_rule!r}"
+        )
+
+
 def next_obc_nodes(
     x: NDArray[np.float64],
     y: NDArray[np.float64],
     nv: NDArray[np.int_],
     obc_ids: NDArray[np.int_],
+    # jsasaki 2026-11-05: review round 13 #1: explicit choice of the endpoint rule
+    endpoint_rule: str = "observed",
 ) -> NDArray[np.int_]:
     """Return the 1-based ``NEXT_OBC`` node for each 1-based OBC node.
 
@@ -83,7 +118,13 @@ def next_obc_nodes(
         Connectivity ``(3, nele)``, zero-based (``FvcomGrid.nv``).
     obc_ids
         1-based OBC node IDs in ``*_obc.dat`` order.
+    endpoint_rule
+        ``"observed"`` (default): a boundary-string endpoint is its own
+        ``NEXT_OBC``.  ``"source"``: endpoints get a ``NEXT_OBC`` from the
+        normal of their single boundary edge, as in ``mod_obcs.F``.
     """
+    # jsasaki 2026-11-05: review round 13 #1: validate the endpoint rule
+    _check_endpoint_rule(endpoint_rule)
     nv = np.asarray(nv)
     if nv.shape[0] != 3:
         raise ValueError(f"nv must be (3, nele); got {nv.shape}")
@@ -107,10 +148,13 @@ def next_obc_nodes(
                 f"OBC node {p + 1}: {len(adj_obc)} adjacent OBC "
                 "nodes; boundary line is not simple"
             )
-        if len(adj_obc) == 1:
+        # jsasaki 2026-11-05: review round 13 #1: the exception only under the observed rule
+        if len(adj_obc) == 1 and endpoint_rule == "observed":
             # Boundary-string ENDPOINT (open/solid corner): observed runtime
             # behaviour is NO substitution (see module docstring) — return the
-            # node itself so h_substituted == own depth.
+            # node itself so h_substituted == own depth.  Under the "source"
+            # rule the loop below runs with the one boundary edge, which is
+            # SETUP_OBC's NXOBC/NYOBC for NADJN_OBC == 1.
             out[k] = p + 1
             continue
         acc_x = acc_y = 0.0
@@ -159,12 +203,20 @@ def substituted_obc_depths(
     nv: NDArray[np.int_],
     obc_ids: NDArray[np.int_],
     h_all: NDArray[np.floating],
+    # jsasaki 2026-11-05: review round 13 #1: explicit choice of the endpoint rule
+    *,
+    endpoint_rule: str = "observed",
 ) -> tuple[NDArray[np.floating], NDArray[np.int_]]:
     """Depths FVCOM actually uses at the OBC nodes under depth control.
 
     Returns ``(h_substituted, next_ids)`` where ``h_substituted[k] =
     h_all[next_ids[k] - 1]`` — feed these to the OBC generator so the file is
     sampled at the depths ``OBC_DEPTH_CONTROL_ON = T`` imposes it at.
+    ``endpoint_rule`` is ``"observed"`` (default; endpoints keep their own
+    depth, as in the b9 production run) or ``"source"`` (endpoints take their
+    ``NEXT_OBC`` neighbour's depth, as ``mod_startup.F`` reads); see the module
+    docstring.
     """
-    nxt = next_obc_nodes(x, y, nv, obc_ids)
+    # jsasaki 2026-11-05: review round 13 #1: pass the endpoint rule through
+    nxt = next_obc_nodes(x, y, nv, obc_ids, endpoint_rule=endpoint_rule)
     return np.asarray(h_all)[nxt - 1], nxt

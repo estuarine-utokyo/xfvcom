@@ -31,6 +31,7 @@ Example (a slope-adaptive Tokyo-Bay header)::
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -187,12 +188,51 @@ def _check_int32(path: Path, key: str, val: str, iv: int) -> None:
         )
 
 
-# jsasaki 2026-11-05: review round 12 #5: new helper
+# ---> jsasaki 2026-11-05: review round 13 #2: one Fortran real-literal
+# conversion shared by the numeric-line validator and the active readers
+#: A real literal as Fortran's list-directed READ accepts it (checked against
+#: gfortran and Intel ifx): optional sign, a mantissa with at least one digit
+#: and at most one decimal point, and an optional exponent written either with
+#: a letter (E/D/Q, any case, optional sign) or as a bare SIGNED integer
+#: ('1.0-3' = 0.001, '1.0+3' = 1000).  'E'/'D'/'Q' without digits ('1e') is
+#: refused: gfortran stops on it (ifx reads 1.0), so it is not portable.
+_FORTRAN_REAL = re.compile(
+    r"(?P<mant>[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+))"
+    r"(?:(?P<letter>[EeDdQq])(?P<lexp>[+-]?[0-9]+)|(?P<sexp>[+-][0-9]+))?"
+)
+
+
+def fortran_real(tok: str) -> float:
+    """Convert one token the way Fortran's list-directed ``READ`` into a
+    ``REAL(DP)`` does, or raise :class:`ValueError`.
+
+    Accepts implicit-exponent forms (``1.0-3``, ``1.0+3``, ``.5-1``), ``D``/``Q``
+    exponents (``1.0d-3``) and signs; refuses what the Fortran runtime refuses
+    (``1.0.0``, ``abc``, ``1e``, ``1.0e+``, ``.``) and a value that overflows
+    ``REAL(DP)`` (Intel Fortran stops on it, gfortran reads Infinity).  An
+    underflow reads as zero, as in Fortran.
+    """
+    m = _FORTRAN_REAL.fullmatch(tok)
+    if m is None:
+        raise ValueError(f"'{tok}' is not a Fortran real literal")
+    exp = m["lexp"] if m["letter"] else m["sexp"]
+    x = float(m["mant"] + ("" if exp is None else "e" + exp))
+    if not np.isfinite(x):
+        raise ValueError(f"'{tok}' is not finite (overflows REAL(DP))")
+    return x
+
+
 def _with_point(tok: str) -> str:
     """``tok`` with a decimal point in its mantissa ('8' -> '8.0', '8e-4' ->
-    '8.0e-4'), the literal FVCOM types as 'float' with the same value."""
-    i = min((j for j in (tok.find("e"), tok.find("E")) if j >= 0), default=len(tok))
+    '8.0e-4', '1-3' -> '1.0-3'), the literal FVCOM types as 'float' with the
+    same value.  A token that is not a real literal is returned with '.0'
+    appended."""
+    m = _FORTRAN_REAL.fullmatch(tok)
+    i = m.end("mant") if m is not None else len(tok)
     return f"{tok[:i]}.0{tok[i:]}"
+
+
+# <--- jsasaki 2026-11-05
 
 
 # jsasaki 2026-11-05: review round 12 #2: new helper
@@ -221,7 +261,8 @@ def _check_numeric_line(path: Path, lineno: int, key: str, val: str) -> None:
             except ValueError:
                 hint = ""
                 try:
-                    float(tok)
+                    # jsasaki 2026-11-05: review round 13 #2: Fortran real syntax
+                    fortran_real(tok)
                     hint = (
                         f" -- for a floating value write it with a decimal point, "
                         f"e.g. '{_with_point(tok)}'"
@@ -245,22 +286,29 @@ def _check_numeric_line(path: Path, lineno: int, key: str, val: str) -> None:
                     f"a decimal point is read as an INTEGER){why}",
                 )
         else:
+            # ---> jsasaki 2026-11-05: review round 13 #2: Fortran real syntax
+            # ('1.0-3' is valid); overflow is told apart from bad syntax
+            if _FORTRAN_REAL.fullmatch(tok) is None:
+                raise _bad(
+                    path,
+                    key,
+                    val,
+                    f"line {lineno}: '{tok}' is not a valid floating value (not a "
+                    f"Fortran real literal){why}",
+                )
             try:
-                x = float(tok)
+                fortran_real(tok)
             except ValueError:
                 raise _bad(
                     path,
                     key,
                     val,
-                    f"line {lineno}: '{tok}' is not a valid floating value{why}",
+                    f"line {lineno}: '{tok}' is not finite (overflows REAL(DP): "
+                    "Intel Fortran stops on it, gfortran reads Infinity); FVCOM's "
+                    "SCAN_FILE converts every numeric line it passes before matching "
+                    "the key, even when the key is unused",
                 ) from None
-            if not np.isfinite(x):
-                raise _bad(
-                    path,
-                    key,
-                    val,
-                    f"line {lineno}: '{tok}' is not finite (overflow?){why}",
-                )
+            # <--- jsasaki 2026-11-05
 
 
 #: FVCOM's fallback for a floating key it cannot read (mod_input.F)
@@ -309,9 +357,10 @@ def _get_float(path: Path, pairs: dict[str, str], key: str) -> float | None:
             ),
         )
     try:
-        x = float(toks[0])
-    except ValueError:
-        raise _bad(path, key, val, "not a valid floating value") from None
+        # jsasaki 2026-11-05: review round 13 #2: Fortran real syntax, as FVCOM reads it
+        x = fortran_real(toks[0])
+    except ValueError as e:
+        raise _bad(path, key, val, f"not a valid floating value ({e})") from None
     # jsasaki 2026-11-05: review round 11 #2: an integer-form DREF is read as an INTEGER
     if typ == "integer":
         try:
@@ -366,9 +415,12 @@ def _get_fvec(path: Path, pairs: dict[str, str], key: str) -> tuple[float, ...] 
             "returns -4, i.e. the key counts as absent)",
         )
     try:
-        xs = tuple(float(t) for t in toks)
-    except ValueError:
-        raise _bad(path, key, val, "not a list of valid floating values") from None
+        # jsasaki 2026-11-05: review round 13 #2: Fortran real syntax, as FVCOM reads it
+        xs = tuple(fortran_real(t) for t in toks)
+    except ValueError as e:
+        raise _bad(
+            path, key, val, f"not a list of valid floating values ({e})"
+        ) from None
     # jsasaki 2026-11-05: review round 10 #4: an overflowing literal (1.0e999) converts to inf
     if not np.isfinite(xs).all():
         raise _bad(path, key, val, "a value is not finite (overflow?)")

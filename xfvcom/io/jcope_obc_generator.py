@@ -945,6 +945,8 @@ def write_tsobc_nc(
     fields: dict[str, NDArray[np.float32]],
     title: str | None = None,
     source_files: Iterable[str] = (),
+    # jsasaki 2026-11-05: review round 13 #1: provenance of the OBC depths (e.g. endpoint rule)
+    history_note: str | None = None,
 ) -> Path:
     """Write a FVCOM TIME SERIES OBC TS FILE from pre-computed arrays.
 
@@ -1007,6 +1009,8 @@ def write_tsobc_nc(
             fields32,
             title,
             sources,
+            # jsasaki 2026-11-05: review round 13 #1: appended to the history attribute
+            history_note,
         )
 
     return _atomic_write(out_path, _write)
@@ -1025,6 +1029,8 @@ def _write_tsobc_file(
     fields: dict[str, NDArray[np.float32]],
     title: str | None,
     source_files: list[str],
+    # jsasaki 2026-11-05: review round 13 #1: provenance of the OBC depths
+    history_note: str | None = None,
 ) -> None:
     n_obc = int(obc_nodes.size)
     with nc.Dataset(out_path, "w", format="NETCDF4") as ds:
@@ -1082,7 +1088,10 @@ def _write_tsobc_file(
             "JCOPE-T DA (JAMSTEC), interpolated to FVCOM OBC sigma "
             "layers via xfvcom.io.JcopeObcGenerator"
         )
-        ds.history = _format_history(source_files)
+        # jsasaki 2026-11-05: review round 13 #1: record the OBC-depth provenance
+        ds.history = _format_history(source_files) + (
+            f"; {history_note}" if history_note else ""
+        )
 
 
 def write_elevation_nc(
