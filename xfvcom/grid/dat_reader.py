@@ -10,7 +10,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 # jsasaki 2026-11-05: review round 14 #2: FVCOM reads coordinates list-directed (D/E/Q exponents)
-from ..fortran_numbers import fortran_real
+# jsasaki 2026-11-05: review round 17 #4: list-directed fields (commas separate like blanks)
+from ..fortran_numbers import fortran_real, list_fields
 
 __all__ = ["read_dat"]
 
@@ -34,19 +35,65 @@ _SCAN_FILE_LINES = 201
 #: The value of a count header: ONE unsigned integer, optional '+', spaces and a trailing '!'
 #: comment (FVCOM's GET_VALUE strips the comment and reads an integer; '3.5' is typed 'float' and
 #: refused by SCAN_FILE(ISCAL=...)).
-_COUNT_VALUE = re.compile(r"\s*\+?([0-9]+)\s*(?:!.*)?")
+# jsasaki 2026-11-05: review round 17 #2: the '!' comment is removed before the value is read
+_COUNT_VALUE = re.compile(r"\s*\+?([0-9]+)\s*")
+# ---> jsasaki 2026-11-05: review round 17 #2 #3: SCAN_FILE's exact keys and its line buffer
+#: The count-header keys FVCOM looks up (SCAN_FILE(..., "Node Number", ...) in mod_input.F), compared
+#: case-sensitively and in full with TRIM(VARNAME) == TRIM(VNAME) (mod_utils.F).
+_COUNT_KEYS = {"Node Number": "node", "Cell Number": "nele"}
+#: GET_VALUE's VARNAME is CHARACTER(LEN=40): the key is cut to 40 characters before the comparison.
+_VARNAME_LEN = 40
+#: SCAN_FILE reads each header line into CHARACTER(LEN=400) :: INPLINE; later characters are lost.
+_INPLINE_LEN = 400
+
+
+def _split_header(text: str) -> tuple[str, str] | None:
+    """``(key, value)`` of a header line as GET_VALUE sees it, or ``None`` (no ``=``: no data).
+
+    ADJUSTL (spaces only), then commas become blanks, then the ``!`` comment is removed; the key
+    is everything before the first ``=``, cut to 40 characters, trailing blanks trimmed.
+    """
+    t = text.lstrip(" ")
+    if not t or t.startswith("!"):
+        return None
+    t = t.replace(",", " ").split("!", 1)[0]
+    key, eq, val = t.partition("=")
+    if not eq:
+        return None
+    return key[:_VARNAME_LEN].rstrip(" "), val
+
+
+def _header_key(raw: str, lineno: int, path: Path) -> str | None:
+    """``"node"`` / ``"nele"`` for a ``Node Number`` / ``Cell Number`` header line, else ``None``.
+
+    A count header whose reading depends on characters beyond column 400 (where FVCOM's
+    SCAN_FILE cuts the line) is refused instead of being read differently from FVCOM.
+    """
+    full = _split_header(raw)
+    kf = _COUNT_KEYS.get(full[0]) if full else None
+    view = _split_header(raw[:_INPLINE_LEN])
+    kv = _COUNT_KEYS.get(view[0]) if view else None
+    if (kf or kv) and len(raw.rstrip(" ")) > _INPLINE_LEN:
+        raise ValueError(
+            f"{path}: line {lineno}: count header is {len(raw.rstrip(' '))} characters long; "
+            f"FVCOM's SCAN_FILE reads only the first {_INPLINE_LEN} characters of a header line"
+        )
+    return kf
 
 
 def _header_count(raw: str, lineno: int, path: Path) -> int:
     """The count N of a ``Node Number = N`` / ``Cell Number = N`` header line (N >= 1)."""
-    _key, eq, val = raw.partition("=")
-    m = _COUNT_VALUE.fullmatch(val) if eq else None
+    kv = _split_header(raw)
+    m = _COUNT_VALUE.fullmatch(kv[1]) if kv else None
     if m is None or int(m[1]) < 1:
         raise ValueError(
             f"{path}: line {lineno}: count header {raw.strip()!r} must be "
             "'<name> = N' with N one positive integer"
         )
     return int(m[1])
+
+
+# <--- jsasaki 2026-11-05
 
 
 # jsasaki 2026-11-05: review round 16 #3: a record is the text before its first '!' (attached comments too)
@@ -59,6 +106,12 @@ def _is_comment(raw: str) -> bool:
     """A comment-only line (nothing but blanks before ``!``); blank lines are dropped before this is asked."""
     # jsasaki 2026-11-05: review round 16 #3: same definition as the record body
     return not _body(raw).strip()
+
+
+# jsasaki 2026-11-05: review round 17 #4: FVCOM reads records list-directed; commas separate fields
+def _fields(raw: str) -> list[str]:
+    """The list-directed fields of a record (comment removed, commas and blanks as separators)."""
+    return list_fields(_body(raw))
 
 
 # <--- jsasaki 2026-11-05
@@ -91,24 +144,21 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     # first record that reads as four integers (READ_COLDSTART_GRID); both headers must come before it
     # and within the 200 lines SCAN_FILE scans.
     # jsasaki 2026-11-05: review round 16 #3: tokenise the record without its '!' comment
+    # jsasaki 2026-11-05: review round 17 #4: commas separate fields like blanks
     start = next(
         (
             k
             for k, (_n, ln) in enumerate(lines)
-            if len(_body(ln).split()) >= 4
-            and all(_is_int(t) for t in _body(ln).split()[:4])
+            if len(_fields(ln)) >= 4 and all(_is_int(t) for t in _fields(ln)[:4])
         ),
         len(lines),
     )
     counts: dict[str, int] = {}
     for k, (lineno, raw) in enumerate(lines):
-        # jsasaki 2026-11-05: review round 14 #3: FVCOM's SCAN_FILE matches ADJUSTL(TLINE); spaces only
-        low = raw.lstrip(" ").lower()
-        if low.startswith("node number"):
-            key = "node"
-        elif low.startswith("cell number") or low.startswith("elem number"):
-            key = "nele"
-        else:
+        # jsasaki 2026-11-05: review round 17 #2 #3: the complete case-sensitive key of ADJUSTL(TLINE),
+        # as SCAN_FILE compares it ('node number', 'Node Number unused', 'Elem Number' are no headers)
+        key = _header_key(raw, lineno, path)
+        if key is None:
             continue
         if k >= start:
             raise ValueError(
@@ -127,7 +177,11 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
             )
         counts[key] = _header_count(raw, lineno, path)
     if "node" not in counts or "nele" not in counts:
-        raise ValueError("Node/Cell counts not found in DAT file")
+        # jsasaki 2026-11-05: review round 17 #2: name the exact keys FVCOM looks up
+        raise ValueError(
+            "Node/Cell counts not found in DAT file (FVCOM looks up the exact, "
+            "case-sensitive header keys 'Node Number' and 'Cell Number')"
+        )
     node, nele = counts["node"], counts["nele"]
     idx = start
     # <--- jsasaki 2026-11-05
@@ -139,8 +193,8 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     seen_elem: NDArray[np.bool_] = np.zeros(nele, dtype=bool)
     while read_elem < nele and idx < len(lines):
         # jsasaki 2026-11-05: review round 15 #3: lines carry their line numbers
-        # jsasaki 2026-11-05: review round 16 #3: tokenise the record without its '!' comment
-        parts = _body(lines[idx][1]).split()
+        # jsasaki 2026-11-05: review round 17 #4: list-directed fields of the comment-free record
+        parts = _fields(lines[idx][1])
         idx += 1
         # jsasaki 2026-11-05: review round 12 #3: FVCOM reads J,N1,N2,N3; extra columns are unused
         if len(parts) < 4 or not all(_is_int(t) for t in parts[:4]):
@@ -178,7 +232,8 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     if not allow_unordered:
         nxt = next((ln for ln in lines[idx:] if not _is_comment(ln[1])), None)
         # jsasaki 2026-11-05: review round 16 #3: tokenise the record without its '!' comment
-        tok = _body(nxt[1]).split()[:4] if nxt is not None else []
+        # jsasaki 2026-11-05: review round 17 #4: list-directed fields of the comment-free record
+        tok = _fields(nxt[1])[:4] if nxt is not None else []
         if len(tok) == 4 and all(_is_int(t) for t in tok) and int(tok[0]) != 1:
             assert nxt is not None
             raise ValueError(
@@ -197,8 +252,8 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     seen: NDArray[np.bool_] = np.zeros(node, dtype=bool)
     while read_node < node and idx < len(lines):
         # jsasaki 2026-11-05: review round 15 #3: lines carry their line numbers
-        # jsasaki 2026-11-05: review round 16 #3: tokenise the record without its '!' comment
-        parts = _body(lines[idx][1]).split()
+        # jsasaki 2026-11-05: review round 17 #4: list-directed fields of the comment-free record
+        parts = _fields(lines[idx][1])
         idx += 1
         # jsasaki 2026-11-05: review round 12 #3: FVCOM reads J,X1,Y1; extra columns are unused
         if len(parts) < 3 or not _is_int(parts[0]):

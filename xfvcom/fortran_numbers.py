@@ -13,7 +13,7 @@ import re
 
 import numpy as np
 
-__all__ = ["fortran_real"]
+__all__ = ["fortran_real", "list_fields"]
 
 #: A real literal as Fortran's list-directed READ accepts it (checked against
 #: gfortran and Intel ifx): optional sign, a mantissa with at least one digit
@@ -45,3 +45,26 @@ def fortran_real(tok: str) -> float:
     if not np.isfinite(x):
         raise ValueError(f"'{tok}' is not finite (overflows REAL(DP))")
     return x
+
+
+#: A list-directed value separator: a comma with optional blanks around it, or blanks alone.
+_LIST_SEPARATOR = re.compile(r"\s*,\s*|\s+")
+
+
+def list_fields(body: str) -> list[str]:
+    """Split a record body (comment already removed) into list-directed fields.
+
+    Commas separate values like blanks, as in Fortran's list-directed ``READ``
+    (``400000.0, 3900000.0, 10.0``).  A NULL value -- nothing between two
+    commas, or a leading comma -- is returned as an empty string, which no
+    numeric conversion accepts, so a record relying on Fortran's
+    leave-unchanged semantics for null values is refused by the caller.  A
+    trailing comma ends the record and adds no field.
+    """
+    s = body.strip()
+    if not s:
+        return []
+    fields = _LIST_SEPARATOR.split(s)
+    if fields and fields[-1] == "" and s.endswith(","):
+        fields.pop()
+    return fields

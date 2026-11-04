@@ -56,7 +56,7 @@ _H = np.array([20.0, 20.0, 20.0, 10.0, 100.0])
 
 
 def test_round16_nbsn_order_matches_fvcom():
-    assert [j + 1 for j in _fvcom_boundary_neighbours(0, _NV, [0, 1, 2])] == [
+    assert [j + 1 for j in _fvcom_boundary_neighbours(0, _NV, [0, 1, 2], _X, _Y)] == [
         2,
         5,
         4,

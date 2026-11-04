@@ -35,7 +35,8 @@ import pandas as pd
 from numpy.typing import NDArray
 
 # jsasaki 2026-11-05: review round 14 #2: shared Fortran real-literal conversion
-from xfvcom.fortran_numbers import fortran_real
+# jsasaki 2026-11-05: review round 17 #4: list-directed fields (commas separate like blanks)
+from xfvcom.fortran_numbers import fortran_real, list_fields
 from xfvcom.grid.grid_obj import FvcomGrid
 from xfvcom.io import (
     FullDomainSource,
@@ -104,12 +105,14 @@ def _declared_block(path: Path, header: re.Pattern) -> tuple[int, list[str]]:
 
 # ---> jsasaki 2026-11-05: review round 15 #4: comment-stripped record fields
 def _record_fields(line: str) -> list[str]:
-    """The whitespace-separated fields of a record before any '!' comment.
+    """The list-directed fields (blank- or comma-separated) of a record before any '!' comment.
 
     A comment-only line yields no fields, so it is refused as a malformed record: FVCOM's
     list-directed read would count it as a (bad) row of the block.
     """
-    return line.split("!", 1)[0].split()
+    # jsasaki 2026-11-05: review round 17 #4: commas separate fields like blanks (list-directed READ);
+    # a null value (',,') is an empty field, which the int/real conversion refuses
+    return list_fields(line.split("!", 1)[0])
 
 
 # <--- jsasaki 2026-11-05

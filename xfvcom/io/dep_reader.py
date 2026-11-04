@@ -23,7 +23,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 # jsasaki 2026-11-05: review round 14 #2: FVCOM reads depth records list-directed
-from ..fortran_numbers import fortran_real
+# jsasaki 2026-11-05: review round 17 #4: list-directed fields (commas separate like blanks)
+from ..fortran_numbers import fortran_real, list_fields
 
 __all__ = ["DepData", "read_dep", "write_dep"]
 
@@ -73,7 +74,8 @@ def read_dep(path: str | Path) -> DepData:
     h: NDArray[np.float64] = np.empty(node, dtype=np.float64)
     read = 0
     while read < node and idx < len(lines):
-        parts = lines[idx].split()
+        # jsasaki 2026-11-05: review round 17 #4: commas separate fields like blanks (list-directed READ)
+        parts = list_fields(lines[idx])
         idx += 1
         if len(parts) < 3:
             continue

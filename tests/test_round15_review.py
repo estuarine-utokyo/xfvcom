@@ -124,7 +124,8 @@ def test_round15_no_shape_assert_left():
     ],
 )
 def test_round15_malformed_count_headers_are_refused(tmp_path, head):
-    with pytest.raises(ValueError, match="positive integer"):
+    # jsasaki 2026-11-05: review round 17 #2: a line without '=' is no header for SCAN_FILE (not found)
+    with pytest.raises(ValueError, match="positive integer|counts not found"):
         read_dat(_mesh(tmp_path, head + _ELEM + _NODES))
 
 
