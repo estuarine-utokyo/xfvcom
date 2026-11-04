@@ -299,6 +299,99 @@ def _save_profile_cache(cache_dir, year, fingerprint, raw):
             tmp.unlink()
 
 
+# jsasaki 2026-11-05: review round 7 #1: new helper -- an external per-node
+# coordinate must be tied to the requested OBC nodes by id and by depth
+def load_siglev_npz(
+    path: Path,
+    obc_ids: np.ndarray,
+    obc_h: np.ndarray,
+    ignore_depth: bool = False,
+    depth_tol: float = 1e-3,
+) -> np.ndarray:
+    """Load an explicit per-node OBC coordinate, ordered like ``obc_ids``.
+
+    The npz holds ``siglev`` (n_obc, KB) and, for identity checks,
+    ``obc_node`` (1-based node ids, row order of ``siglev``) and ``h``
+    (depth in m that each row was built for). With ``obc_node`` the rows are
+    reordered by id to the OBC list order; the id sets must be identical. With
+    ``h`` the recorded depths must equal ``obc_h`` (the depths the runner
+    samples at) within ``depth_tol`` m unless ``ignore_depth``. Missing keys
+    only produce a warning (identity unverified). Returns (n_obc, KB) float64.
+    Raises ValueError on any mismatch.
+    """
+    obc_ids = np.asarray(obc_ids, dtype=np.int64)
+    with np.load(path) as d:
+        if "siglev" not in d.files:
+            raise ValueError(f"--siglev-npz {path} has no array 'siglev'")
+        z = np.asarray(d["siglev"], dtype=np.float64)
+        ids = np.asarray(d["obc_node"]) if "obc_node" in d.files else None
+        h_rec = np.asarray(d["h"], dtype=np.float64) if "h" in d.files else None
+    if z.ndim != 2 or z.shape[1] < 2:
+        raise ValueError(f"--siglev-npz 'siglev' must be (n_obc, KB), got {z.shape}")
+    if not np.all(np.isfinite(z)):
+        raise ValueError("--siglev-npz 'siglev' holds non-finite values")
+    if z.shape[0] != obc_ids.shape[0]:
+        raise ValueError(
+            f"--siglev-npz has {z.shape[0]} nodes != OBC list {obc_ids.shape[0]}"
+        )
+    if h_rec is not None and h_rec.shape != (z.shape[0],):
+        raise ValueError(
+            f"--siglev-npz 'h' has shape {h_rec.shape}, expected ({z.shape[0]},)"
+        )
+    if ids is None:
+        print(
+            f"WARNING: --siglev-npz {path} has no 'obc_node' array: node identity "
+            "could NOT be verified; rows are assumed to follow the OBC list order"
+        )
+    else:
+        if ids.shape != (z.shape[0],):
+            raise ValueError(
+                f"--siglev-npz 'obc_node' has shape {ids.shape}, expected ({z.shape[0]},)"
+            )
+        if not np.issubdtype(ids.dtype, np.integer):
+            raise ValueError(
+                f"--siglev-npz 'obc_node' must be integer, got {ids.dtype}"
+            )
+        ids = ids.astype(np.int64)
+        if np.unique(ids).size != ids.size:
+            raise ValueError("--siglev-npz 'obc_node' holds duplicate node ids")
+        if set(ids.tolist()) != set(obc_ids.tolist()):
+            only_npz = sorted(set(ids.tolist()) - set(obc_ids.tolist()))
+            only_obc = sorted(set(obc_ids.tolist()) - set(ids.tolist()))
+            raise ValueError(
+                "--siglev-npz 'obc_node' differs from the OBC list: "
+                f"only in npz {only_npz}, only in OBC list {only_obc}"
+            )
+        pos = {int(n): i for i, n in enumerate(ids)}
+        order = np.array([pos[int(n)] for n in obc_ids], dtype=np.int64)
+        if not np.array_equal(order, np.arange(order.size)):
+            print("[siglev-npz] rows reordered by node id to the OBC list order")
+        z = z[order]
+        if h_rec is not None:
+            h_rec = h_rec[order]
+    if h_rec is None:
+        print(
+            f"WARNING: --siglev-npz {path} has no 'h' array: the depths the "
+            "coordinate was built for could NOT be verified"
+        )
+    else:
+        obc_h = np.asarray(obc_h, dtype=np.float64)
+        diff = np.abs(h_rec - obc_h)
+        dmax = float(np.max(diff)) if diff.size else 0.0
+        if not np.all(np.isfinite(diff)) or dmax > depth_tol:
+            k = int(np.nanargmax(diff)) if np.any(np.isfinite(diff)) else 0
+            msg = (
+                f"--siglev-npz recorded depths 'h' differ from the selected OBC "
+                f"depths by up to {dmax:.6g} m (node {int(obc_ids[k])}: npz "
+                f"{h_rec[k]:.6g} m vs depth file {obc_h[k]:.6g} m; tolerance "
+                f"{depth_tol:g} m) -- wrong depth file or wrong npz?"
+            )
+            if not ignore_depth:
+                raise ValueError(msg)
+            print("WARNING (--siglev-npz-ignore-depth): " + msg)
+    return z
+
+
 def _process_year(
     year,
     region_nc,
@@ -462,6 +555,7 @@ def main() -> int:
         "the model's actual sigma-z layer depths. Requires --fvcom-grid + "
         "--fvcom-dep to match the grid the sigma.dat was built for.",
     )
+    # jsasaki 2026-11-05: review round 7 #1: help names the identity arrays
     parser.add_argument(
         "--siglev-npz",
         type=Path,
@@ -469,7 +563,16 @@ def main() -> int:
         help="npz with array 'siglev' of shape (n_obc, KB): an EXPLICIT per-node "
         "OBC vertical coordinate (sigma levels, 0..-1) built externally -- e.g. "
         "the LSC2 surface-aligned per-column grid, which has no sigma.dat. "
-        "Overrides --n-siglay; mutually exclusive with --sigma-dat.",
+        "Overrides --n-siglay; mutually exclusive with --sigma-dat. "
+        "Optional arrays 'obc_node' (node ids) and 'h' (depths) are checked "
+        "against the OBC list and the depth file (rows reordered by id).",
+    )
+    # jsasaki 2026-11-05: review round 7 #1: explicit override of the depth check
+    parser.add_argument(
+        "--siglev-npz-ignore-depth",
+        action="store_true",
+        help="warn instead of stopping when the --siglev-npz 'h' depths differ "
+        "from the selected OBC depths (default: stop)",
     )
     parser.add_argument(
         "--obc-depth-control",
@@ -645,11 +748,16 @@ def main() -> int:
     if args.siglev_npz is not None:
         if args.sigma_dat is not None:
             sys.exit("--siglev-npz and --sigma-dat are mutually exclusive")
-        z_obc = np.load(args.siglev_npz)["siglev"].astype(np.float64)  # (n_obc, KB)
-        if z_obc.shape[0] != obc_ids.shape[0]:
-            sys.exit(
-                f"--siglev-npz has {z_obc.shape[0]} nodes != OBC list {obc_ids.shape[0]}"
-            )
+        # jsasaki 2026-11-05: review round 7 #1: verify node ids / depths, reorder by id
+        try:
+            z_obc = load_siglev_npz(
+                args.siglev_npz,
+                obc_ids,
+                obc_h_fvcom,
+                ignore_depth=args.siglev_npz_ignore_depth,
+            )  # (n_obc, KB), OBC list order
+        except ValueError as e:
+            sys.exit(str(e))
         siglev_per_node = z_obc.T  # (KB, n_obc)
         siglay_per_node = 0.5 * (siglev_per_node[:-1] + siglev_per_node[1:])
         print(

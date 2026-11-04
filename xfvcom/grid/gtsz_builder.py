@@ -158,12 +158,23 @@ def grassfire_href(
 
     href = h.copy()
     sweeps = 0
+    # jsasaki 2026-11-05: review round 7 #6: track convergence; an exhausted
+    # sweep budget is an error, as in mod_setup.F (FATAL_ERROR), not a result
+    dchg = np.inf
     for sweeps in range(1, max_sweep + 1):
         before = href.copy()
         np.minimum.at(href, b, href[a] + w)  # relax a -> b
         np.minimum.at(href, a, href[b] + w)  # relax b -> a (sees the a->b update)
-        if float(np.max(before - href)) < tol:
+        dchg = float(np.max(before - href)) if href.size else 0.0
+        if dchg < tol:
             break
+    if not dchg < tol:
+        raise RuntimeError(
+            f"grassfire_href: H_ref did not converge within max_sweep={max_sweep} "
+            f"sweeps (last sweep changed H_ref by {dchg:.6g} m >= tol={tol:g} m); "
+            "the result would violate the SMAX slope limit -- check smax/the mesh "
+            "or raise max_sweep"
+        )
     np.minimum(href, h, out=href)  # safety: H_ref <= H
     return (href, sweeps) if return_sweeps else href
 

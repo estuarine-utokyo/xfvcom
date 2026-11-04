@@ -136,6 +136,26 @@ class GtszSpec:
             raise ValueError(f"GtszSpec: GTSZ BASE must be 1/2/3, got {self.base}")
         if not (0 <= self.nz <= 500):
             raise ValueError(f"GtszSpec: require 0 <= GTSZ NZ <= 500, got {self.nz}")
+        # jsasaki 2026-11-05: review round 7 #4: shape-parameter checks of
+        # mod_setup.F SIGMA_GTSZ (evaluated for every column path)
+        if self.base == 2 and not (np.isfinite(self.p1) and self.p1 > 0.0):
+            raise ValueError(
+                f"GtszSpec: GTSZ P1 must be finite and > 0 for GTSZ BASE=2 (got {self.p1})"
+            )
+        if self.base == 3:
+            if not (np.isfinite(self.l1) and np.isfinite(self.l2)):
+                raise ValueError(
+                    f"GtszSpec: GTSZ L1/L2 must be finite (got {self.l1}, {self.l2})"
+                )
+            if not abs(np.tanh(self.l1) + np.tanh(self.l2)) >= SMALL:
+                raise ValueError(
+                    "GtszSpec: tanh(GTSZ L1)+tanh(GTSZ L2) ~ 0: the A3 shape "
+                    "denominator is singular"
+                )
+        if not (np.isfinite(self.smooth) and self.smooth >= 0.0):
+            raise ValueError(
+                f"GtszSpec: GTSZ SMOOTH must be finite and >= 0 (got {self.smooth})"
+            )
         if len(self.zlev) != self.nz:
             raise ValueError(f"GtszSpec: len(ZLEV)={len(self.zlev)} != NZ={self.nz}")
         # mod_input.F:5166-5173 ZLEV contract (checked at parse time in FVCOM,
@@ -198,6 +218,12 @@ class GtszSpec:
             if not (self.have_zband or self.lowsig):
                 raise ValueError(
                     "GtszSpec: GTSZ SADAPT=T requires a z-band (GTSZ NZ > 0)"
+                )
+            # jsasaki 2026-11-05: review round 7 #4: mod_setup.F (review C1):
+            # gentle columns get KBP = K1-1, so K1=1 leaves no active layer
+            if self.k1 < 2:
+                raise ValueError(
+                    f"GtszSpec: GTSZ SADAPT=T requires GTSZ K1 >= 2 (got K1={self.k1})"
                 )
 
     def with_(self, **kw) -> "GtszSpec":
@@ -380,9 +406,13 @@ def build_column_lowsig(
         z[k - 1] = sigref * sband[k - 1]  # upper band [0, sigref]
     if spec.lowfrac:
         # GTSZ LOWFRAC: shaped lower band (cumulative prescribed fractions)
+        # jsasaki 2026-11-05: review round 7 #3: FVCOM renormalises the accepted
+        # fractions (mod_input.F: GTSZ_LOWFRAC / SUM(GTSZ_LOWFRAC)) before use
+        fsum = sum(spec.lowfrac)
+        lowfrac = [f / fsum for f in spec.lowfrac]
         frcum = 0.0
         for k in range(k1 + 1, kb + 1):
-            frcum += spec.lowfrac[k - k1 - 1]
+            frcum += lowfrac[k - k1 - 1]
             z[k - 1] = sigref + (-1.0 - sigref) * frcum
     else:
         for k in range(k1 + 1, kb + 1):

@@ -101,7 +101,15 @@ def connectivity_base(
         return _check_base(start_index, "start_index")
     attr = getattr(da, "attrs", {}).get("start_index")
     if attr is not None:
-        return _check_base(np.asarray(attr).reshape(-1)[0], "start_index attribute")
+        # jsasaki 2026-11-05: review round 7 #7: exactly one value; an empty or
+        # multi-valued attribute is contradictory metadata, not a base
+        flat = np.asarray(attr).reshape(-1)
+        if flat.size != 1:
+            raise ValueError(
+                "nv start_index attribute must hold exactly one value (0 or 1), "
+                f"got {flat.size} values: {flat.tolist()!r}"
+            )
+        return _check_base(flat[0], "start_index attribute")
     if fallback == "min_is_one":
         return 1 if vals.size and vals.min() == 1 else 0
     if fallback == "min_is_zero":
