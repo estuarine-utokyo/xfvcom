@@ -1039,3 +1039,112 @@ def test_round4_fill_marker_is_refused_by_both_writers(generator, tmp_path):
     ):
         write_elevation_nc(out, time_mjd=g.mjd, obc_nodes=g.obc_nodes, elevation=elev)
     assert not out.exists()
+
+
+# ---------------------------------------------------------------------------
+# review round 5 (gpt-6.1-sol)
+# ---------------------------------------------------------------------------
+
+import os  # noqa: E402
+import stat  # noqa: E402
+
+from xfvcom.io import jcope_obc_generator as gen_mod  # noqa: E402
+
+
+def test_round5_undecoded_numeric_region_time_is_refused(synthetic_archive):
+    # #7: Unix seconds without CF units became nanoseconds after 1970
+    basic_path, region_path = synthetic_archive
+    bad = _rewrite_region(
+        region_path,
+        region_path.parent / "secs.nc",
+        lambda ds: ds.assign_coords(
+            time=np.int64(1577836800) + 3600 * np.arange(ds.sizes["time"])
+        ),
+    )
+    with xr.open_dataset(bad) as ds:
+        assert ds["time"].dtype.kind == "i"  # really undecoded on reopening
+    grid = JcopeGrid(basic_path)
+    try:
+        with pytest.raises(ValueError, match="decoded datetimes"):
+            JcopeObcGenerator(**_kw(bad, grid))
+    finally:
+        grid.close()
+
+
+@pytest.mark.parametrize(
+    "times, match",
+    [
+        (
+            pd.DatetimeIndex(["2020-01-01 00:00", "NaT", "2020-01-01 02:00"]),
+            "NaT",
+        ),
+        (
+            pd.DatetimeIndex(
+                ["2020-01-01 00:00", "2020-01-01 02:00", "2020-01-01 01:00"]
+            ),
+            "strictly increasing",
+        ),
+        (
+            pd.DatetimeIndex(
+                ["2020-01-01 00:00", "2020-01-01 00:00", "2020-01-01 01:00"]
+            ),
+            "strictly increasing",
+        ),
+        (np.array([1.0, 2.0, 3.0]), "decoded datetimes"),
+    ],
+)
+def test_round5_region_time_index_validation(times, match):
+    ds = xr.Dataset(coords={"time": times})
+    with pytest.raises(ValueError, match=match):
+        gen_mod._region_time_index(ds, Path("r.nc"))
+
+
+def test_round5_obc_h_fill_marker_is_refused(generator, tmp_path):
+    # #9: obc_h equal to the f4 fill marker was written and read back as masked
+    g = generator
+    h = np.array(g.obc_h_fvcom, dtype=np.float32)
+    h[0] = nc.default_fillvals["f4"]
+    out = tmp_path / "ts.nc"
+    with pytest.raises(ValueError, match="obc_h.*fill marker"):
+        write_tsobc_nc(
+            out,
+            time_mjd=g.mjd,
+            obc_nodes=g.obc_nodes,
+            obc_h=h,
+            siglev=g.siglev,
+            siglay=g.siglay,
+            fields=g.build_tsobc_arrays(),
+        )
+    assert not out.exists()
+    with pytest.raises(ValueError, match="f8 fill marker"):
+        gen_mod._validate_time(np.array([1.0, nc.default_fillvals["f8"]]))
+
+
+def test_round5_writers_do_not_touch_the_process_umask(
+    generator, tmp_path, monkeypatch
+):
+    # #10: os.umask(0) briefly gave every other thread a permissive creation mask
+    g = generator
+    real = os.umask(0o022)
+    os.umask(real)
+    try:
+        os.umask(0o027)
+
+        def _forbidden(*_a, **_k):
+            raise AssertionError("os.umask called by the writer")
+
+        monkeypatch.setattr(os, "umask", _forbidden)
+        assert gen_mod._current_umask() == (
+            0o027 if os.path.exists("/proc/self/status") else gen_mod._DEFAULT_UMASK
+        )
+        out = write_elevation_nc(
+            tmp_path / "e.nc",
+            time_mjd=g.mjd,
+            obc_nodes=g.obc_nodes,
+            elevation=g.build_elevation_array(),
+        )
+        monkeypatch.undo()
+        assert stat.S_IMODE(out.stat().st_mode) == 0o666 & ~gen_mod._current_umask()
+    finally:
+        monkeypatch.undo()
+        os.umask(real)

@@ -197,7 +197,10 @@ def test_round2_compare_checks_alignment_before_values():
     times = pd.date_range("2020-01-01", periods=3, freq="h")
     grid = types.SimpleNamespace(lat=lat, lon=lon)
     src = types.SimpleNamespace(lat=lat, lon=lon, time_index=times)
-    reg = xr.Dataset(coords={"time": times, "level": np.arange(46)})
+    # jsasaki 2026-11-05: review round 5 #11: the region schema (level/lat/lon) is now required
+    reg = xr.Dataset(
+        coords={"time": times, "level": np.arange(46), "lat": lat[:2], "lon": lon[:2]}
+    )
     assert c.check_alignment(src, grid, reg).tolist() == [0, 1, 2]
     with pytest.raises(SystemExit, match="lat/lon"):
         c.check_alignment(
@@ -205,9 +208,9 @@ def test_round2_compare_checks_alignment_before_values():
         )
     bad_t = pd.DatetimeIndex([times[0], times[0], times[2]])
     with pytest.raises(SystemExit, match="duplicate"):
-        c.check_alignment(src, grid, xr.Dataset(coords={"time": bad_t}))
+        c.check_alignment(src, grid, reg.assign_coords(time=bad_t))
     with pytest.raises(SystemExit, match="absent"):
-        c.check_alignment(src, grid, xr.Dataset(coords={"time": times[:2]}))
+        c.check_alignment(src, grid, reg.isel(time=slice(0, 2)))
 
 
 # ---------------------------------------------------------------------------
@@ -267,3 +270,35 @@ def test_round4_time_axis_must_be_real(t):
     # #9: casting complex times to float64 discarded a non-finite imaginary part
     with pytest.raises(SystemExit, match="real numbers"):
         r.check_time_axis([2020], {2020: t})
+
+
+# ---------------------------------------------------------------------------
+# review round 5 (gpt-6.1-sol)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "mutate, match",
+    [
+        (lambda ds: ds.drop_vars("level"), "coordinate level is missing"),
+        (lambda ds: ds.assign_coords(level=np.arange(1, 47)), "level coordinate"),
+        (
+            lambda ds: ds.assign_coords(time=1577836800 + 3600 * np.arange(3)),
+            "decoded datetimes",
+        ),
+    ],
+)
+def test_round5_compare_requires_the_region_schema(mutate, match):
+    # #11: a region file without its level coordinate was compared all the same
+    import compare_jcope_sources as c
+
+    lat = 17.0 + np.arange(4) / 36.0
+    lon = 117.0 + np.arange(5) / 36.0
+    times = pd.date_range("2020-01-01", periods=3, freq="h")
+    grid = types.SimpleNamespace(lat=lat, lon=lon)
+    src = types.SimpleNamespace(lat=lat, lon=lon, time_index=times)
+    reg = xr.Dataset(
+        coords={"time": times, "level": np.arange(46), "lat": lat[:2], "lon": lon[:2]}
+    )
+    with pytest.raises(SystemExit, match=match):
+        c.check_alignment(src, grid, mutate(reg))

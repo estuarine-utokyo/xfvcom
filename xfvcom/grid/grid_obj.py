@@ -41,6 +41,77 @@ class _DatasetLike(Protocol):
     def __contains__(self, key: str) -> bool: ...
 
 
+# jsasaki 2026-11-05: review round 5 #2/#4/#5: connectivity and projection helpers
+def _connectivity_three_by_nele(da: Any) -> NDArray[np.int_]:
+    """Return connectivity as an integer ``(3, nele)`` array, validated first.
+
+    Orientation comes from the dimension names (``three`` / ``nele``) when they
+    are present; only unnamed inputs fall back to the shape, and a 3 x 3 array
+    without names is refused as ambiguous. The values must be real, finite and
+    integral before they are converted (a cast would truncate 0.9 to 0).
+    """
+    vals = np.asarray(getattr(da, "values", da))
+    if vals.ndim != 2:
+        raise ValueError(f"Connectivity (nv) must be 2-D (got shape {vals.shape})")
+    if vals.dtype.kind not in "iuf":
+        raise ValueError(f"Connectivity (nv) must be real numeric (got {vals.dtype})")
+    if vals.dtype.kind == "f":
+        if not np.isfinite(vals).all():
+            raise ValueError("Connectivity (nv) contains non-finite values")
+        if not np.array_equal(vals, np.round(vals)):
+            raise ValueError("Connectivity (nv) contains non-integral values")
+    dims = tuple(str(d) for d in getattr(da, "dims", ()))
+    if "three" in dims or "nele" in dims:
+        if "three" in dims:
+            first = dims.index("three") == 0
+        else:
+            first = dims.index("nele") == 1
+        if not first:
+            vals = vals.T
+    elif vals.shape[0] == 3 and vals.shape[1] != 3:
+        pass
+    elif vals.shape[1] == 3 and vals.shape[0] != 3:
+        vals = vals.T  # (nele,3) -> (3,nele)
+    elif vals.shape == (3, 3):
+        raise ValueError(
+            "Connectivity (nv) of shape (3, 3) without 'three'/'nele' dimension "
+            "names is ambiguous"
+        )
+    if vals.shape[0] != 3:
+        raise ValueError(
+            f"Connectivity (nv) must have a dimension of length 3 (got {vals.shape})"
+        )
+    return np.asarray(vals, dtype=int)
+
+
+def _projection_from_attrs(attrs: Any) -> dict[str, Any]:
+    """Read ``utm_zone`` / ``utm_hemisphere`` written by :meth:`FvcomGrid.to_xarray`.
+
+    Datasets without them (older exports, model output) keep the defaults.
+    """
+    out: dict[str, Any] = {}
+    zone = attrs.get("utm_zone") if hasattr(attrs, "get") else None
+    if zone is not None:
+        z = np.asarray(zone)
+        if (
+            z.size != 1
+            or z.dtype.kind not in "iu"
+            or not 1 <= int(z.reshape(-1)[0]) <= 60
+        ):
+            raise ValueError(
+                f"utm_zone attribute must be an integer 1..60 (got {zone!r})"
+            )
+        out["zone"] = int(z.reshape(-1)[0])
+    hemi = attrs.get("utm_hemisphere") if hasattr(attrs, "get") else None
+    if hemi is not None:
+        if str(hemi) not in ("north", "south"):
+            raise ValueError(
+                f"utm_hemisphere attribute must be 'north' or 'south' (got {hemi!r})"
+            )
+        out["northern"] = str(hemi) == "north"
+    return out
+
+
 # -----------------------------------------------------------------------------
 # Main dataclass
 # -----------------------------------------------------------------------------
@@ -101,10 +172,14 @@ class FvcomGrid:
             raise KeyError("Dataset missing grid vars: " + ", ".join(miss))
 
         # ---- fallback for loose validation --------------------------------
+        # jsasaki 2026-11-05: review round 5 #3: nv_zero is zero-based by definition
+        nv_zero_adopted = False
         if not validate:
             # nv_zero → nv
             if "nv" not in ds and "nv_zero" in ds:
                 ds = ds.assign(nv=ds["nv_zero"])
+                # jsasaki 2026-11-05: review round 5 #3: keep its base unless the caller overrides it
+                nv_zero_adopted = True
             # if planar x/y missing but lon/lat present, copy for plotting
             if "x" not in ds and "lon" in ds:
                 ds = ds.assign(x=ds["lon"])
@@ -120,14 +195,16 @@ class FvcomGrid:
         }
         # ------------------------------------------------------------------
         # nv: ensure (3, nele) shape & 0-based
-        nv_raw = np.asarray(ds["nv"].values, dtype=int)
-        if nv_raw.shape[0] != 3 and nv_raw.shape[1] == 3:
-            nv_raw = nv_raw.T  # (nele,3) → (3,nele)
+        # jsasaki 2026-11-05: review round 5 #2/#4: validated and oriented before integer conversion
+        nv_raw = _connectivity_three_by_nele(ds["nv"])
         # ---> jsasaki 2026-11-05: review round 4 #4: an explicit base (argument, then attribute)
         # wins over the min()==1 inference, which changed zero-based subsets silently
         base = start_index
         if base is None:
             base = getattr(ds["nv"], "attrs", {}).get("start_index")
+        # jsasaki 2026-11-05: review round 5 #3: an adopted nv_zero without a stated base is zero-based
+        if base is None and nv_zero_adopted:
+            base = 0
         if base is not None:
             if isinstance(base, (bool, np.bool_)) or base not in (0, 1):
                 raise ValueError(f"nv start_index must be 0 or 1 (got {base!r})")
@@ -148,6 +225,8 @@ class FvcomGrid:
         nv = kw["nv"]
         kw["xc"] = kw["x"][nv].mean(axis=0)
         kw["yc"] = kw["y"][nv].mean(axis=0)
+        # jsasaki 2026-11-05: review round 5 #5: restore the projection written by to_xarray
+        kw.update(_projection_from_attrs(getattr(ds, "attrs", {})))
 
         return cls(**kw)  # type: ignore[arg-type]
 
@@ -230,6 +309,11 @@ class FvcomGrid:
             },
             attrs={"cf_role": "mesh_topology"},
         )
+        # ---> jsasaki 2026-11-05: review round 5 #5: the projection survives a round trip
+        if self.zone is not None:
+            ds.attrs["utm_zone"] = int(self.zone)
+        ds.attrs["utm_hemisphere"] = "north" if self.northern else "south"
+        # <--- jsasaki 2026-11-05
         if self.lon is not None:
             ds["lon"] = ("node", self.lon)
         if self.lat is not None:
@@ -628,6 +712,8 @@ class FvcomGrid:
 
         polygon: list[tuple[float, float]] = []
         polygon.append(_edge_midpoint(start_edge))
+        # jsasaki 2026-11-05: review round 5 #1: last edge whose midpoint was appended
+        last_edge: tuple[int, int] | None = None
 
         visited_triangles: set[int] = set()
         current_triangle = start_triangle
@@ -662,6 +748,8 @@ class FvcomGrid:
                 )
 
             polygon.append(_edge_midpoint(outgoing_edge))
+            # jsasaki 2026-11-05: review round 5 #1: remember the edge for the topological closure test
+            last_edge = outgoing_edge
 
             neighbors = [
                 tri
@@ -686,9 +774,12 @@ class FvcomGrid:
             current_edge = outgoing_edge
             current_triangle = next_triangle
 
-        # Remove duplicated final midpoint for interior nodes
-        if polygon and np.allclose(polygon[0], polygon[-1]):
+        # ---> jsasaki 2026-11-05: review round 5 #1: decide the closure by topology. np.allclose
+        # (rtol=1e-5) treated distinct boundary midpoints as equal at UTM magnitudes and dropped a vertex.
+        # Remove duplicated final midpoint for interior nodes: the walk returned to the start edge
+        if len(polygon) > 1 and last_edge == start_edge:
             polygon.pop()
+        # <--- jsasaki 2026-11-05
 
         # Boundary nodes include the node itself to trace along the coastline/open boundary
         if node_boundary_edges:
@@ -834,13 +925,13 @@ class FvcomGrid:
             if len(polygon) < 3:
                 continue
 
-            # Calculate area using shoelace formula
-            area = 0.0
-            n = len(polygon)
-            for i in range(n):
-                j = (i + 1) % n
-                area += polygon[i][0] * polygon[j][1]
-                area -= polygon[j][0] * polygon[i][1]
+            # ---> jsasaki 2026-11-05: review round 5 #1: shoelace on coordinates relative to the
+            # first vertex, so the area does not lose precision (or change) with the mesh origin
+            pts = np.asarray(polygon, dtype=float)
+            px = pts[:, 0] - pts[0, 0]
+            py = pts[:, 1] - pts[0, 1]
+            area = float(np.sum(px * np.roll(py, -1) - np.roll(px, -1) * py))
+            # <--- jsasaki 2026-11-05
 
             area = abs(area) / 2.0
             total_area += area

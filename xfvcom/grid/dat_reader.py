@@ -62,6 +62,8 @@ def read_dat(path: str | Path) -> _GridData:
     # ----------------------------------------------------- element block (comes first)
     nv: NDArray[np.int_] = np.empty((3, nele), dtype=np.int_)
     read_elem = 0
+    # jsasaki 2026-11-05: review round 5 #6: element records are placed by their own id (1..nele, unique)
+    seen_elem: NDArray[np.bool_] = np.zeros(nele, dtype=bool)
     while read_elem < nele and idx < len(lines):
         parts = lines[idx].split()
         idx += 1
@@ -73,7 +75,15 @@ def read_dat(path: str | Path) -> _GridData:
             raise ValueError(
                 f"element {parts[0]}: node id(s) {ids} outside 1..{node} (1-based)"
             )
-        nv[:, read_elem] = [ids[0] - 1, ids[1] - 1, ids[2] - 1]
+        # ---> jsasaki 2026-11-05: review round 5 #6: the record id, not the row position, selects the column
+        eid = int(parts[0])
+        if eid < 1 or eid > nele:
+            raise ValueError(f"element record id {eid} outside 1..{nele} (1-based)")
+        if seen_elem[eid - 1]:
+            raise ValueError(f"element record id {eid} appears more than once")
+        seen_elem[eid - 1] = True
+        nv[:, eid - 1] = [ids[0] - 1, ids[1] - 1, ids[2] - 1]
+        # <--- jsasaki 2026-11-05
         read_elem += 1
     if read_elem != nele:
         raise ValueError(f"Element block ended prematurely ({read_elem}/{nele})")

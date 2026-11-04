@@ -63,8 +63,22 @@ class JcopeGrid:
         # Small, eagerly cached
         self.lat: NDArray[np.float64] = np.asarray(self._ds["lat"].values)
         self.lon: NDArray[np.float64] = np.asarray(self._ds["lon"].values)
-        self.h: NDArray[np.float32] = np.asarray(self._ds["h"].values)
-        self.mask: NDArray[np.bool_] = np.asarray(self._ds["mask"].values, dtype=bool)
+        # ---> jsasaki 2026-11-05: review round 5 #8: on a square grid the shape cannot tell (lat, lon)
+        # from (lon, lat); the dimension names decide, and the arrays are read in (lat, lon) order
+        for name in ("h", "mask"):
+            dims = tuple(self._ds[name].dims)
+            if sorted(dims) != ["lat", "lon"]:
+                self._ds.close()
+                raise ValueError(
+                    f"{self._path}: {name} must have dimensions (lat, lon) (got {dims})"
+                )
+        self.h: NDArray[np.float32] = np.asarray(
+            self._ds["h"].transpose("lat", "lon").values
+        )
+        self.mask: NDArray[np.bool_] = np.asarray(
+            self._ds["mask"].transpose("lat", "lon").values, dtype=bool
+        )
+        # <--- jsasaki 2026-11-05
 
         # Grid origin / spacing (must be present)
         self.lon_origin: float = float(self._ds.attrs["grid_origin_lon"])

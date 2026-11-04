@@ -272,8 +272,11 @@ class JcopeObcGenerator:
 
         # Time axis converted to MJD float64 once
         # jsasaki 2026-11-04: full-domain archive source (FullDomainSource)
-        time_index = pd.DatetimeIndex(
-            self._src.time_index if self._src is not None else self._ds["time"].values
+        # jsasaki 2026-11-05: review round 5 #7: the region file's time must be decoded datetimes
+        time_index = (
+            pd.DatetimeIndex(self._src.time_index)
+            if self._src is not None
+            else _region_time_index(self._ds, self.region_nc_path)
         )
         self.mjd: NDArray[np.float64] = to_mjd(time_index)
         # Back-compat alias for code that referenced the underscored name.
@@ -724,6 +727,9 @@ def _validate_time(time_mjd: ArrayLike) -> NDArray[np.float64]:
         raise ValueError("time_mjd must be a non-empty, finite 1-D array")
     if (np.diff(t) <= 0).any():
         raise ValueError("time_mjd must be strictly increasing")
+    # jsasaki 2026-11-05: review round 5 #9: time is written as f8; its fill marker reads back as missing
+    if (t == F8_FILL).any():
+        raise ValueError("time_mjd contains the netCDF f8 fill marker")
     return t
 
 
@@ -753,6 +759,8 @@ def _to_float32(a: NDArray) -> NDArray[np.float32]:
 # netCDF fill marker refused
 # The fill marker of the f4 forcing variables: a finite value equal to it reads back as missing.
 F4_FILL = np.float32(nc.default_fillvals["f4"])
+# jsasaki 2026-11-05: review round 5 #9: the f8 marker of the time variable (read once at import)
+F8_FILL = np.float64(nc.default_fillvals["f8"])
 
 
 def _as_float32(values: ArrayLike, label: str) -> NDArray[np.float32]:
@@ -831,13 +839,53 @@ def _validate_region_schema(ds: xr.Dataset, path: Path) -> None:
 # <--- jsasaki 2026-11-05
 
 
+# ---> jsasaki 2026-11-05: review round 5 #7: undecoded numeric time (e.g. Unix seconds without CF
+# units) was read by DatetimeIndex as nanoseconds since 1970 and passed every later check
+def _region_time_index(ds: xr.Dataset, path: Path) -> pd.DatetimeIndex:
+    """The region file's time coordinate as a DatetimeIndex: decoded, no NaT, strictly increasing."""
+    t = np.asarray(ds["time"].values)
+    if t.ndim != 1 or t.size == 0 or t.dtype.kind != "M":
+        raise ValueError(
+            f"{path}: the time coordinate must be a non-empty 1-D array of decoded datetimes "
+            f"(got dtype {t.dtype}, shape {t.shape}); open the file with CF time decoding "
+            "and give the time variable CF units"
+        )
+    idx = pd.DatetimeIndex(t)
+    if idx.hasnans:
+        raise ValueError(f"{path}: the time coordinate has missing (NaT) entries")
+    if (np.diff(idx.asi8) <= 0).any():
+        raise ValueError(
+            f"{path}: the time coordinate must be strictly increasing "
+            "(no duplicate or decreasing times)"
+        )
+    return idx
+
+
+# <--- jsasaki 2026-11-05
+
+
 # ---------- module-level NC writers ---------- #
 
 
+# ---> jsasaki 2026-11-05: review round 5 #10: never change the process umask to read it. os.umask(x)
+# is process-wide, so even a set-and-restore pair briefly gives other threads the wrong creation mode.
+# Linux reports the umask read-only in /proc/self/status ("Umask:" line, kernel >= 4.7); elsewhere,
+# or if that line is absent, the conventional 0o022 is assumed.
+_DEFAULT_UMASK = 0o022
+
+
 def _current_umask() -> int:
-    mask = os.umask(0)
-    os.umask(mask)
-    return mask
+    try:
+        with open("/proc/self/status", encoding="ascii", errors="replace") as fh:
+            for line in fh:
+                if line.startswith("Umask:"):
+                    return int(line.split()[1], 8) & 0o777
+    except (OSError, ValueError, IndexError):
+        pass
+    return _DEFAULT_UMASK
+
+
+# <--- jsasaki 2026-11-05
 
 
 def _atomic_write(out_path: str | Path, write: Callable[[Path], None]) -> Path:
@@ -904,6 +952,13 @@ def write_tsobc_nc(
     obc_h = _to_float32(_plain_float(obc_h, "obc_h"))
     if obc_h.shape != (n_obc,) or not (np.isfinite(obc_h).all() and (obc_h > 0).all()):
         raise ValueError(f"obc_h must be {n_obc} finite positive depths")
+    # ---> jsasaki 2026-11-05: review round 5 #9: the f4 fill marker reads back as masked. siglev/siglay
+    # are confined to [-1, 0] by _validate_sigma and time is checked in _validate_time.
+    if (obc_h == F4_FILL).any():
+        raise ValueError(
+            f"obc_h: value {float(F4_FILL):g} is the netCDF fill marker (read back as missing)"
+        )
+    # <--- jsasaki 2026-11-05
     # siglay/siglev may be 1-D (uniform, broadcast across nodes) or 2-D
     # (n_sig, n_obc) for a per-node sigma-z grid — take the layer count from
     # the leading axis either way.

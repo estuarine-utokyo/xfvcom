@@ -330,3 +330,61 @@ def test_round3_ties_go_to_the_first_cell_in_j_i_order(tmp_path):
         assert (int(j), int(i)) == (1, 1)
         j, i = g.find_nearest_ocean([1.5, 2.2], [1.5, 3.0])
         assert j.tolist() == [1, 2] and i.tolist() == [1, 3]
+
+
+# ---------------------------------------------------------------------------
+# review round 5 (gpt-6.1-sol)
+# ---------------------------------------------------------------------------
+
+
+def _square_basic(path, mask, *, order=("lat", "lon")):
+    """Square unit-grid basic.nc whose h / mask are stored in the given dimension order."""
+    n = mask.shape[0]
+    h = np.where(mask, 10.0 + np.arange(n)[:, None] + 100.0 * np.arange(n), 0.0)
+    with nc.Dataset(path, "w") as ds:
+        ds.createDimension("lat", n)
+        ds.createDimension("lon", n)
+        ds.createDimension("level", 2)
+        ds.createVariable("lat", "f8", ("lat",))[:] = np.arange(n, dtype=float)
+        ds.createVariable("lon", "f8", ("lon",))[:] = np.arange(n, dtype=float)
+        t = order != ("lat", "lon")
+        ds.createVariable("h", "f4", order)[:] = h.T if t else h
+        ds.createVariable("mask", "i1", order)[:] = (mask.T if t else mask).astype(
+            np.int8
+        )
+        ds.createVariable("ZZ", "f4", ("level", "lat", "lon"))[:] = -1.0
+        ds.grid_origin_lat = ds.grid_origin_lon = 0.0
+        ds.grid_dy_deg = ds.grid_dx_deg = 1.0
+    return path
+
+
+def test_round5_square_grid_h_and_mask_follow_their_dimension_names(tmp_path):
+    # #8: on a square grid, (lon, lat) storage passed the shape check and transposed the lookup
+    mask = np.zeros((8, 8), dtype=bool)
+    mask[3, 6] = True  # the only ocean cell: (j=3, i=6)
+    ref = _square_basic(tmp_path / "a.nc", mask)
+    tr = _square_basic(tmp_path / "b.nc", mask, order=("lon", "lat"))
+    with JcopeGrid(ref) as a, JcopeGrid(tr) as b:
+        np.testing.assert_array_equal(a.mask, b.mask)
+        np.testing.assert_array_equal(a.h, b.h)
+        for g in (a, b):
+            j, i = g.find_nearest_ocean(5.0, 6.0)
+            assert (int(j), int(i)) == (3, 6)
+            assert float(g.h_at(3.0, 6.0)) == float(a.h[3, 6])
+
+
+def test_round5_unknown_h_dimensions_are_refused(tmp_path):
+    p = tmp_path / "c.nc"
+    with nc.Dataset(p, "w") as ds:
+        for d in ("lat", "lon", "y", "x"):
+            ds.createDimension(d, 4)
+        ds.createDimension("level", 2)
+        ds.createVariable("lat", "f8", ("lat",))[:] = np.arange(4.0)
+        ds.createVariable("lon", "f8", ("lon",))[:] = np.arange(4.0)
+        ds.createVariable("h", "f4", ("y", "x"))[:] = 10.0
+        ds.createVariable("mask", "i1", ("lat", "lon"))[:] = 1
+        ds.createVariable("ZZ", "f4", ("level", "lat", "lon"))[:] = -1.0
+        ds.grid_origin_lat = ds.grid_origin_lon = 0.0
+        ds.grid_dy_deg = ds.grid_dx_deg = 1.0
+    with pytest.raises(ValueError, match=r"h must have dimensions \(lat, lon\)"):
+        JcopeGrid(p)

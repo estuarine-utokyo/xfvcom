@@ -25,6 +25,12 @@ from run_jcope_obc import parse_obc_dat  # noqa: E402
 from xfvcom.grid.grid_obj import FvcomGrid  # noqa: E402
 from xfvcom.io import FullDomainSource, JcopeGrid  # noqa: E402
 
+# jsasaki 2026-11-05: review round 5 #11: share the generator's regional-schema validation
+from xfvcom.io.jcope_obc_generator import (  # noqa: E402
+    _region_time_index,
+    _validate_region_schema,
+)
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 STEP = {"TT": 0.01, "ST": 0.01, "UT": 0.001, "VT": 0.001, "EGT": 0.001}
@@ -66,14 +72,16 @@ def check_alignment(src, grid, reg) -> np.ndarray:
         and np.allclose(src.lon, grid.lon, rtol=0, atol=AXIS_ATOL)
     ):
         sys.exit("the archive's lat/lon axes are not the grid file's")
-    if "level" in reg.variables and not np.array_equal(
-        np.asarray(reg["level"].values), np.arange(46)
-    ):
-        sys.exit("the region file's level axis is not 0..45")
-    r_time = pd.DatetimeIndex(reg["time"].values)
+    # ---> jsasaki 2026-11-05: review round 5 #11: the generator's regional schema (time/level/lat/lon
+    # on their own dimensions, level exactly 0..45) and decoded, strictly increasing time are required
+    label = Path(str(reg.encoding.get("source", "the region file")))
+    try:
+        _validate_region_schema(reg, label)
+        r_time = _region_time_index(reg, label)
+    except ValueError as exc:
+        sys.exit(str(exc))
+    # <--- jsasaki 2026-11-05
     want = pd.DatetimeIndex(src.time_index)
-    if not r_time.is_unique:
-        sys.exit("the region file's time axis has duplicate times")
     pos = r_time.get_indexer(want)
     if (pos < 0).any():
         sys.exit(
