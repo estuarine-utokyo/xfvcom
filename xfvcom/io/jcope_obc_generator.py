@@ -32,6 +32,9 @@ from __future__ import annotations
 
 import os
 
+# jsasaki 2026-11-05: review round 6 #4: permission bits of a replaced destination
+import stat
+
 # jsasaki 2026-11-05: review round 2 #16: unique temporary files
 import tempfile
 from datetime import datetime, timezone
@@ -869,12 +872,10 @@ def _region_time_index(ds: xr.Dataset, path: Path) -> pd.DatetimeIndex:
 
 # ---> jsasaki 2026-11-05: review round 5 #10: never change the process umask to read it. os.umask(x)
 # is process-wide, so even a set-and-restore pair briefly gives other threads the wrong creation mode.
-# Linux reports the umask read-only in /proc/self/status ("Umask:" line, kernel >= 4.7); elsewhere,
-# or if that line is absent, the conventional 0o022 is assumed.
-_DEFAULT_UMASK = 0o022
-
-
-def _current_umask() -> int:
+# Linux reports the umask read-only in /proc/self/status ("Umask:" line, kernel >= 4.7).
+# jsasaki 2026-11-05: review round 6 #4: elsewhere it is unknown (None); assuming 0o022 widened
+# files written under a stricter mask, so the caller then keeps the temporary file's 0600.
+def _current_umask() -> int | None:
     try:
         with open("/proc/self/status", encoding="ascii", errors="replace") as fh:
             for line in fh:
@@ -882,7 +883,7 @@ def _current_umask() -> int:
                     return int(line.split()[1], 8) & 0o777
     except (OSError, ValueError, IndexError):
         pass
-    return _DEFAULT_UMASK
+    return None
 
 
 # <--- jsasaki 2026-11-05
@@ -903,7 +904,16 @@ def _atomic_write(out_path: str | Path, write: Callable[[Path], None]) -> Path:
     done = False
     try:
         write(tmp)
-        os.chmod(tmp, 0o666 & ~_current_umask())
+        # ---> jsasaki 2026-11-05: review round 6 #4: a replaced destination keeps its permission
+        # bits; a new file gets 0666 & ~umask; with the umask unknown the 0600 of mkstemp stays
+        try:
+            mode: int | None = stat.S_IMODE(os.stat(final).st_mode) & 0o777
+        except FileNotFoundError:
+            umask = _current_umask()
+            mode = None if umask is None else 0o666 & ~umask
+        if mode is not None:
+            os.chmod(tmp, mode)
+        # <--- jsasaki 2026-11-05
         os.replace(tmp, final)
         done = True
     finally:

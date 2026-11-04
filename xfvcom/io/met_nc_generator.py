@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+from ..grid.connectivity import zero_based_connectivity
 from ..grid.grid_obj import FvcomGrid
 from .base_generator import BaseGenerator
 from .sources.base import BaseForcingSource
@@ -549,19 +550,20 @@ class MetNetCDFGenerator(BaseGenerator):
                 if "units" not in v_out.ncattrs():
                     v_out.units = "meters" if name in ("xc", "yc") else "degrees"
 
-            nv_in = self.mesh_ds["nv"].values
             v_nv_out = ds_out.createVariable(
                 "nv", "i4", ("three", "nele"), fill_value=False
             )
-            # FvcomGrid uses 0-based indexing internally, FVCOM expects 1-based
-            # Add 1 if the minimum value is 0 (indicating 0-based indexing)
-            nv_offset = 1 if nv_in.min() == 0 else 0
-            if nv_in.shape == (3, nele):
-                v_nv_out[:, :] = nv_in + nv_offset
-            elif nv_in.shape == (nele, 3):
-                v_nv_out[:, :] = nv_in.T + nv_offset
-            else:
-                raise ValueError(f"Unexpected nv shape: {nv_in.shape}")
+            # ---> jsasaki 2026-11-05: review round 6 #1: FVCOM expects 1-based. The base comes from
+            # nv.attrs["start_index"] (FvcomGrid.to_xarray writes 0); without it the old inference
+            # is kept (minimum 0 -> zero-based, else one-based). Orientation follows the dimension
+            # names, then the shape.
+            nv0 = zero_based_connectivity(
+                self.mesh_ds["nv"], fallback="min_is_zero", n_nodes=node
+            )
+            if nv0.shape != (3, nele):
+                raise ValueError(f"Unexpected nv shape: {self.mesh_ds['nv'].shape}")
+            v_nv_out[:, :] = nv0 + 1
+            # <--- jsasaki 2026-11-05
             v_nv_out.long_name = "nodes surrounding element"
 
             # ---------------------------------------------------------

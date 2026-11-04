@@ -39,6 +39,32 @@ __all__ = ["JcopeGrid"]
 AXIS_ATOL = 1e-6
 
 
+def _binary_mask(raw: object) -> NDArray[np.bool_]:
+    """Return ``raw`` as a boolean mask after checking it holds only 0/1 flags.
+
+    Masked entries, NaN/inf and any value other than 0 or 1 are refused: the
+    plain ``astype(bool)`` turned a decoded fill value (NaN) into ocean.
+    """
+    if np.ma.isMaskedArray(raw) and np.ma.getmaskarray(raw).any():
+        raise ValueError("mask has masked (missing) entries")
+    arr = np.asarray(np.ma.getdata(raw))
+    if arr.dtype.kind == "b":
+        return arr.astype(bool)
+    if arr.dtype.kind not in "iuf":
+        raise ValueError(f"mask must be numeric 0/1 flags (got dtype {arr.dtype})")
+    if not np.isfinite(arr).all():
+        raise ValueError(
+            f"mask has {int(np.size(arr) - np.isfinite(arr).sum())} missing "
+            "(non-finite) entries"
+        )
+    bad = (arr != 0) & (arr != 1)
+    if bad.any():
+        raise ValueError(
+            f"mask must contain only 0 and 1 (found {np.unique(arr[bad])[:5].tolist()})"
+        )
+    return arr == 1
+
+
 class JcopeGrid:
     """Lightweight reader for the JCOPE-T DA static-grid archive.
 
@@ -75,9 +101,15 @@ class JcopeGrid:
         self.h: NDArray[np.float32] = np.asarray(
             self._ds["h"].transpose("lat", "lon").values
         )
-        self.mask: NDArray[np.bool_] = np.asarray(
-            self._ds["mask"].transpose("lat", "lon").values, dtype=bool
-        )
+        # ---> jsasaki 2026-11-05: review round 6 #9: a decoded fill value (NaN) would become True
+        # (ocean); only finite, unmasked 0/1 (or boolean) flags are accepted
+        raw_mask = self._ds["mask"].transpose("lat", "lon").values
+        try:
+            self.mask: NDArray[np.bool_] = _binary_mask(raw_mask)
+        except ValueError as exc:
+            self._ds.close()
+            raise ValueError(f"{self._path}: {exc}") from None
+        # <--- jsasaki 2026-11-05
         # <--- jsasaki 2026-11-05
 
         # Grid origin / spacing (must be present)

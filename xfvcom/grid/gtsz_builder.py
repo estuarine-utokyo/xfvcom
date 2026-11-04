@@ -84,8 +84,12 @@ def load_mesh(grd_path: str | Path, dep_path: str | Path) -> MeshInputs:
     d = read_dep(dep_path)
     x, y = np.asarray(g["x"], float), np.asarray(g["y"], float)
     nv = np.asarray(g["nv"])  # (3, N)
-    if nv.shape[0] == 3 and nv.shape[1] != 3:
-        nv = nv.T  # -> (N, 3)
+    # ---> jsasaki 2026-11-05: review round 6 #3: read_dat always returns (3, N); transposing only
+    # when N != 3 left a three-element mesh in the wrong orientation
+    if nv.ndim != 2 or nv.shape[0] != 3:
+        raise ValueError(f"load_mesh: read_dat returned nv of shape {nv.shape}")
+    nv = nv.T  # -> (N, 3)
+    # <--- jsasaki 2026-11-05
     if d.h.shape[0] != x.shape[0]:
         raise ValueError(
             f"load_mesh: grid has {x.shape[0]} nodes but dep has {d.h.shape[0]}"

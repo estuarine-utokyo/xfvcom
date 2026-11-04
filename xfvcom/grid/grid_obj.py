@@ -19,6 +19,9 @@ Key features
 All in‑code comments remain in **English** as requested.
 """
 
+import hashlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -27,6 +30,7 @@ import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
 
+from .connectivity import connectivity_three_by_nele, zero_based_connectivity
 from .dat_reader import read_dat
 from .geo_utils import utm_to_lonlat
 
@@ -41,49 +45,11 @@ class _DatasetLike(Protocol):
     def __contains__(self, key: str) -> bool: ...
 
 
-# jsasaki 2026-11-05: review round 5 #2/#4/#5: connectivity and projection helpers
-def _connectivity_three_by_nele(da: Any) -> NDArray[np.int_]:
-    """Return connectivity as an integer ``(3, nele)`` array, validated first.
-
-    Orientation comes from the dimension names (``three`` / ``nele``) when they
-    are present; only unnamed inputs fall back to the shape, and a 3 x 3 array
-    without names is refused as ambiguous. The values must be real, finite and
-    integral before they are converted (a cast would truncate 0.9 to 0).
-    """
-    vals = np.asarray(getattr(da, "values", da))
-    if vals.ndim != 2:
-        raise ValueError(f"Connectivity (nv) must be 2-D (got shape {vals.shape})")
-    if vals.dtype.kind not in "iuf":
-        raise ValueError(f"Connectivity (nv) must be real numeric (got {vals.dtype})")
-    if vals.dtype.kind == "f":
-        if not np.isfinite(vals).all():
-            raise ValueError("Connectivity (nv) contains non-finite values")
-        if not np.array_equal(vals, np.round(vals)):
-            raise ValueError("Connectivity (nv) contains non-integral values")
-    dims = tuple(str(d) for d in getattr(da, "dims", ()))
-    if "three" in dims or "nele" in dims:
-        if "three" in dims:
-            first = dims.index("three") == 0
-        else:
-            first = dims.index("nele") == 1
-        if not first:
-            vals = vals.T
-    elif vals.shape[0] == 3 and vals.shape[1] != 3:
-        pass
-    elif vals.shape[1] == 3 and vals.shape[0] != 3:
-        vals = vals.T  # (nele,3) -> (3,nele)
-    elif vals.shape == (3, 3):
-        raise ValueError(
-            "Connectivity (nv) of shape (3, 3) without 'three'/'nele' dimension "
-            "names is ambiguous"
-        )
-    if vals.shape[0] != 3:
-        raise ValueError(
-            f"Connectivity (nv) must have a dimension of length 3 (got {vals.shape})"
-        )
-    return np.asarray(vals, dtype=int)
+# jsasaki 2026-11-05: review round 6 #1: the connectivity helper moved to .connectivity (shared with io)
+_connectivity_three_by_nele = connectivity_three_by_nele
 
 
+# jsasaki 2026-11-05: review round 5 #5: projection helper
 def _projection_from_attrs(attrs: Any) -> dict[str, Any]:
     """Read ``utm_zone`` / ``utm_hemisphere`` written by :meth:`FvcomGrid.to_xarray`.
 
@@ -112,6 +78,54 @@ def _projection_from_attrs(attrs: Any) -> dict[str, Any]:
     return out
 
 
+# ---> jsasaki 2026-11-05: review round 6 #8: one validation for every node/element selector.
+# The old np.asarray(..., dtype=int) truncated 1.9 to 1 and read through masked entries.
+def _select_indices(
+    indices: Any, count: int, index_base: Any, kind: str
+) -> tuple[NDArray[np.int_], NDArray[np.int_]]:
+    """Validate a selector and return ``(as_given, zero_based)`` integer arrays.
+
+    ``None`` selects all ``count`` items. ``index_base`` must be 0 or 1. Masked
+    entries, non-numeric or boolean values, and non-integral or non-finite numbers
+    are refused before conversion; every index must lie in the valid range.
+    """
+    if isinstance(index_base, (bool, np.bool_)) or index_base not in (0, 1):
+        raise ValueError(f"index_base must be 0 or 1 (got {index_base!r})")
+    base = int(index_base)
+    if indices is None:
+        idx = np.arange(base, count + base)
+        return idx, idx - base
+    if np.ma.isMaskedArray(indices) and np.ma.getmaskarray(indices).any():
+        raise ValueError(f"{kind} indices contain masked entries")
+    raw = np.asarray(np.ma.getdata(indices))
+    if raw.size == 0:
+        arr = np.zeros(raw.shape, dtype=int)
+    elif raw.dtype.kind in "iu":
+        arr = raw.astype(int)
+    elif raw.dtype.kind == "f":
+        if not np.isfinite(raw).all():
+            raise ValueError(f"{kind} indices contain non-finite values")
+        if not np.array_equal(raw, np.round(raw)):
+            raise ValueError(
+                f"{kind} indices contain non-integral values: "
+                f"{raw[raw != np.round(raw)].tolist()}"
+            )
+        arr = raw.astype(int)
+    else:
+        raise ValueError(f"{kind} indices must be integers (got dtype {raw.dtype})")
+    idx0 = arr - base
+    bad = (idx0 < 0) | (idx0 >= count)
+    if np.any(bad):
+        raise ValueError(
+            f"Invalid {kind} indices (base-{base}): {np.atleast_1d(arr[bad]).tolist()}. "
+            f"Valid range: {base} to {count - 1 + base}"
+        )
+    return arr, idx0
+
+
+# <--- jsasaki 2026-11-05
+
+
 # -----------------------------------------------------------------------------
 # Main dataclass
 # -----------------------------------------------------------------------------
@@ -138,11 +152,18 @@ class FvcomGrid:
     xc: NDArray[np.float64] | None = field(default=None, repr=False)
     yc: NDArray[np.float64] | None = field(default=None, repr=False)
 
+    # jsasaki 2026-11-05: review round 6 #2: x/y hold lon/lat (degrees), not projected metres
+    geographic: bool = False
+
     # cached topology helpers -----------------------------------------
     _boundary_edge_cache: set[tuple[int, int]] | None = field(
         default=None, init=False, repr=False
     )
     _boundary_node_cache: set[int] | None = field(default=None, init=False, repr=False)
+    # jsasaki 2026-11-05: review round 6 #7: fingerprint of the nv the caches were built from
+    _topology_key: tuple[Any, ...] | None = field(default=None, init=False, repr=False)
+    # jsasaki 2026-11-05: review round 6 #7: set while one public call loops over nodes (nv fixed)
+    _topology_pinned: bool = field(default=False, init=False, repr=False)
 
     # ------------------------------------------------------------------
     # Constructors
@@ -174,6 +195,8 @@ class FvcomGrid:
         # ---- fallback for loose validation --------------------------------
         # jsasaki 2026-11-05: review round 5 #3: nv_zero is zero-based by definition
         nv_zero_adopted = False
+        # jsasaki 2026-11-05: review round 6 #2: coordinate type survives a to_xarray round trip
+        geographic = getattr(ds, "attrs", {}).get("xy_coordinates") == "geographic"
         if not validate:
             # nv_zero → nv
             if "nv" not in ds and "nv_zero" in ds:
@@ -183,8 +206,12 @@ class FvcomGrid:
             # if planar x/y missing but lon/lat present, copy for plotting
             if "x" not in ds and "lon" in ds:
                 ds = ds.assign(x=ds["lon"])
+                # jsasaki 2026-11-05: review round 6 #2: degrees, so metric areas must refuse
+                geographic = True
             if "y" not in ds and "lat" in ds:
                 ds = ds.assign(y=ds["lat"])
+                # jsasaki 2026-11-05: review round 6 #2: degrees, so metric areas must refuse
+                geographic = True
             miss = [n for n in req if n not in ds]
             if miss:
                 raise KeyError("Dataset still missing vars: " + ", ".join(miss))
@@ -195,27 +222,16 @@ class FvcomGrid:
         }
         # ------------------------------------------------------------------
         # nv: ensure (3, nele) shape & 0-based
-        # jsasaki 2026-11-05: review round 5 #2/#4: validated and oriented before integer conversion
-        nv_raw = _connectivity_three_by_nele(ds["nv"])
-        # ---> jsasaki 2026-11-05: review round 4 #4: an explicit base (argument, then attribute)
-        # wins over the min()==1 inference, which changed zero-based subsets silently
-        base = start_index
-        if base is None:
-            base = getattr(ds["nv"], "attrs", {}).get("start_index")
-        # jsasaki 2026-11-05: review round 5 #3: an adopted nv_zero without a stated base is zero-based
-        if base is None and nv_zero_adopted:
-            base = 0
-        if base is not None:
-            if isinstance(base, (bool, np.bool_)) or base not in (0, 1):
-                raise ValueError(f"nv start_index must be 0 or 1 (got {base!r})")
-            nv_raw = nv_raw - int(base)
-        elif nv_raw.min() == 1:
-            # 1-based → 0-based (inferred; see the docstring)
-            nv_raw = nv_raw - 1
+        # ---> jsasaki 2026-11-05: review round 6 #1: one shared normalisation (argument, then the
+        # start_index attribute, then the inference: an adopted nv_zero is zero-based, otherwise
+        # min()==1 means one-based), validated and range-checked against the node count
+        nv_raw = zero_based_connectivity(
+            ds["nv"],
+            start_index=start_index,
+            fallback=0 if nv_zero_adopted else "min_is_one",
+            n_nodes=kw["x"].size,
+        )
         # <--- jsasaki 2026-11-05
-        # jsasaki 2026-11-05: review round 3 #19: a negative index would silently wrap to the last node
-        if nv_raw.min() < 0 or nv_raw.max() >= kw["x"].size:
-            raise ValueError("Connectivity (nv) references a node outside the mesh")
         kw["nv"] = nv_raw
 
         for name in ("lon", "lat", "lonc", "latc"):
@@ -227,6 +243,8 @@ class FvcomGrid:
         kw["yc"] = kw["y"][nv].mean(axis=0)
         # jsasaki 2026-11-05: review round 5 #5: restore the projection written by to_xarray
         kw.update(_projection_from_attrs(getattr(ds, "attrs", {})))
+        # jsasaki 2026-11-05: review round 6 #2: record that x/y are lon/lat
+        kw["geographic"] = geographic
 
         return cls(**kw)  # type: ignore[arg-type]
 
@@ -314,6 +332,9 @@ class FvcomGrid:
             ds.attrs["utm_zone"] = int(self.zone)
         ds.attrs["utm_hemisphere"] = "north" if self.northern else "south"
         # <--- jsasaki 2026-11-05
+        # jsasaki 2026-11-05: review round 6 #2: a geographic grid stays geographic after a round trip
+        if self.geographic:
+            ds.attrs["xy_coordinates"] = "geographic"
         if self.lon is not None:
             ds["lon"] = ("node", self.lon)
         if self.lat is not None:
@@ -332,6 +353,17 @@ class FvcomGrid:
     # ------------------------------------------------------------------
     # Area calculation methods
     # ------------------------------------------------------------------
+    # ---> jsasaki 2026-11-05: review round 6 #2: areas are in m^2 only when x/y are metres; a
+    # geographic grid (x/y copied from lon/lat by the loose fallback) would return degrees^2
+    def _require_metric(self, what: str) -> None:
+        if self.geographic:
+            raise ValueError(
+                f"{what}: this grid's x/y are geographic lon/lat (degrees), so the "
+                "area would be in degrees^2, not m^2; build the grid from projected "
+                "x/y (e.g. FvcomGrid.from_dat, or a dataset with x/y in metres)"
+            )
+
+    # <--- jsasaki 2026-11-05
     def calculate_node_area(
         self,
         node_indices: list[int] | NDArray[np.int_] | None = None,
@@ -353,31 +385,12 @@ class FvcomGrid:
         """
         import numpy as np
 
-        # Handle None case - all nodes
-        if node_indices is None:
-            node_indices = np.arange(
-                1 if index_base == 1 else 0, self.node + (1 if index_base == 1 else 0)
-            )
-
-        # Convert to numpy array
-        node_indices_arr: NDArray[np.int_] = np.asarray(node_indices, dtype=int)
-
-        # Convert to zero-based if needed
-        if index_base == 1:
-            node_indices_0 = node_indices_arr - 1
-        else:
-            node_indices_0 = node_indices_arr
-
-        # Validate indices
-        if np.any(node_indices_0 < 0) or np.any(node_indices_0 >= self.node):
-            invalid = node_indices_arr[
-                (node_indices_0 < 0) | (node_indices_0 >= self.node)
-            ]
-            raise ValueError(
-                f"Invalid node indices (base-{index_base}): {invalid.tolist()}. "
-                f"Valid range: {1 if index_base == 1 else 0} to "
-                f"{self.node if index_base == 1 else self.node - 1}"
-            )
+        # jsasaki 2026-11-05: review round 6 #2: metric areas need projected x/y
+        self._require_metric("calculate_node_area")
+        # jsasaki 2026-11-05: review round 6 #8: validated selector (masks, fractions, base, range)
+        node_indices_arr, node_indices_0 = _select_indices(
+            node_indices, self.node, index_base, "node"
+        )
 
         # Find all elements containing any of the selected nodes
         # nv is already 0-based internally
@@ -433,25 +446,12 @@ class FvcomGrid:
         """
         import numpy as np
 
-        if element_indices is None:
-            element_indices = np.arange(
-                1 if index_base == 1 else 0, self.nele + (1 if index_base == 1 else 0)
-            )
-
-        elem_arr: NDArray[np.int_] = np.asarray(element_indices, dtype=int)
-
-        if index_base == 1:
-            elem_idx0 = elem_arr - 1
-        else:
-            elem_idx0 = elem_arr
-
-        if np.any(elem_idx0 < 0) or np.any(elem_idx0 >= self.nele):
-            invalid = elem_arr[(elem_idx0 < 0) | (elem_idx0 >= self.nele)]
-            raise ValueError(
-                f"Invalid element indices (base-{index_base}): {invalid.tolist()}. "
-                f"Valid range: {1 if index_base == 1 else 0} to "
-                f"{self.nele if index_base == 1 else self.nele - 1}"
-            )
+        # jsasaki 2026-11-05: review round 6 #2: metric areas need projected x/y
+        self._require_metric("calculate_element_area")
+        # jsasaki 2026-11-05: review round 6 #8: validated selector (masks, fractions, base, range)
+        elem_arr, elem_idx0 = _select_indices(
+            element_indices, self.nele, index_base, "element"
+        )
 
         tri_nodes = self.nv[:, elem_idx0]
         x_coords = self.x[tri_nodes]
@@ -493,31 +493,10 @@ class FvcomGrid:
         """
         import numpy as np
 
-        # Handle None case - all nodes
-        if node_indices is None:
-            node_indices = np.arange(
-                1 if index_base == 1 else 0, self.node + (1 if index_base == 1 else 0)
-            )
-
-        # Convert to numpy array
-        node_indices_arr: NDArray[np.int_] = np.asarray(node_indices, dtype=int)
-
-        # Convert to zero-based if needed
-        if index_base == 1:
-            node_indices_0 = node_indices_arr - 1
-        else:
-            node_indices_0 = node_indices_arr
-
-        # Validate indices
-        if np.any(node_indices_0 < 0) or np.any(node_indices_0 >= self.node):
-            invalid = node_indices_arr[
-                (node_indices_0 < 0) | (node_indices_0 >= self.node)
-            ]
-            raise ValueError(
-                f"Invalid node indices (base-{index_base}): {invalid.tolist()}. "
-                f"Valid range: {1 if index_base == 1 else 0} to "
-                f"{self.node if index_base == 1 else self.node - 1}"
-            )
+        # jsasaki 2026-11-05: review round 6 #8: validated selector (masks, fractions, base, range)
+        node_indices_arr, node_indices_0 = _select_indices(
+            node_indices, self.node, index_base, "node"
+        )
 
         # Find all elements containing any of the selected nodes
         node_set = set(node_indices_0.tolist())
@@ -607,13 +586,17 @@ class FvcomGrid:
         """
         import numpy as np
 
-        # Convert to zero-based
-        if index_base == 1:
-            node_idx = node_idx - 1
-
-        # Validate index
-        if node_idx < 0 or node_idx >= self.node:
-            raise ValueError(f"Invalid node index: {node_idx}")
+        # ---> jsasaki 2026-11-05: review round 6 #8: one integral, unmasked scalar in range
+        if np.ndim(node_idx) != 0:
+            raise ValueError(f"node_idx must be a single index (got {node_idx!r})")
+        try:
+            _, idx0 = _select_indices(
+                np.atleast_1d(node_idx), self.node, index_base, "node"
+            )
+        except ValueError as exc:
+            raise ValueError(f"Invalid node index: {node_idx!r} ({exc})") from None
+        node_idx = int(idx0[0])
+        # <--- jsasaki 2026-11-05
 
         # Find all triangles containing this node
         incident_triangles = self._get_incident_triangles(node_idx)
@@ -826,8 +809,41 @@ class FvcomGrid:
         sorted_indices = np.argsort(angles)
         return [triangle_indices[i] for i in sorted_indices]
 
+    # ---> jsasaki 2026-11-05: review round 6 #7: the caches follow nv. Replacing nv or editing it in
+    # place changes the fingerprint (shape, dtype, content digest), which drops both caches.
+    def _sync_topology_cache(self) -> None:
+        if self._topology_pinned:
+            return
+        nv = np.ascontiguousarray(self.nv)
+        key = (
+            nv.shape,
+            nv.dtype.str,
+            hashlib.blake2b(nv.tobytes(), digest_size=16).digest(),
+        )
+        if key != self._topology_key:
+            self._boundary_edge_cache = None
+            self._boundary_node_cache = None
+            self._topology_key = key
+
+    @contextmanager
+    def _pinned_topology(self) -> Iterator[None]:
+        """Check nv once, then skip the per-node fingerprint inside a loop."""
+        if self._topology_pinned:
+            yield
+            return
+        self._sync_topology_cache()
+        self._topology_pinned = True
+        try:
+            yield
+        finally:
+            self._topology_pinned = False
+
+    # <--- jsasaki 2026-11-05
+
     def _get_boundary_edges(self) -> set[tuple[int, int]]:
         """Compute (or return cached) set of boundary edges as node index pairs."""
+        # jsasaki 2026-11-05: review round 6 #7: a cache built from another nv is discarded
+        self._sync_topology_cache()
         if self._boundary_edge_cache is not None:
             return self._boundary_edge_cache
 
@@ -849,6 +865,8 @@ class FvcomGrid:
 
     def _get_boundary_nodes(self) -> set[int]:
         """Return set of node indices that lie on any boundary edge."""
+        # jsasaki 2026-11-05: review round 6 #7: a cache built from another nv is discarded
+        self._sync_topology_cache()
         if self._boundary_node_cache is not None:
             return self._boundary_node_cache
 
@@ -889,52 +907,36 @@ class FvcomGrid:
         """
         import numpy as np
 
-        # Handle None case - all nodes
-        if node_indices is None:
-            node_indices = np.arange(
-                1 if index_base == 1 else 0, self.node + (1 if index_base == 1 else 0)
-            )
-
-        # Convert to numpy array
-        node_indices_arr: NDArray[np.int_] = np.asarray(node_indices, dtype=int)
-
-        # Convert to zero-based if needed
-        if index_base == 1:
-            node_indices_0 = node_indices_arr - 1
-        else:
-            node_indices_0 = node_indices_arr
-
-        # Validate indices
-        if np.any(node_indices_0 < 0) or np.any(node_indices_0 >= self.node):
-            invalid = node_indices_arr[
-                (node_indices_0 < 0) | (node_indices_0 >= self.node)
-            ]
-            raise ValueError(
-                f"Invalid node indices (base-{index_base}): {invalid.tolist()}. "
-                f"Valid range: {1 if index_base == 1 else 0} to "
-                f"{self.node if index_base == 1 else self.node - 1}"
-            )
+        # jsasaki 2026-11-05: review round 6 #2: metric areas need projected x/y
+        self._require_metric("calculate_node_area_median_dual")
+        # jsasaki 2026-11-05: review round 6 #8: validated selector (masks, fractions, base, range)
+        node_indices_arr, node_indices_0 = _select_indices(
+            node_indices, self.node, index_base, "node"
+        )
 
         total_area = 0.0
 
-        # Calculate area for each node's control volume
-        for node_idx in node_indices_0:
-            # Get control volume polygon
-            polygon = self.get_node_control_volume(node_idx, index_base=0)
+        # jsasaki 2026-11-05: review round 6 #7: nv is fingerprinted once for the whole loop
+        with self._pinned_topology():
+            # Calculate area for each node's control volume
+            # jsasaki 2026-11-05: review round 6 #8: a node counts once, as in calculate_node_area
+            for node_idx in np.unique(node_indices_0):
+                # Get control volume polygon
+                polygon = self.get_node_control_volume(node_idx, index_base=0)
 
-            if len(polygon) < 3:
-                continue
+                if len(polygon) < 3:
+                    continue
 
-            # ---> jsasaki 2026-11-05: review round 5 #1: shoelace on coordinates relative to the
-            # first vertex, so the area does not lose precision (or change) with the mesh origin
-            pts = np.asarray(polygon, dtype=float)
-            px = pts[:, 0] - pts[0, 0]
-            py = pts[:, 1] - pts[0, 1]
-            area = float(np.sum(px * np.roll(py, -1) - np.roll(px, -1) * py))
-            # <--- jsasaki 2026-11-05
+                # ---> jsasaki 2026-11-05: review round 5 #1: shoelace on coordinates relative to the
+                # first vertex, so the area does not lose precision (or change) with the mesh origin
+                pts = np.asarray(polygon, dtype=float)
+                px = pts[:, 0] - pts[0, 0]
+                py = pts[:, 1] - pts[0, 1]
+                area = float(np.sum(px * np.roll(py, -1) - np.roll(px, -1) * py))
+                # <--- jsasaki 2026-11-05
 
-            area = abs(area) / 2.0
-            total_area += area
+                area = abs(area) / 2.0
+                total_area += area
 
         return total_area
 
@@ -957,45 +959,43 @@ class FvcomGrid:
         list[list[tuple[float, float]]]
             List of control volume polygons, each as a list of (lon, lat) coordinates
         """
-        import numpy as np
+        # ---> jsasaki 2026-11-05: review round 6 #8: validated selector (one polygon per entry)
+        _, node_indices_0 = _select_indices(node_indices, self.node, index_base, "node")
+        # <--- jsasaki 2026-11-05
 
-        # Handle None case - all nodes
-        if node_indices is None:
-            node_indices = np.arange(
-                1 if index_base == 1 else 0, self.node + (1 if index_base == 1 else 0)
+        # ---> jsasaki 2026-11-05: review round 6 #6: polygon vertices (centroids, edge midpoints)
+        # are transformed with the grid's own projection; the old nearest-node offset with a fixed
+        # 1e-5 deg/m displaced them by tens of metres. x/y that already are lon/lat are returned as
+        # they are; projected x/y without a UTM zone cannot be transformed and are refused.
+        to_geo = self.lon is not None and self.lat is not None
+        xy_is_lonlat = self.geographic or (
+            to_geo
+            and np.array_equal(self.lon, self.x)
+            and np.array_equal(self.lat, self.y)
+        )
+        if to_geo and not xy_is_lonlat and self.zone is None:
+            raise ValueError(
+                "get_node_control_volumes: the grid has lon/lat but no UTM zone, so the "
+                "polygon vertices cannot be converted; set FvcomGrid.zone (and northern)"
             )
 
-        # Convert to numpy array
-        node_indices_arr: NDArray[np.int_] = np.asarray(node_indices, dtype=int)
-
-        volumes = []
-        for node_idx in node_indices_arr:
-            polygon = self.get_node_control_volume(node_idx, index_base)
-
-            # Convert to geographic coordinates if available
-            if self.lon is not None and self.lat is not None and len(polygon) > 0:
-                # Need to interpolate since polygon points are at centroids/midpoints
-                geo_polygon = []
-                for x, y in polygon:
-                    # Find nearest node for approximate lon/lat
-                    # This is simplified - better would be proper interpolation
-                    distances = np.sqrt((self.x - x) ** 2 + (self.y - y) ** 2)
-                    nearest = np.argmin(distances)
-
-                    # Use offset from nearest node to estimate lon/lat
-                    dx = x - self.x[nearest]
-                    dy = y - self.y[nearest]
-
-                    # Rough approximation (assuming small distances)
-                    # Better would use proper UTM to geographic conversion
-                    lon_approx = self.lon[nearest] + dx * 1e-5  # Rough scale
-                    lat_approx = self.lat[nearest] + dy * 1e-5
-
-                    geo_polygon.append((lon_approx, lat_approx))
-
-                volumes.append(geo_polygon)
-            else:
-                volumes.append(polygon)
+        volumes: list[list[tuple[float, float]]] = []
+        # jsasaki 2026-11-05: review round 6 #7: nv is fingerprinted once for the whole loop
+        with self._pinned_topology():
+            for node_idx in np.atleast_1d(node_indices_0):
+                polygon = self.get_node_control_volume(int(node_idx), index_base=0)
+                if to_geo and not xy_is_lonlat and len(polygon) > 0:
+                    pts = np.asarray(polygon, dtype=float)
+                    assert self.zone is not None  # checked above
+                    plon, plat = utm_to_lonlat(
+                        pts[:, 0], pts[:, 1], zone=self.zone, northern=self.northern
+                    )
+                    volumes.append(
+                        [(float(a), float(b)) for a, b in zip(plon, plat, strict=True)]
+                    )
+                else:
+                    volumes.append(polygon)
+        # <--- jsasaki 2026-11-05
 
         return volumes
 

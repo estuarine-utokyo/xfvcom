@@ -1135,7 +1135,10 @@ def test_round5_writers_do_not_touch_the_process_umask(
 
         monkeypatch.setattr(os, "umask", _forbidden)
         assert gen_mod._current_umask() == (
-            0o027 if os.path.exists("/proc/self/status") else gen_mod._DEFAULT_UMASK
+            # jsasaki 2026-11-05: review round 6 #4: an unreadable umask is unknown (None)
+            0o027
+            if os.path.exists("/proc/self/status")
+            else None
         )
         out = write_elevation_nc(
             tmp_path / "e.nc",
@@ -1144,7 +1147,11 @@ def test_round5_writers_do_not_touch_the_process_umask(
             elevation=g.build_elevation_array(),
         )
         monkeypatch.undo()
-        assert stat.S_IMODE(out.stat().st_mode) == 0o666 & ~gen_mod._current_umask()
+        # jsasaki 2026-11-05: review round 6 #4: unknown umask keeps the temporary file's 0600
+        um = gen_mod._current_umask()
+        assert stat.S_IMODE(out.stat().st_mode) == (
+            0o600 if um is None else 0o666 & ~um
+        )
     finally:
         monkeypatch.undo()
         os.umask(real)

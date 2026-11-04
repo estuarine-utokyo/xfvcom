@@ -10,6 +10,8 @@ import pandas as pd
 import pyproj
 import xarray as xr
 
+from ..grid.connectivity import zero_based_connectivity
+
 
 class FvcomDataLoader:
     """
@@ -118,7 +120,13 @@ class FvcomDataLoader:
         """
         Set up the counterclockwise nv_ccw.
         """
-        self.ds["nv_zero"] = xr.DataArray(self.ds["nv"].values.T - 1)
+        # ---> jsasaki 2026-11-05: review round 6 #1: shared normalisation honours the dimension
+        # names and nv.attrs["start_index"]; without the attribute nv is one-based (FVCOM output),
+        # as before. An index outside the mesh is refused instead of wrapping to the last node.
+        n_nodes = int(self.ds.sizes["node"]) if "node" in self.ds.sizes else None
+        nv0 = zero_based_connectivity(self.ds["nv"], fallback=1, n_nodes=n_nodes)
+        self.ds["nv_zero"] = xr.DataArray(nv0.T)
+        # <--- jsasaki 2026-11-05
         self.ds["nv_zero"].attrs[
             "long_name"
         ] = "nodes surrounding element in zero-based for matplotlib"

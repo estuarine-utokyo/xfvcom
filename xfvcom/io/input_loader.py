@@ -14,6 +14,7 @@ import pandas as pd
 import xarray as xr
 
 from xfvcom.grid import FvcomGrid
+from xfvcom.grid.connectivity import zero_based_connectivity
 
 
 class FvcomInputLoader:
@@ -175,9 +176,9 @@ class FvcomInputLoader:
         )
 
         # Element connectivity (ensure 1-based for FVCOM compatibility)
-        nv = grid_ds["nv"].values
-        if nv.min() == 0:
-            nv = nv + 1  # Convert 0-based to 1-based
+        # jsasaki 2026-11-05: review round 6 #1: FvcomGrid connectivity is always zero-based (the
+        # old min()==0 test left zero-based nv that omits node 0 unshifted)
+        nv = zero_based_connectivity(grid_ds["nv"], n_nodes=self.grid.node) + 1
 
         data_vars["nv"] = xr.DataArray(
             nv,
@@ -185,6 +186,8 @@ class FvcomInputLoader:
             attrs={
                 "long_name": "nodes surrounding element",
                 "note": "1-based indexing for FVCOM compatibility",
+                # jsasaki 2026-11-05: review round 6 #1: the base is stated for later readers
+                "start_index": 1,
             },
         )
 
@@ -365,9 +368,9 @@ class FvcomInputLoader:
             return
 
         # Create 0-based version (FVCOM uses 1-based indexing)
-        self.ds["nv_zero"] = xr.DataArray(
-            self.ds["nv"].values.T - 1, dims=("nele", "three")
-        )
+        # jsasaki 2026-11-05: review round 6 #1: shared normalisation (start_index, else one-based)
+        nv0 = zero_based_connectivity(self.ds["nv"], fallback=1)
+        self.ds["nv_zero"] = xr.DataArray(nv0.T, dims=("nele", "three"))
         self.ds["nv_zero"].attrs[
             "long_name"
         ] = "nodes surrounding element in zero-based for matplotlib"

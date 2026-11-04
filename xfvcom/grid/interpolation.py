@@ -108,10 +108,18 @@ def elems2nodes(
     # Avoid division by zero for unused nodes
     count = np.maximum(count, 1)
 
+    # ---> jsasaki 2026-11-05: review round 6 #10: the mean needs a float accumulator; an integer
+    # one failed at the in-place division. Integer/boolean inputs are promoted to float64; every
+    # other dtype (float, complex, ...) keeps its own, as before.
+    acc_dtype: np.dtype = (
+        np.dtype(np.float64) if elem_data.dtype.kind in "iub" else elem_data.dtype
+    )
+    # <--- jsasaki 2026-11-05
+
     # Handle different input dimensions
     if elem_data.ndim == 1:
         # 1D: (n_elem,) -> (n_nodes,)
-        node_data = np.zeros(n_nodes, dtype=elem_data.dtype)
+        node_data = np.zeros(n_nodes, dtype=acc_dtype)
         np.add.at(node_data, triangles[0], elem_data)
         np.add.at(node_data, triangles[1], elem_data)
         np.add.at(node_data, triangles[2], elem_data)
@@ -120,7 +128,7 @@ def elems2nodes(
     elif elem_data.ndim == 2:
         # 2D: (n_time, n_elem) -> (n_time, n_nodes)
         n_time = elem_data.shape[0]
-        node_data = np.zeros((n_time, n_nodes), dtype=elem_data.dtype)
+        node_data = np.zeros((n_time, n_nodes), dtype=acc_dtype)
         for t in range(n_time):
             np.add.at(node_data[t], triangles[0], elem_data[t])
             np.add.at(node_data[t], triangles[1], elem_data[t])
@@ -130,7 +138,7 @@ def elems2nodes(
     elif elem_data.ndim == 3:
         # 3D: (n_time, n_siglay, n_elem) -> (n_time, n_siglay, n_nodes)
         n_time, n_siglay = elem_data.shape[:2]
-        node_data = np.zeros((n_time, n_siglay, n_nodes), dtype=elem_data.dtype)
+        node_data = np.zeros((n_time, n_siglay, n_nodes), dtype=acc_dtype)
         for t in range(n_time):
             for k in range(n_siglay):
                 np.add.at(node_data[t, k], triangles[0], elem_data[t, k])
