@@ -144,12 +144,16 @@ class JcopeObcGenerator:
             self.region_nc_path = Path(region_nc).expanduser().resolve()
             self._region_ds = xr.open_dataset(self.region_nc_path)
             self.source_name = self.region_nc_path.name
+            # jsasaki 2026-11-05: review round 3 #2: the supported coordinate schema of a region file
+            _validate_region_schema(self._region_ds, self.region_nc_path)
 
         # jsasaki 2026-11-05: review round 2 #13: node ids are validated, not silently coerced
         self.obc_nodes = _validate_obc_nodes(obc_nodes)
-        self.obc_lat = np.asarray(obc_lat, dtype=np.float64)
-        self.obc_lon = np.asarray(obc_lon, dtype=np.float64)
-        self.obc_h_fvcom = np.asarray(obc_h_fvcom, dtype=np.float32)
+        # jsasaki 2026-11-05: review round 3 #3 #4: masked entries become NaN (refused below); a
+        # depth beyond the float32 range becomes inf (refused below)
+        self.obc_lat = _plain_float(obc_lat, "obc_lat")
+        self.obc_lon = _plain_float(obc_lon, "obc_lon")
+        self.obc_h_fvcom = _to_float32(_plain_float(obc_h_fvcom, "obc_h_fvcom"))
 
         # jsasaki 2026-11-04: review round 1 #10 #11: refuse physically invalid inputs
         if not (np.isfinite(self.obc_lat).all() and np.isfinite(self.obc_lon).all()):
@@ -196,8 +200,9 @@ class JcopeObcGenerator:
                 raise ValueError(
                     "siglay_per_node and siglev_per_node must be given together"
                 )
-            sl = np.asarray(siglay_per_node, dtype=np.float64)
-            sv = np.asarray(siglev_per_node, dtype=np.float64)
+            # jsasaki 2026-11-05: review round 3 #3: masked entries become NaN (refused by _validate_sigma)
+            sl = _plain_float(siglay_per_node, "siglay_per_node")
+            sv = _plain_float(siglev_per_node, "siglev_per_node")
             if sl.ndim != 2 or sv.ndim != 2:
                 raise ValueError("per-node siglay/siglev must be 2-D (n_sig, n_obc)")
             if sl.shape[1] != n_obc or sv.shape[1] != n_obc:
@@ -326,6 +331,22 @@ class JcopeObcGenerator:
         # Region offset in the global grid: where does the region start?
         j0, i0 = self.grid.index_of(r_lat[0], r_lon[0])
         j0_int, i0_int = int(j0), int(i0)
+        # ---> jsasaki 2026-11-05: review round 3 #1: the COMPLETE regional axes must be the contiguous
+        # block of the grid's axes that starts there (not only the origin)
+        if self._src is None:
+            blk_lat = self.grid.lat[j0_int : j0_int + r_lat.size]
+            blk_lon = self.grid.lon[i0_int : i0_int + r_lon.size]
+            if not (
+                blk_lat.shape == r_lat.shape
+                and blk_lon.shape == r_lon.shape
+                and np.allclose(r_lat, blk_lat, rtol=0, atol=AXIS_ATOL)
+                and np.allclose(r_lon, blk_lon, rtol=0, atol=AXIS_ATOL)
+            ):
+                raise ValueError(
+                    "the region file's lat/lon axes are not a contiguous block of the grid file's "
+                    f"axes (tolerance {AXIS_ATOL:g} degree)"
+                )
+        # <--- jsasaki 2026-11-05
 
         # Global ocean cells for OBC nodes
         jg, ig = self.grid.find_nearest_ocean(self.obc_lat, self.obc_lon)
@@ -361,10 +382,12 @@ class JcopeObcGenerator:
         if self._src is not None:
             return self._src.read_profile(name, self._jr, self._ir)
         da = self._ds[name]
-        if da.ndim != 4:
+        # jsasaki 2026-11-05: review round 3 #2: dimensions by NAME, transposed to the canonical order
+        if da.ndim != 4 or set(da.dims) != {"time", "level", "lat", "lon"}:
             raise ValueError(
                 f"{name!r} is not a 4-D (time, level, lat, lon) field " f"in region_nc"
             )
+        da = da.transpose("time", "level", "lat", "lon")
         # Vectorized fancy indexing over n_obc; one array fetch per node.
         n_time = da.sizes["time"]
         n_level = da.sizes["level"]
@@ -374,7 +397,8 @@ class JcopeObcGenerator:
                 lat=int(self._jr[n]),
                 lon=int(self._ir[n]),
             ).values
-            out[:, :, n] = np.asarray(vals, dtype=np.float32)
+            # jsasaki 2026-11-05: review round 3 #3: a masked value is NaN, never its underlying data
+            out[:, :, n] = _to_float32(_plain_float(vals, name))
         return out
 
     def _read_variable_2d(self, name: str) -> NDArray[np.float32]:
@@ -386,10 +410,12 @@ class JcopeObcGenerator:
         if self._src is not None:
             return self._src.read_2d(name, self._jr, self._ir)
         da = self._ds[name]
-        if da.ndim != 3:
+        # jsasaki 2026-11-05: review round 3 #2: dimensions by NAME, transposed to the canonical order
+        if da.ndim != 3 or set(da.dims) != {"time", "lat", "lon"}:
             raise ValueError(
                 f"{name!r} is not a 3-D (time, lat, lon) field in region_nc"
             )
+        da = da.transpose("time", "lat", "lon")
         n_time = da.sizes["time"]
         out = np.empty((n_time, self.n_obc), dtype=np.float32)
         for n in range(self.n_obc):
@@ -397,7 +423,8 @@ class JcopeObcGenerator:
                 lat=int(self._jr[n]),
                 lon=int(self._ir[n]),
             ).values
-            out[:, n] = np.asarray(vals, dtype=np.float32)
+            # jsasaki 2026-11-05: review round 3 #3: a masked value is NaN, never its underlying data
+            out[:, n] = _to_float32(_plain_float(vals, name))
         return out
 
     # ---------- vertical interpolation ---------- #
@@ -494,7 +521,17 @@ class JcopeObcGenerator:
         for v in vars_list:
             jcope_name, _vname, _units, _long = _TSOBC_VAR_MAP[v]
             if raw_profiles is not None and v in raw_profiles:
-                jcope_field = np.asarray(raw_profiles[v], dtype=np.float32)
+                # ---> jsasaki 2026-11-05: review round 3 #3 #14: masked -> NaN (then refused as
+                # non-finite forcing), and exactly (n_time, 46, n_obc): no time or node is dropped
+                jcope_field = _to_float32(
+                    _plain_float(raw_profiles[v], f"raw_profiles[{v!r}]")
+                )
+                want = (self.mjd.size, N_JCOPE_ACTIVE_LEVELS, self.n_obc)
+                if jcope_field.shape != want:
+                    raise ValueError(
+                        f"raw_profiles[{v!r}] has shape {jcope_field.shape}; expected {want}"
+                    )
+                # <--- jsasaki 2026-11-05
             else:
                 jcope_field = self._read_variable_profile(jcope_name)[
                     :, :N_JCOPE_ACTIVE_LEVELS, :
@@ -567,18 +604,29 @@ SIGMA_TOL = 1e-6
 
 def _validate_obc_nodes(obc_nodes: ArrayLike) -> NDArray[np.int32]:
     """Non-empty, 1-D, integral, positive, unique node ids representable as int32."""
-    a = np.asarray(obc_nodes)
+    # jsasaki 2026-11-05: review round 3 #3: a masked node id is refused, not unmasked
+    if np.ma.is_masked(obc_nodes):
+        raise ValueError("obc_nodes has masked entries")
+    a = np.asarray(np.ma.getdata(obc_nodes))
     if a.ndim != 1 or a.size == 0:
         raise ValueError("obc_nodes must be a non-empty 1-D array")
     if a.dtype.kind not in "iuf":
         raise ValueError(f"obc_nodes must be integers (got dtype {a.dtype})")
     if a.dtype.kind == "f" and not (np.isfinite(a).all() and (a == np.rint(a)).all()):
         raise ValueError("obc_nodes must be integers")
-    if (a < 1).any() or (a > np.iinfo(np.int32).max).any():
+    # ---> jsasaki 2026-11-05: review round 3 #13: the range check in a representation that keeps the
+    # int32 bound exact (float64 for floats; the integer values themselves otherwise), and the
+    # converted result is verified against the input
+    vals = a.astype(np.float64) if a.dtype.kind == "f" else a
+    if (vals < 1).any() or (vals > np.iinfo(np.int32).max).any():
         raise ValueError("obc_nodes must be positive (1-based) int32 node ids")
     if np.unique(a).size != a.size:
         raise ValueError("obc_nodes must be unique")
-    return a.astype(np.int32)
+    out = a.astype(np.int32)
+    if not np.array_equal(out.astype(np.float64), a.astype(np.float64)):
+        raise ValueError("obc_nodes are not representable as int32 node ids")
+    return out
+    # <--- jsasaki 2026-11-05
 
 
 def _validate_sigma(
@@ -589,8 +637,9 @@ def _validate_sigma(
     siglev runs from 0 (surface) to -1 (bed) without increasing; each siglay lies between its two
     interfaces. Collapsed (equal) interfaces are allowed; the layer centre then equals them.
     """
-    sv = np.asarray(siglev, dtype=np.float64)
-    sl = np.asarray(siglay, dtype=np.float64)
+    # jsasaki 2026-11-05: review round 3 #3: masked entries become NaN (refused below)
+    sv = _plain_float(siglev, "siglev")
+    sl = _plain_float(siglay, "siglay")
     if sv.ndim not in (1, 2) or sl.ndim != sv.ndim:
         raise ValueError("siglev / siglay must both be 1-D or both 2-D (n_sig, n_obc)")
     if sv.ndim == 2 and (sv.shape[1] != n_obc or sl.shape[1] != n_obc):
@@ -657,12 +706,65 @@ def _check_finite(label: str, arr: NDArray, obc_nodes: ArrayLike) -> None:
 
 
 def _validate_time(time_mjd: ArrayLike) -> NDArray[np.float64]:
-    t = np.asarray(time_mjd, dtype=np.float64)
+    # jsasaki 2026-11-05: review round 3 #3: masked entries become NaN (refused below)
+    t = _plain_float(time_mjd, "time_mjd")
     if t.ndim != 1 or t.size == 0 or not np.isfinite(t).all():
         raise ValueError("time_mjd must be a non-empty, finite 1-D array")
     if (np.diff(t) <= 0).any():
         raise ValueError("time_mjd must be strictly increasing")
     return t
+
+
+# <--- jsasaki 2026-11-05
+
+
+# ---> jsasaki 2026-11-05: review round 3 #1 #2 #3 #4: masks, float32 conversion and the region schema
+# Absolute tolerance (degree) of an axis comparison, the same as for the full-domain archive's axes.
+AXIS_ATOL = 1e-6
+
+
+def _plain_float(values: ArrayLike, label: str) -> NDArray[np.float64]:
+    """A plain float64 ndarray; masked entries become NaN, so a mask never passes as data."""
+    a = np.ma.asarray(values)
+    if a.dtype.kind not in "iuf":
+        raise ValueError(f"{label} must be real numbers (got dtype {a.dtype})")
+    return np.asarray(np.ma.filled(a.astype(np.float64), np.nan))
+
+
+def _to_float32(a: NDArray) -> NDArray[np.float32]:
+    """Convert to float32; a finite value beyond the float32 range becomes inf (refused as non-finite)."""
+    with np.errstate(over="ignore", invalid="ignore"):
+        return np.asarray(a).astype(np.float32)
+
+
+def _forcing_float32(
+    label: str, arr: ArrayLike, obc_nodes: ArrayLike
+) -> NDArray[np.float32]:
+    """The float32 array that will be written, validated finite (masked, NaN, Inf, overflow refused)."""
+    out = _to_float32(_plain_float(arr, label))
+    _check_finite(f"{label} (masked, NaN, Inf or beyond float32)", out, obc_nodes)
+    return out
+
+
+def _validate_region_schema(ds: xr.Dataset, path: Path) -> None:
+    """Coordinates time/level/lat/lon on their own dimensions; level exactly 0..45 ascending."""
+    for c in ("time", "level", "lat", "lon"):
+        if c not in ds.variables or ds[c].dims != (c,):
+            raise ValueError(
+                f"{path}: coordinate {c} is missing or not on dimension {c}"
+            )
+    lev = np.asarray(ds["level"].values)
+    if lev.dtype.kind not in "iuf" or not np.array_equal(
+        lev, np.arange(N_JCOPE_ACTIVE_LEVELS)
+    ):
+        raise ValueError(
+            f"{path}: the level coordinate must be 0..{N_JCOPE_ACTIVE_LEVELS - 1} ascending "
+            "(JCOPE level index, 0 = surface)"
+        )
+    for c in ("lat", "lon"):
+        v = np.asarray(ds[c].values)
+        if v.dtype.kind not in "iuf" or v.size == 0 or not np.isfinite(v).all():
+            raise ValueError(f"{path}: coordinate {c} must be non-empty and finite")
 
 
 # <--- jsasaki 2026-11-05
@@ -737,7 +839,8 @@ def write_tsobc_nc(
     obc_nodes = _validate_obc_nodes(obc_nodes)
     n_time = int(time_mjd.size)
     n_obc = int(obc_nodes.size)
-    obc_h = np.asarray(obc_h, dtype=np.float32)
+    # jsasaki 2026-11-05: review round 3 #3 #4: masked -> NaN, overflow -> inf, both refused below
+    obc_h = _to_float32(_plain_float(obc_h, "obc_h"))
     if obc_h.shape != (n_obc,) or not (np.isfinite(obc_h).all() and (obc_h > 0).all()):
         raise ValueError(f"obc_h must be {n_obc} finite positive depths")
     # siglay/siglev may be 1-D (uniform, broadcast across nodes) or 2-D
@@ -748,6 +851,8 @@ def write_tsobc_nc(
     n_siglev = int(siglev_arr.shape[0])
     if not fields:
         raise ValueError("fields is empty")
+    # jsasaki 2026-11-05: review round 3 #3 #4: the validated float32 arrays are the ones written
+    fields32: dict[str, NDArray[np.float32]] = {}
     for v, arr in fields.items():
         if v not in _TSOBC_VAR_MAP:
             raise ValueError(
@@ -758,7 +863,7 @@ def write_tsobc_nc(
                 f"field {v!r} has shape {np.shape(arr)}; "
                 f"expected ({n_time}, {n_siglay}, {n_obc})"
             )
-        _check_finite(f"field {v!r}", np.asarray(arr), obc_nodes)
+        fields32[v] = _forcing_float32(f"field {v!r}", arr, obc_nodes)
     sources = list(source_files)
 
     def _write(path: Path) -> None:
@@ -771,7 +876,7 @@ def write_tsobc_nc(
             siglay_arr,
             n_siglev,
             n_siglay,
-            fields,
+            fields32,
             title,
             sources,
         )
@@ -875,11 +980,12 @@ def write_elevation_nc(
         raise ValueError(
             f"elevation has shape {np.shape(elevation)}; expected ({n_time}, {n_obc})"
         )
-    _check_finite("elevation", np.asarray(elevation), obc_nodes)
+    # jsasaki 2026-11-05: review round 3 #3 #4: the validated float32 array is the one written
+    elevation32 = _forcing_float32("elevation", elevation, obc_nodes)
     sources = list(source_files)
 
     def _write(path: Path) -> None:
-        _write_elevation_file(path, time_mjd, obc_nodes, elevation, title, sources)
+        _write_elevation_file(path, time_mjd, obc_nodes, elevation32, title, sources)
 
     return _atomic_write(out_path, _write)
     # <--- jsasaki 2026-11-05

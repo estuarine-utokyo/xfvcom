@@ -171,8 +171,20 @@ def check_time_axis(
     """
     # jsasaki 2026-11-05: review round 2 #2: the actual periods, not only the year list, are checked
     epoch = pd.Timestamp("1858-11-17")
+    # ---> jsasaki 2026-11-05: review round 3 #18: finite, non-empty 1-D times (NaN compares false
+    # with every bound below); masked entries count as missing
+    checked: dict[int, np.ndarray] = {}
     for y in years:
-        t = np.asarray(mjd_by_year[y], dtype=np.float64)
+        t = np.ma.filled(np.ma.asarray(mjd_by_year[y]).astype(np.float64), np.nan)
+        if t.ndim != 1 or t.size == 0 or not np.isfinite(t).all():
+            raise SystemExit(
+                f"the source for {y} must have a non-empty, finite 1-D time axis"
+            )
+        checked[y] = t
+    mjd_by_year = checked
+    # <--- jsasaki 2026-11-05
+    for y in years:
+        t = mjd_by_year[y]
         lo = (pd.Timestamp(f"{y}-01-01") - epoch) / pd.Timedelta(days=1)
         hi = (pd.Timestamp(f"{y + 1}-01-01") - epoch) / pd.Timedelta(days=1)
         if t.size == 0 or t.min() < lo - _STEP_TOL or t.max() > hi - _HOUR + _STEP_TOL:

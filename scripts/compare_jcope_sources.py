@@ -28,6 +28,29 @@ from xfvcom.io import FullDomainSource, JcopeGrid  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 STEP = {"TT": 0.01, "ST": 0.01, "UT": 0.001, "VT": 0.001, "EGT": 0.001}
+# jsasaki 2026-11-05: review round 3 #16: one explicit absolute axis tolerance (degree) for both
+# sources, no relative part (rtol scaled by ~140 degrees would admit shifts of ~1e-3 degree)
+AXIS_ATOL = 1e-6
+
+
+def check_region_block(grid, reg) -> tuple[int, int]:
+    """The region file's axes must be a contiguous block of the grid's; return its (j0, i0) offset."""
+    # ---> jsasaki 2026-11-05: review round 3 #16: rtol=0 and an explicit absolute tolerance
+    r_lat = np.asarray(reg["lat"].values, dtype=np.float64)
+    r_lon = np.asarray(reg["lon"].values, dtype=np.float64)
+    j0, i0 = grid.index_of(r_lat[0], r_lon[0])
+    j0, i0 = int(j0), int(i0)
+    b_lat = grid.lat[j0 : j0 + r_lat.size]
+    b_lon = grid.lon[i0 : i0 + r_lon.size]
+    if not (
+        b_lat.shape == r_lat.shape
+        and b_lon.shape == r_lon.shape
+        and np.allclose(r_lat, b_lat, rtol=0, atol=AXIS_ATOL)
+        and np.allclose(r_lon, b_lon, rtol=0, atol=AXIS_ATOL)
+    ):
+        sys.exit("the region file's axes are not a block of the grid's")
+    return j0, i0
+    # <--- jsasaki 2026-11-05
 
 
 def check_alignment(src, grid, reg) -> np.ndarray:
@@ -35,11 +58,12 @@ def check_alignment(src, grid, reg) -> np.ndarray:
     # ---> jsasaki 2026-11-05: review round 2 #19: the archive's own axes against basic.nc, the
     # vertical index of the region file, and the exact hours selected from both sources
     assert src.lat is not None and src.lon is not None
+    # jsasaki 2026-11-05: review round 3 #16: the shared explicit tolerance
     if not (
         src.lat.shape == grid.lat.shape
         and src.lon.shape == grid.lon.shape
-        and np.allclose(src.lat, grid.lat, rtol=0, atol=1e-6)
-        and np.allclose(src.lon, grid.lon, rtol=0, atol=1e-6)
+        and np.allclose(src.lat, grid.lat, rtol=0, atol=AXIS_ATOL)
+        and np.allclose(src.lon, grid.lon, rtol=0, atol=AXIS_ATOL)
     ):
         sys.exit("the archive's lat/lon axes are not the grid file's")
     if "level" in reg.variables and not np.array_equal(
@@ -82,7 +106,8 @@ def main() -> int:
     jj, ii = grid.find_nearest_ocean(lat, lon)
     src = FullDomainSource(a.archive_root, a.start, a.end)
     reg = xr.open_dataset(a.region_nc)
-    j0, i0 = grid.index_of(reg["lat"].values[0], reg["lon"].values[0])
+    # jsasaki 2026-11-05: review round 3 #16: the axis-block check first, with rtol=0
+    j0, i0 = check_region_block(grid, reg)
     rj, ri = jj - int(j0), ii - int(i0)
     if (
         (rj < 0).any()
@@ -91,13 +116,6 @@ def main() -> int:
         or (ri >= reg.sizes["lon"]).any()
     ):
         sys.exit("an OBC cell lies outside the region file")
-    if not (
-        np.allclose(reg["lat"].values, grid.lat[int(j0) : int(j0) + reg.sizes["lat"]])
-        and np.allclose(
-            reg["lon"].values, grid.lon[int(i0) : int(i0) + reg.sizes["lon"]]
-        )
-    ):
-        sys.exit("the region file's axes are not a block of the grid's")
     # jsasaki 2026-11-05: review round 2 #19: alignment checked before any value
     pos = check_alignment(src, grid, reg)
     pts = dict(

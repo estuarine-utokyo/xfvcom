@@ -245,3 +245,88 @@ def test_nearest_ocean_uses_the_fractional_position(tmp_path):
         assert (int(j), int(i)) == (5, 6)
         j, i = g.find_nearest_ocean(17.0 + 5 * g.dy, 117.0 + 4.6 * g.dx)
         assert (int(j), int(i)) == (5, 4)
+
+
+# ---------------------------------------------------------------------------
+# review round 3 (gpt-6.1-sol)
+# ---------------------------------------------------------------------------
+
+
+def _unit_basic(path, mask, *, origin=(0.0, 0.0), spacing=(1.0, 1.0), shift_lon=0.0):
+    """basic.nc on a unit grid (exact fractional positions); attributes may disagree with the axes."""
+    jm, im = mask.shape
+    with nc.Dataset(path, "w") as ds:
+        ds.createDimension("lat", jm)
+        ds.createDimension("lon", im)
+        ds.createDimension("level", 2)
+        ds.createVariable("lat", "f8", ("lat",))[:] = np.arange(jm, dtype=float)
+        ds.createVariable("lon", "f8", ("lon",))[:] = np.arange(im, dtype=float)
+        ds.createVariable("h", "f4", ("lat", "lon"))[:] = np.where(mask, 100.0, 0.0)
+        ds.createVariable("mask", "i1", ("lat", "lon"))[:] = mask.astype(np.int8)
+        ds.createVariable("ZZ", "f4", ("level", "lat", "lon"))[:] = -1.0
+        ds.grid_origin_lat, ds.grid_origin_lon = origin[0], origin[1] + shift_lon
+        ds.grid_dy_deg, ds.grid_dx_deg = spacing
+    return path
+
+
+@pytest.mark.parametrize(
+    "kw, match",
+    [
+        (dict(shift_lon=1.0), "lon axis is not grid_origin"),
+        (dict(spacing=(1.0, 2.0)), "lon axis is not grid_origin"),
+        (dict(spacing=(0.0, 1.0)), "grid_dy_deg must be finite and positive"),
+        (dict(spacing=(1.0, np.nan)), "grid_dx_deg must be finite and positive"),
+        (dict(origin=(np.inf, 0.0)), "grid_origin_lat must be finite"),
+    ],
+)
+def test_round3_attributes_must_describe_the_axes(tmp_path, kw, match):
+    # #12: shifting only grid_origin_lon used to pair the payload with another cell's geometry
+    p = _unit_basic(tmp_path / "b.nc", np.ones((4, 5), dtype=bool), **kw)
+    with pytest.raises(ValueError, match=match):
+        JcopeGrid(p)
+
+
+def test_round3_real_basic_nc_still_loads():
+    p = "/home/pj24001722/share/Data/jcopetda/grid/basic.nc"
+    import os
+
+    if not os.path.isfile(p):
+        pytest.skip("real basic.nc not available")
+    with JcopeGrid(p) as g:
+        assert (g.jm, g.im) == (1190, 1190)
+
+
+@pytest.mark.parametrize(
+    "lat, lon, match",
+    [
+        ([np.nan], [1.0], "finite"),
+        ([2.0], [1.0, 3.0], "same length"),
+        ([[1.0, 2.0]], [[1.0, 2.0]], "1-D"),
+        (np.ma.masked_array([1.0], mask=[True]), [1.0], "masked"),
+    ],
+)
+def test_round3_lookup_coordinates_are_validated(tmp_path, lat, lon, match):
+    # #17
+    with JcopeGrid(_unit_basic(tmp_path / "b.nc", np.ones((4, 5), dtype=bool))) as g:
+        with pytest.raises(ValueError, match=match):
+            g.find_nearest_ocean(lat, lon)
+        with pytest.raises(ValueError, match=match):
+            g.index_of(lat, lon)
+
+
+@pytest.mark.parametrize("radius", [0, -1, 1.5, True, "3"])
+def test_round3_search_radius_is_validated(tmp_path, radius):
+    # #17
+    with JcopeGrid(_unit_basic(tmp_path / "b.nc", np.ones((4, 5), dtype=bool))) as g:
+        with pytest.raises(ValueError, match="max_radius_cells"):
+            g.find_nearest_ocean(1.0, 1.0, max_radius_cells=radius)
+
+
+def test_round3_ties_go_to_the_first_cell_in_j_i_order(tmp_path):
+    # #20: (1.5, 1.5) is equally far from (1,1), (1,2), (2,1), (2,2); the rounded-cell shortcut
+    # returned (2, 2)
+    with JcopeGrid(_unit_basic(tmp_path / "b.nc", np.ones((4, 5), dtype=bool))) as g:
+        j, i = g.find_nearest_ocean(1.5, 1.5)
+        assert (int(j), int(i)) == (1, 1)
+        j, i = g.find_nearest_ocean([1.5, 2.2], [1.5, 3.0])
+        assert j.tolist() == [1, 2] and i.tolist() == [1, 3]

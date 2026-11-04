@@ -789,3 +789,160 @@ def test_round2_writer_temporary_is_unique_and_exclusive(generator, tmp_path):
     with nc.Dataset(out) as ds:
         assert ds["elevation"].shape == (4, 3)
     assert not [p for p in tmp_path.iterdir() if p.name.startswith(".e.nc.")]
+
+
+# ---------------------------------------------------------------------------
+# review round 3 (gpt-6.1-sol)
+# ---------------------------------------------------------------------------
+
+import xarray as xr  # noqa: E402
+
+
+def _rewrite_region(region_path, out_path, fn):
+    with xr.open_dataset(region_path) as ds:
+        new = fn(ds.load())
+    new.to_netcdf(out_path)
+    return out_path
+
+
+def test_round3_region_axes_must_be_the_grid_block(synthetic_archive):
+    # #1: doubled longitude spacing with the origin kept used to pass and sample other columns
+    basic_path, region_path = synthetic_archive
+    bad = _rewrite_region(
+        region_path,
+        region_path.parent / "bad.nc",
+        lambda ds: ds.assign_coords(
+            lon=ds["lon"].values[0] + 2 * (ds["lon"].values - ds["lon"].values[0])
+        ),
+    )
+    grid = JcopeGrid(basic_path)
+    try:
+        with pytest.raises(ValueError, match="contiguous block"):
+            JcopeObcGenerator(**_kw(bad, grid))
+    finally:
+        grid.close()
+
+
+def test_round3_region_level_coordinate_and_dimension_order(synthetic_archive):
+    # #2: a reversed level axis is refused; a transposed payload gives the same forcing
+    basic_path, region_path = synthetic_archive
+    rev = _rewrite_region(
+        region_path,
+        region_path.parent / "rev.nc",
+        lambda ds: ds.isel(level=slice(None, None, -1)),
+    )
+    tr = _rewrite_region(
+        region_path,
+        region_path.parent / "tr.nc",
+        lambda ds: ds.transpose("lon", "time", "lat", "level"),
+    )
+    grid = JcopeGrid(basic_path)
+    try:
+        with pytest.raises(ValueError, match="level coordinate must be 0..45"):
+            JcopeObcGenerator(**_kw(rev, grid))
+        with (
+            JcopeObcGenerator(**_kw(region_path, grid)) as ref,
+            JcopeObcGenerator(**_kw(tr, grid)) as got,
+        ):
+            a, b = ref.build_tsobc_arrays(), got.build_tsobc_arrays()
+            for v in ("temp", "salt"):
+                np.testing.assert_array_equal(a[v], b[v])
+            np.testing.assert_array_equal(
+                ref.build_elevation_array(), got.build_elevation_array()
+            )
+    finally:
+        grid.close()
+
+
+def test_round3_masked_forcing_is_refused(generator, tmp_path):
+    # #3: masked arrays with finite underlying values used to be written as missing values, and
+    # masked raw profiles used to be unmasked into finite forcing
+    g = generator
+    fields = g.build_tsobc_arrays()
+    masked = {k: np.ma.masked_array(v, mask=True) for k, v in fields.items()}
+    out = tmp_path / "ts.nc"
+    with pytest.raises(ValueError, match="non-finite"):
+        write_tsobc_nc(
+            out,
+            time_mjd=g.mjd,
+            obc_nodes=g.obc_nodes,
+            obc_h=g.obc_h_fvcom,
+            siglev=g.siglev,
+            siglay=g.siglay,
+            fields=masked,
+        )
+    elev = np.ma.masked_array(g.build_elevation_array(), mask=False)
+    elev[2, 1] = np.ma.masked
+    with pytest.raises(ValueError, match="non-finite value at time index 2, node 102"):
+        write_elevation_nc(out, time_mjd=g.mjd, obc_nodes=g.obc_nodes, elevation=elev)
+    raw = g.read_raw_profiles()
+    raw["temp"] = np.ma.masked_array(np.full_like(raw["temp"], 17.0), mask=True)
+    with pytest.raises(ValueError, match=r"temp \(TT\).*non-finite"):
+        g.build_tsobc_arrays(raw_profiles=raw)
+    with pytest.raises(ValueError, match="time_mjd"):
+        write_elevation_nc(
+            out,
+            time_mjd=np.ma.masked_array(g.mjd, mask=[True] + [False] * 3),
+            obc_nodes=g.obc_nodes,
+            elevation=g.build_elevation_array(),
+        )
+    assert not out.exists()
+
+
+def test_round3_float32_overflow_is_refused(generator, tmp_path):
+    # #4: 1e300 passed the float64 finite check and was stored as inf
+    g = generator
+    fields = {k: v.astype(np.float64) for k, v in g.build_tsobc_arrays().items()}
+    fields["salt"][0, 0, 0] = 1e300
+    out = tmp_path / "ts.nc"
+    with pytest.raises(ValueError, match="beyond float32"):
+        write_tsobc_nc(
+            out,
+            time_mjd=g.mjd,
+            obc_nodes=g.obc_nodes,
+            obc_h=g.obc_h_fvcom,
+            siglev=g.siglev,
+            siglay=g.siglay,
+            fields=fields,
+        )
+    elev = g.build_elevation_array().astype(np.float64)
+    elev[1, 2] = -1e300
+    with pytest.raises(ValueError, match="time index 1, node 103"):
+        write_elevation_nc(out, time_mjd=g.mjd, obc_nodes=g.obc_nodes, elevation=elev)
+    assert not out.exists()
+    # float64 input that fits is written as the validated float32 values
+    ok = g.build_elevation_array().astype(np.float64) + 1e-12
+    write_elevation_nc(out, time_mjd=g.mjd, obc_nodes=g.obc_nodes, elevation=ok)
+    with nc.Dataset(out) as ds:
+        np.testing.assert_array_equal(ds["elevation"][:], ok.astype(np.float32))
+
+
+@pytest.mark.parametrize(
+    "nodes",
+    [
+        np.array([2**31, 2, 3], dtype=np.float32),
+        np.array([2**31, 2, 3], dtype=np.int64),
+        np.array([2.0**40, 2, 3]),
+    ],
+)
+def test_round3_node_ids_beyond_int32_are_refused(nodes):
+    # #13: float32 2**31 was compared against the int32 maximum rounded to float32
+    from xfvcom.io.jcope_obc_generator import _validate_obc_nodes
+
+    with pytest.raises(ValueError, match="int32"):
+        _validate_obc_nodes(nodes)
+    assert _validate_obc_nodes(np.array([2**31 - 1, 1], dtype=np.int64)).tolist() == [
+        2**31 - 1,
+        1,
+    ]
+
+
+@pytest.mark.parametrize(
+    "shape", [(1, N_JCOPE_ACTIVE_LEVELS, 3), (4, N_JCOPE_ACTIVE_LEVELS, 1), (4, 47, 3)]
+)
+def test_round3_raw_profile_override_shape_is_exact(generator, shape):
+    # #14: a (1, 46, n) or (n_time, 46, 1) override used to give one-hour / one-node forcing
+    with pytest.raises(ValueError, match="raw_profiles"):
+        generator.build_tsobc_arrays(
+            variables=("temp",), raw_profiles={"temp": np.full(shape, 15.0)}
+        )

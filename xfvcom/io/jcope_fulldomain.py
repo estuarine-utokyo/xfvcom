@@ -18,8 +18,9 @@ A day file lists the hours whose raw record could not be obtained in its global 
 refuses to build from them, ``missing="interpolate"`` fills the declared hours INSIDE the requested
 period by linear interpolation in time between the nearest valid hours (a stand-in; it smooths
 whatever varies faster than the gap). When such a neighbour lies outside the period, the day files
-beyond its edge are read, one day at a time and at most ``MAX_HALO_DAYS`` days out; declarations in
-those extra days that the requested period does not depend on are ignored. The archive tree
+beyond its edge are read when that variable is read, one day at a time and at most ``MAX_HALO_DAYS``
+days out; declarations in those extra days that the requested period does not depend on are ignored,
+and the ``provisional_fill`` notes of the extra files that supplied endpoints are reported. The archive tree
 ``$DATA_DIR/jcopetda_provisional`` already contains such interpolated day files (global attribute
 ``provisional_fill``), so for it the default works unchanged; the declaration is reported in
 :meth:`FullDomainSource.provenance` and ends up in the history of the files written from it.
@@ -29,7 +30,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Callable, Iterable
+
+# jsasaki 2026-11-05: review round 3 #7: Callable no longer used
+from typing import Iterable
 
 import netCDF4 as nc
 import numpy as np
@@ -106,84 +109,70 @@ class FullDomainSource:
             raise ValueError(f"end {end} is before start {start}")
         self.start, self.end = d0, d1
 
-        def path_of(d: pd.Timestamp) -> Path:
-            return self.root / f"{d:%Y}" / f"jcopetda_{d:%Y%m%d}.nc"
-
         absent = [
-            path_of(d)
+            self._path_of(d)
             for d in pd.date_range(d0, d1, freq="D")
-            if not path_of(d).is_file()
+            if not self._path_of(d).is_file()
         ]
         if absent:
             raise FileNotFoundError(
                 f"{len(absent)} day file(s) missing under {self.root}: first {absent[0]} "
                 f"(the archive covers 2018-06-04 .. 2025-12-31)"
             )
-        # ---> jsasaki 2026-11-05: review round 2 #8 #18: declarations are kept as timestamps, the
-        # halo days are added only while a requested gap still lacks a valid neighbour, and the
-        # notes / repairs reported are those of the requested period only
+        # ---> jsasaki 2026-11-05: review round 3 #7 #8: only the requested days are inspected here;
+        # the halo days a variable's interpolation needs are resolved when that variable is read (a gap
+        # of a variable never read must not break anything), and the provisional notes of the halo
+        # files that supplied interpolation endpoints are reported with that variable
         self.lat: NDArray[np.float64] | None = None
         self.lon: NDArray[np.float64] | None = None
         self._schema: dict[str, float] = {}
         self._decl: dict[str, set[pd.Timestamp]] = {}
         self._notes_by_day: dict[pd.Timestamp, list[str]] = {}
-        idx_by_day: dict[pd.Timestamp, pd.DatetimeIndex] = {}
-        for day in pd.date_range(d0, d1, freq="D"):
-            idx_by_day[day] = self._inspect(path_of(day), day)
-        lo, hi = d0, d1
-        if missing == "interpolate":
-            lo, hi = self._extend_halo(d0, d1, path_of, idx_by_day)
-        days = pd.date_range(lo, hi, freq="D")
-        self.paths = [path_of(d) for d in days]
-        self._i0 = int((d0 - lo).days) * HOURS_PER_DAY
-        self.n_time = int((d1 - d0).days + 1) * HOURS_PER_DAY
-        full = idx_by_day[days[0]].append([idx_by_day[d] for d in days[1:]])
-        self._time_full = full
-        self.time_index = full[self._i0 : self._i0 + self.n_time]
-        pos = {t: k for k, t in enumerate(full)}
+        self._idx_by_day: dict[pd.Timestamp, pd.DatetimeIndex] = {}
+        days = pd.date_range(d0, d1, freq="D")
+        for day in days:
+            self._idx_by_day[day] = self._inspect(self._path_of(day), day)
+        self.paths = [self._path_of(d) for d in days]
+        self.n_time = int(len(days)) * HOURS_PER_DAY
+        self.time_index = self._idx_by_day[days[0]].append(
+            [self._idx_by_day[d] for d in days[1:]]
+        )
         t_lo, t_hi = d0, d1 + _DAY
-        # every declared hour of the loaded days (never a valid interpolation neighbour) ...
-        self._declared: dict[str, list[int]] = {
-            v: sorted(pos[t] for t in s if t in pos) for v, s in self._decl.items()
-        }
-        # ... and the declared hours inside the requested period (to refuse or to repair)
-        self._missing: dict[str, list[int]] = {}
+        # the declared hours inside the requested period (to refuse or to repair), per variable
+        self._missing: dict[str, list[pd.Timestamp]] = {}
         for v, s in self._decl.items():
-            g = sorted(pos[t] for t in s if t_lo <= t < t_hi)
+            g = sorted(t for t in s if t_lo <= t < t_hi)
             if g:
                 self._missing[v] = g
-        self.notes: list[str] = [
-            n
-            for d in pd.date_range(d0, d1, freq="D")
-            for n in self._notes_by_day.get(d, [])
-        ]
+        self.notes: list[str] = [n for d in days for n in self._notes_by_day.get(d, [])]
         self._read_vars: set[str] = set()
         self._repaired: dict[str, set[pd.Timestamp]] = {}
+        # the provisional notes of halo files whose hours were interpolation endpoints, per variable
+        self._dep_notes: dict[str, list[str]] = {}
+        # the day files each variable was read from (the period plus its halo days)
+        self.paths_read: dict[str, list[Path]] = {}
         # <--- jsasaki 2026-11-05
 
-    def _extend_halo(
-        self,
-        d0: pd.Timestamp,
-        d1: pd.Timestamp,
-        path_of: Callable[[pd.Timestamp], Path],
-        idx_by_day: dict[pd.Timestamp, pd.DatetimeIndex],
-    ) -> tuple[pd.Timestamp, pd.Timestamp]:
-        """Add day files beyond the period until every requested gap has valid neighbours."""
+    def _path_of(self, d: pd.Timestamp) -> Path:
+        return self.root / f"{d:%Y}" / f"jcopetda_{d:%Y%m%d}.nc"
+
+    def _halo(self, var: str) -> tuple[pd.Timestamp, pd.Timestamp]:
+        """Days to read for ``var``: the period plus day files until every gap has valid neighbours."""
+        # jsasaki 2026-11-05: review round 3 #7: resolved for one variable, at read time
+        d0, d1 = self.start, self.end
         lo, hi = d0, d1
         while True:
             need = 0
-            for var, stamps in self._decl.items():
-                for s in sorted(t for t in stamps if d0 <= t < d1 + _DAY):
-                    for step in (-_HOUR, _HOUR):
-                        t = s + step
-                        while t in stamps:
-                            t += step
-                        if t < lo:
-                            need = -1
-                        elif t >= hi + _DAY:
-                            need = 1
-                        if need:
-                            break
+            stamps = self._decl.get(var, set())
+            for s in self._missing.get(var, []):
+                for step in (-_HOUR, _HOUR):
+                    t = s + step
+                    while t in stamps:
+                        t += step
+                    if t < lo:
+                        need = -1
+                    elif t >= hi + _DAY:
+                        need = 1
                     if need:
                         break
                 if need:
@@ -197,13 +186,14 @@ class FullDomainSource:
                     f"{var}: the missing hour {s:%Y-%m-%d %H}Z has no valid neighbour within "
                     f"{MAX_HALO_DAYS} days outside the requested period"
                 )
-            p = path_of(day)
+            p = self._path_of(day)
             if not p.is_file():
                 raise ValueError(
                     f"{var}: the missing hour {s:%Y-%m-%d %H}Z has no valid neighbour on both sides "
                     f"(its interpolation needs the day file {p}, which does not exist)"
                 )
-            idx_by_day[day] = self._inspect(p, day)
+            if day not in self._idx_by_day:
+                self._idx_by_day[day] = self._inspect(p, day)
             if need < 0:
                 lo = day
             else:
@@ -231,9 +221,22 @@ class FullDomainSource:
                         f"{p}: coordinate variable {cname} is not on dimension {cname}"
                     )
             # <--- jsasaki 2026-11-05
+            # ---> jsasaki 2026-11-05: review round 3 #15: a masked or non-finite coordinate entry is
+            # refused before it is compared (np.asarray would expose the value under the mask)
+            coords = {c: ds.variables[c][:] for c in ("time", "level", "lat", "lon")}
+            for cname, cval in coords.items():
+                if np.ma.is_masked(cval):
+                    raise ValueError(f"{p}: coordinate {cname} has masked entries")
+                cval = np.ma.getdata(cval)
+                if cval.dtype.kind not in "iuf" or not np.isfinite(cval).all():
+                    raise ValueError(
+                        f"{p}: coordinate {cname} must be finite real numbers"
+                    )
+                coords[cname] = cval
+            # <--- jsasaki 2026-11-05
             tv = ds.variables["time"]
             t = nc.num2date(
-                tv[:], tv.units, tv.calendar, only_use_cftime_datetimes=False
+                coords["time"], tv.units, tv.calendar, only_use_cftime_datetimes=False
             )
             idx = pd.DatetimeIndex([pd.Timestamp(x) for x in t])
             want = pd.date_range(day, periods=HOURS_PER_DAY, freq="h")
@@ -241,9 +244,10 @@ class FullDomainSource:
                 raise ValueError(
                     f"{p}: the time axis is not the 24 hourly UTC steps of {day:%Y-%m-%d}"
                 )
-            lat = np.asarray(ds.variables["lat"][:], dtype=np.float64)
-            lon = np.asarray(ds.variables["lon"][:], dtype=np.float64)
-            lev = np.asarray(ds.variables["level"][:])
+            # jsasaki 2026-11-05: review round 3 #15: the checked, unmasked coordinate values
+            lat = np.asarray(coords["lat"], dtype=np.float64)
+            lon = np.asarray(coords["lon"], dtype=np.float64)
+            lev = np.asarray(coords["level"])
             # jsasaki 2026-11-05: review round 2 #6: the first file read defines the axes
             if self.lat is None or self.lon is None:
                 self.lat, self.lon = lat, lon
@@ -370,6 +374,12 @@ class FullDomainSource:
                     + ", ".join(f"{t:%Y-%m-%d %H}Z" for t in when)
                 )
         lines.extend(self.notes)
+        # jsasaki 2026-11-05: review round 3 #8: provisional halo files that supplied endpoints
+        for var in used:
+            for note in self._dep_notes.get(var, []):
+                line = f"{var} interpolation endpoint from {note}"
+                if line not in lines:
+                    lines.append(line)
         return lines
         # <--- jsasaki 2026-11-05
 
@@ -415,22 +425,35 @@ class FullDomainSource:
     def _read(self, name, jj, ii, is3d):
         jj, ii = self._indices(jj, ii)
         n = jj.size
-        gaps = sorted(self._missing.get(name, []))
-        if gaps and self.missing == "error":
-            when = ", ".join(f"{self._time_full[g]:%Y-%m-%d %H}Z" for g in gaps[:5])
+        gap_times = self._missing.get(name, [])
+        if gap_times and self.missing == "error":
+            when = ", ".join(f"{t:%Y-%m-%d %H}Z" for t in gap_times[:5])
             raise ValueError(
-                f"{name}: {len(gaps)} hour(s) of {self.root} are declared missing ({when}...). Use the "
-                f"archive tree $DATA_DIR/jcopetda_provisional (interpolated day files) or pass "
+                f"{name}: {len(gap_times)} hour(s) of {self.root} are declared missing ({when}...). Use "
+                f"the archive tree $DATA_DIR/jcopetda_provisional (interpolated day files) or pass "
                 f"missing='interpolate'."
             )
-        n_full = len(self._time_full)
+        # ---> jsasaki 2026-11-05: review round 3 #7: the halo of THIS variable, resolved now
+        lo, hi = self._halo(name) if gap_times else (self.start, self.end)
+        days = pd.date_range(lo, hi, freq="D")
+        paths = [self._path_of(d) for d in days]
+        time_full = self._idx_by_day[days[0]].append(
+            [self._idx_by_day[d] for d in days[1:]]
+        )
+        i_start = int((self.start - lo).days) * HOURS_PER_DAY
+        pos_of = {t: k for k, t in enumerate(time_full)}
+        gaps = [pos_of[t] for t in gap_times]
+        # <--- jsasaki 2026-11-05
+        n_full = len(time_full)
         shape = (n_full, N_LEVELS, n) if is3d else (n_full, n)
         out = np.full(shape, np.nan, dtype=np.float32)
         scale = self._schema[name]
-        for d, path in enumerate(self.paths):
+        # jsasaki 2026-11-05: review round 3 #7: the day files of this variable's own halo
+        for d, path in enumerate(paths):
             t0 = d * HOURS_PER_DAY
             with nc.Dataset(path) as ds:
                 v = ds.variables[name]
+                # auto mask/scale off: the payload is a plain int16 ndarray, fill -> NaN below
                 v.set_auto_maskandscale(False)
                 ch = v.chunking()
                 cj, ci = (
@@ -444,6 +467,8 @@ class FullDomainSource:
                     j0, j1 = jj[sel].min(), jj[sel].max() + 1
                     i0, i1 = ii[sel].min(), ii[sel].max() + 1
                     blk = v[:, :, j0:j1, i0:i1] if is3d else v[:, j0:j1, i0:i1]
+                    # jsasaki 2026-11-05: review round 3 #3: never a masked array
+                    blk = np.ma.getdata(blk)
                     q = blk[..., jj[sel] - j0, ii[sel] - i0]  # (24, [46,] len(sel))
                     # jsasaki 2026-11-05: review round 2 #6: never broadcast a short payload
                     want = (
@@ -459,10 +484,15 @@ class FullDomainSource:
                     out[t0 : t0 + HOURS_PER_DAY, ..., sel] = val.astype(np.float32)
         # jsasaki 2026-11-05: review round 2 #18: record what was read
         self._read_vars.add(name)
+        self.paths_read[name] = paths
         if gaps:  # missing == "interpolate"; only the requested hours are repaired
             # jsasaki 2026-11-05: review round 2 #8: no declared hour (halo included) is a neighbour
-            good = np.setdiff1d(np.arange(n_full), self._declared.get(name, []))
+            declared = sorted(
+                pos_of[t] for t in self._decl.get(name, ()) if t in pos_of
+            )
+            good = np.setdiff1d(np.arange(n_full), declared)
             flat = out.reshape(n_full, -1)
+            ends: set[int] = set()
             for g in gaps:
                 pos = np.searchsorted(good, g)
                 if pos == 0 or pos == good.size:
@@ -472,11 +502,21 @@ class FullDomainSource:
                 a, b = good[pos - 1], good[pos]
                 w = (g - a) / (b - a)
                 flat[g] = (1.0 - w) * flat[a] + w * flat[b]
+                ends.update((int(a), int(b)))
             # jsasaki 2026-11-05: review round 2 #18: the hours actually interpolated
-            self._repaired.setdefault(name, set()).update(
-                self._time_full[g] for g in gaps
-            )
-        out = out[self._i0 : self._i0 + self.n_time]
+            self._repaired.setdefault(name, set()).update(time_full[g] for g in gaps)
+            # ---> jsasaki 2026-11-05: review round 3 #8: provisional notes of the halo files whose
+            # hours were endpoints (the period's own notes are always reported)
+            notes = self._dep_notes.setdefault(name, [])
+            for e in sorted(ends):
+                day = time_full[e].normalize()
+                if self.start <= day <= self.end:
+                    continue
+                for note in self._notes_by_day.get(day, []):
+                    if note not in notes:
+                        notes.append(note)
+            # <--- jsasaki 2026-11-05
+        out = out[i_start : i_start + self.n_time]
         # A sea cell has data at every hour: an all-NaN column means the cell is land in the archive.
         # jsasaki 2026-11-05: review round 2 #17: checked one day at a time (no annual boolean array)
         empty_cells = np.zeros(n, dtype=bool)

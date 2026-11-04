@@ -511,12 +511,14 @@ def test_round2_halo_extends_until_a_valid_neighbour(three_days):
     _declare(root, "20200103", ["TT_2020010300"])
     _declare(root, "20200102", [f"TT_20200102{h:02d}" for h in range(24)])
     src = FullDomainSource(root, "2020-01-03", "2020-01-03", missing="interpolate")
-    assert [p.name for p in src.paths] == [
+    # jsasaki 2026-11-05: review round 3 #7: the halo is resolved when the variable is read
+    assert [p.name for p in src.paths] == ["jcopetda_20200103.nc"]
+    got = src.read_profile("TT", [3], [6])
+    assert [p.name for p in src.paths_read["TT"]] == [
         "jcopetda_20200101.nc",
         "jcopetda_20200102.nc",
         "jcopetda_20200103.nc",
     ]
-    got = src.read_profile("TT", [3], [6])
     # the synthetic TT is linear in time (+0.01 per hour): the 25-hour span is restored
     ref = FullDomainSource(root, "2020-01-01", "2020-01-01").read_profile(
         "TT", [3], [6]
@@ -529,8 +531,10 @@ def test_round2_halo_extends_until_a_valid_neighbour(three_days):
 def test_round2_halo_gap_without_any_neighbour_is_an_error(three_days):
     _basic, _region, root = three_days
     _declare(root, "20200101", ["TT_2020010100"])
+    # jsasaki 2026-11-05: review round 3 #7: refused when TT is read, not at construction
+    src = FullDomainSource(root, "2020-01-01", "2020-01-01", missing="interpolate")
     with pytest.raises(ValueError, match="no valid neighbour"):
-        FullDomainSource(root, "2020-01-01", "2020-01-01", missing="interpolate")
+        src.read_profile("TT", [3], [6])
 
 
 def test_round2_a_nan_hour_in_a_later_day_is_still_found(three_days):
@@ -574,3 +578,62 @@ def test_round2_provenance_lists_only_what_was_read_and_repaired(three_days, tmp
     out = g.write_tsobc(tmp_path / "ts.nc")
     with nc.Dataset(out) as ds:
         assert "variables read: TT ST" in ds.history and "EGT" not in ds.history
+
+
+# ---------------------------------------------------------------------------
+# review round 3 (gpt-6.1-sol)
+# ---------------------------------------------------------------------------
+
+
+def test_round3_unused_variable_gap_does_not_block_other_reads(three_days):
+    # #7: UT 2020-01-02 00Z declared missing and no Jan 1 file: TT, T/S and EGT reads still work
+    _basic, _region, root = three_days
+    (root / "2020" / "jcopetda_20200101.nc").unlink()
+    _declare(root, "20200102", ["UT_2020010200"])
+    src = FullDomainSource(root, "2020-01-02", "2020-01-03", missing="interpolate")
+    for name in ("TT", "ST"):
+        assert np.isfinite(src.read_profile(name, [3], [6])).all()
+    assert np.isfinite(src.read_2d("EGT", [3], [6])).all()
+    with pytest.raises(ValueError, match="UT: the missing hour .* does not exist"):
+        src.read_profile("UT", [3], [6])
+
+
+def test_round3_halo_endpoint_provisional_notes_are_reported(three_days):
+    # #8: Jan 2 00Z TT interpolated with the Jan 1 23Z neighbour of a provisional day file
+    _basic, _region, root = three_days
+    _declare(root, "20200102", ["TT_2020010200"])
+    _edit(
+        root / "2020" / "jcopetda_20200101.nc",
+        lambda ds: (
+            setattr(ds, "provisional_fill", "TT_202001012300"),
+            setattr(ds, "provisional_method", "test method"),
+        ),
+    )
+    src = FullDomainSource(root, "2020-01-02", "2020-01-03", missing="interpolate")
+    src.read_profile("ST", [3], [6])  # no gap: no halo, no dependency note
+    assert not any("provisional" in x for x in src.provenance())
+    src.read_profile("TT", [3], [6])
+    prov = src.provenance()
+    assert "TT linearly interpolated in time at 2020-01-02 00Z" in prov
+    assert any(
+        x.startswith("TT interpolation endpoint from jcopetda_20200101.nc")
+        and "provisional_method: test method" in x
+        for x in prov
+    )
+    assert not any("provisional" in x for x in src.provenance(["ST"]))
+
+
+def test_round3_masked_coordinate_entries_are_refused(mini):
+    # #15: missing_value=10 masks the tenth level entry; np.asarray exposed the underlying 10
+    root, p = mini
+    _edit(p, lambda ds: ds["level"].setncattr("missing_value", np.int32(10)))
+    with pytest.raises(ValueError, match="coordinate level has masked entries"):
+        FullDomainSource(root, "2020-01-01", "2020-01-01")
+
+
+def test_round3_readers_return_plain_arrays(mini):
+    # #3: never a masked array
+    root, _p = mini
+    src = FullDomainSource(root, "2020-01-01", "2020-01-01")
+    for got in (src.read_profile("TT", [3], [6]), src.read_2d("EGT", [3], [6])):
+        assert type(got) is np.ndarray and got.dtype == np.float32

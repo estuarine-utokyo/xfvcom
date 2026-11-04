@@ -208,3 +208,44 @@ def test_round2_compare_checks_alignment_before_values():
         c.check_alignment(src, grid, xr.Dataset(coords={"time": bad_t}))
     with pytest.raises(SystemExit, match="absent"):
         c.check_alignment(src, grid, xr.Dataset(coords={"time": times[:2]}))
+
+
+# ---------------------------------------------------------------------------
+# review round 3 (gpt-6.1-sol)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "t",
+    [
+        np.array([np.nan, np.nan]),
+        np.array([]),
+        np.zeros((2, 2)),
+        np.ma.masked_array(_mjd("2020-01-01", 3), mask=[False, True, False]),
+    ],
+)
+def test_round3_time_axis_must_be_finite_nonempty_1d(t):
+    # #18: NaN compared false with every bound and passed
+    with pytest.raises(SystemExit, match="non-empty, finite 1-D"):
+        r.check_time_axis([2020], {2020: t})
+
+
+def test_round3_compare_region_axes_have_no_relative_tolerance():
+    # #16: 0.001 degree in longitude passed np.allclose's default rtol
+    import compare_jcope_sources as c
+
+    from xfvcom.io.jcope_grid import JcopeGrid
+
+    grid = JcopeGrid.__new__(JcopeGrid)
+    grid.lat = 17.0 + np.arange(10) / 36.0
+    grid.lon = 117.0 + np.arange(12) / 36.0
+    grid.lat_origin, grid.lon_origin, grid.dy, grid.dx = 17.0, 117.0, 1 / 36, 1 / 36
+    grid.jm, grid.im = 10, 12
+    reg = xr.Dataset(coords={"lat": grid.lat[2:6], "lon": grid.lon[3:9]})
+    assert c.check_region_block(grid, reg) == (2, 3)
+    for dlat, dlon in ((0.0, 0.001), (0.0001, 0.0)):
+        shifted = xr.Dataset(
+            coords={"lat": grid.lat[2:6] + dlat, "lon": grid.lon[3:9] + dlon}
+        )
+        with pytest.raises(SystemExit, match="not a block"):
+            c.check_region_block(grid, shifted)

@@ -67,7 +67,13 @@ def read_dat(path: str | Path) -> _GridData:
         idx += 1
         if len(parts) != 5 or not _is_int(parts[0]):
             continue
-        nv[:, read_elem] = [int(parts[1]) - 1, int(parts[2]) - 1, int(parts[3]) - 1]
+        ids = [int(parts[1]), int(parts[2]), int(parts[3])]
+        # jsasaki 2026-11-05: review round 3 #19: node ids are 1-based; 0 would become index -1
+        if min(ids) < 1 or max(ids) > node:
+            raise ValueError(
+                f"element {parts[0]}: node id(s) {ids} outside 1..{node} (1-based)"
+            )
+        nv[:, read_elem] = [ids[0] - 1, ids[1] - 1, ids[2] - 1]
         read_elem += 1
     if read_elem != nele:
         raise ValueError(f"Element block ended prematurely ({read_elem}/{nele})")

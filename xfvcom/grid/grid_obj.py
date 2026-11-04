@@ -110,6 +110,9 @@ class FvcomGrid:
         # 1-based → 0-based
         if nv_raw.min() == 1:
             nv_raw = nv_raw - 1
+        # jsasaki 2026-11-05: review round 3 #19: a negative index would silently wrap to the last node
+        if nv_raw.min() < 0 or nv_raw.max() >= kw["x"].size:
+            raise ValueError("Connectivity (nv) references a node outside the mesh")
         kw["nv"] = nv_raw
 
         for name in ("lon", "lat", "lonc", "latc"):
@@ -145,7 +148,8 @@ class FvcomGrid:
         lon, lat = utm_to_lonlat(data["x"], data["y"], zone=zone, northern=hemi)
 
         # sanity-check nv shape vs node count
-        if data["nv"].max() >= data["x"].size:
+        # jsasaki 2026-11-05: review round 3 #19: both bounds (a negative index wraps silently)
+        if data["nv"].min() < 0 or data["nv"].max() >= data["x"].size:
             raise ValueError(
                 "Connectivity (nv) references node index beyond range — "
                 "DAT file may have been mis-parsed. "

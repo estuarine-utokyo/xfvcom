@@ -34,6 +34,10 @@ from numpy.typing import NDArray
 
 __all__ = ["JcopeGrid"]
 
+# jsasaki 2026-11-05: review round 3 #12: absolute tolerance (degree) between the stored axes and
+# origin + index * spacing; the same as the archive / region axis checks, far below half a cell
+AXIS_ATOL = 1e-6
+
 
 class JcopeGrid:
     """Lightweight reader for the JCOPE-T DA static-grid archive.
@@ -71,6 +75,60 @@ class JcopeGrid:
         self.im: int = int(self.lon.size)
         self.jm: int = int(self.lat.size)
         self.km: int = int(self._ds.sizes["level"])
+        # jsasaki 2026-11-05: review round 3 #12: index arithmetic uses the attributes, the payload
+        # uses the axes: they must describe the same cells
+        self._check_geometry()
+
+    def _check_geometry(self) -> None:
+        for name, value in (
+            ("grid_origin_lon", self.lon_origin),
+            ("grid_origin_lat", self.lat_origin),
+        ):
+            if not np.isfinite(value):
+                raise ValueError(f"{self._path}: {name} must be finite")
+        for name, value in (("grid_dx_deg", self.dx), ("grid_dy_deg", self.dy)):
+            if not (np.isfinite(value) and value > 0):
+                raise ValueError(f"{self._path}: {name} must be finite and positive")
+        for name, axis, origin, step in (
+            ("lat", self.lat, self.lat_origin, self.dy),
+            ("lon", self.lon, self.lon_origin, self.dx),
+        ):
+            if axis.ndim != 1 or axis.size == 0:
+                raise ValueError(f"{self._path}: {name} must be a non-empty 1-D axis")
+            want = origin + np.arange(axis.size, dtype=np.float64) * step
+            if not (
+                np.isfinite(axis).all()
+                and np.allclose(axis, want, rtol=0, atol=AXIS_ATOL)
+            ):
+                raise ValueError(
+                    f"{self._path}: the {name} axis is not grid_origin + index * spacing "
+                    f"(tolerance {AXIS_ATOL:g} degree)"
+                )
+        if self.h.shape != (self.jm, self.im) or self.mask.shape != (self.jm, self.im):
+            raise ValueError(
+                f"{self._path}: h / mask are not (lat, lon) = ({self.jm}, {self.im})"
+            )
+
+    @staticmethod
+    def _coords(lat, lon) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Finite, unmasked coordinates: two scalars or two 1-D arrays of the same length."""
+        # jsasaki 2026-11-05: review round 3 #17: invalid coordinates are refused, not clipped
+        if np.ma.is_masked(lat) or np.ma.is_masked(lon):
+            raise ValueError("lat / lon have masked entries")
+        lat_arr = np.asarray(np.ma.getdata(lat))
+        lon_arr = np.asarray(np.ma.getdata(lon))
+        if lat_arr.dtype.kind not in "iuf" or lon_arr.dtype.kind not in "iuf":
+            raise ValueError("lat / lon must be real numbers")
+        lat_arr = lat_arr.astype(np.float64)
+        lon_arr = lon_arr.astype(np.float64)
+        if lat_arr.ndim > 1 or lat_arr.shape != lon_arr.shape:
+            raise ValueError(
+                f"lat / lon must be two scalars or two 1-D arrays of the same length "
+                f"(got shapes {lat_arr.shape}, {lon_arr.shape})"
+            )
+        if not (np.isfinite(lat_arr).all() and np.isfinite(lon_arr).all()):
+            raise ValueError("lat / lon must be finite")
+        return lat_arr, lon_arr
 
     # ---------- lifecycle ---------- #
 
@@ -93,11 +151,11 @@ class JcopeGrid:
     ) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
         """Return ``(j, i)`` indices of the nearest grid cell to ``(lat, lon)``.
 
-        Indices are clipped to the grid extent. Inputs may be scalars or
-        same-shape arrays; the output mirrors the input shape.
+        Indices are clipped to the grid extent. Inputs are two finite scalars or
+        two 1-D arrays of the same length; the output mirrors the input shape.
         """
-        lat_arr = np.asarray(lat, dtype=np.float64)
-        lon_arr = np.asarray(lon, dtype=np.float64)
+        # jsasaki 2026-11-05: review round 3 #17: validated coordinates
+        lat_arr, lon_arr = self._coords(lat, lon)
         j = np.round((lat_arr - self.lat_origin) / self.dy).astype(np.int64)
         i = np.round((lon_arr - self.lon_origin) / self.dx).astype(np.int64)
         j = np.clip(j, 0, self.jm - 1)
@@ -116,11 +174,23 @@ class JcopeGrid:
         Every ocean cell within ``max_radius_cells`` grid spacings (a square
         around the nominal nearest cell) is a candidate; the one whose centre
         is closest (Euclidean, in fractional cell units) to the REQUESTED
-        position wins, ties going to the first in (j, i) order. Raises
-        ``ValueError`` if no ocean cell is found within the radius.
+        position wins, ties going to the first in (j, i) order. The same rule
+        applies when the nominal cell itself is ocean. Raises ``ValueError``
+        if no ocean cell is found within the radius.
         """
-        lat_arr = np.atleast_1d(np.asarray(lat, dtype=np.float64))
-        lon_arr = np.atleast_1d(np.asarray(lon, dtype=np.float64))
+        # ---> jsasaki 2026-11-05: review round 3 #17: validated coordinates and radius
+        if (
+            isinstance(max_radius_cells, (bool, np.bool_))
+            or not isinstance(max_radius_cells, (int, np.integer))
+            or max_radius_cells < 1
+        ):
+            raise ValueError(
+                f"max_radius_cells must be a positive integer (got {max_radius_cells!r})"
+            )
+        lat0, lon0 = self._coords(lat, lon)
+        lat_arr = np.atleast_1d(lat0)
+        lon_arr = np.atleast_1d(lon0)
+        # <--- jsasaki 2026-11-05
         n = lat_arr.size
 
         j0_all, i0_all = self.index_of(lat_arr, lon_arr)
@@ -132,14 +202,12 @@ class JcopeGrid:
 
         for p in range(n):
             j0, i0 = int(j0_all[p]), int(i0_all[p])
-            if self.mask[j0, i0]:
-                # the rounded (clipped) cell is the nearest cell of the grid
-                out_j[p], out_i[p] = j0, i0
-                continue
+            # jsasaki 2026-11-05: review round 3 #20: no rounded-cell shortcut; the box search applies
+            # the documented tie rule (argmin over the row-major box = first in (j, i) order)
 
             # jsasaki 2026-11-05: review round 2 #1: search ALL candidates within the radius instead of
             # stopping at the first non-empty square (that could pick a farther cell in a corner)
-            r = max_radius_cells
+            r = int(max_radius_cells)
             j_lo = max(j0 - r, 0)
             j_hi = min(j0 + r + 1, self.jm)
             i_lo = max(i0 - r, 0)
