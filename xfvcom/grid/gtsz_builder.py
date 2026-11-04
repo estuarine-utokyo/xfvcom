@@ -258,6 +258,9 @@ def suggest_zlev(
     while levels[-1] - dz > -float(h_max):
         levels.append(levels[-1] - dz)
         dz = min(dz * stretch, dz_max)
+    # jsasaki 2026-11-05: review round 9 #5: micrometre-rounded levels, so that the
+    # exact sigma.dat spelling of a long stretched set still fits FVCOM's 400-char line
+    levels = [round(v, 6) for v in levels]
     # ensure the last level is at least as deep as the bed
     if levels[-1] > -float(h_max):
         levels.append(-float(h_max))
@@ -274,10 +277,45 @@ def build_gtsz(mesh: MeshInputs, spec: GtszSpec) -> GtszCoordinate:
     ``KBP`` / ``KBP1`` / ``FRAC1`` (when ``spec.mask``).
     """
     spec.validate()
+    # ---> jsasaki 2026-11-05: review round 9 #1: the depths must be finite, and a
+    # LOWSIG coordinate needs H > 0 at every node (FVCOM's domain-wide check below)
+    h = np.asarray(mesh.h, dtype=np.float64)
+    if h.shape != (mesh.n_node,) or not np.isfinite(h).all():
+        bad = np.flatnonzero(~np.isfinite(h)) if h.ndim == 1 else np.array([0])
+        raise ValueError(
+            f"build_gtsz: mesh depths must be a finite ({mesh.n_node},) array; "
+            f"{bad.size} non-finite value(s), first node {int(bad[0]) + 1} (1-based)"
+            if bad.size
+            else f"build_gtsz: mesh depths have shape {h.shape}, expected ({mesh.n_node},)"
+        )
+    if spec.lowsig and (h <= 0.0).any():
+        bad = np.flatnonzero(h <= 0.0)
+        raise ValueError(
+            f"build_gtsz: GTSZ_LOWSIG needs positive depths, but {bad.size} node(s) "
+            f"have H <= 0 (first node {int(bad[0]) + 1} 1-based, H = {h[bad[0]]:g} m); "
+            "FVCOM stops at startup (mod_setup.F SIGMA_GTSZ: 'GTSZ_LOWSIG produced "
+            "a non-positive layer thickness') -- use a depth file with H > 0"
+        )
+    # <--- jsasaki 2026-11-05
     href = None
     if spec.sadapt:
         href = grassfire_href(mesh.h, mesh.nv, mesh.x, mesh.y, spec.smax)
     Z = build_coordinate(mesh.h, spec, href=href)
+    # ---> jsasaki 2026-11-05: review round 9 #1: mod_setup.F SIGMA_GTSZ checks the
+    # thinnest physical LOWSIG layer over the whole domain, min((Z(K)-Z(K+1))*H),
+    # and stops when it is <= 0 (not only at the open boundary)
+    if spec.lowsig and h.size:
+        dz = (Z[:, :-1] - Z[:, 1:]) * h[:, None]
+        if not np.isfinite(dz).all() or float(dz.min()) <= 0.0:
+            badn = np.flatnonzero(~(np.isfinite(dz) & (dz > 0.0)).all(axis=1))
+            raise ValueError(
+                f"build_gtsz: GTSZ_LOWSIG produced {int((~(dz > 0.0)).sum())} "
+                f"non-positive layer thickness(es) at {badn.size} node(s) (first "
+                f"node {int(badn[0]) + 1} 1-based, thinnest {float(np.nanmin(dz)):g} "
+                "m); FVCOM stops at startup (mod_setup.F SIGMA_GTSZ) -- check H "
+                "and GTSZ K1 / KB / LOWFRAC"
+            )
+    # <--- jsasaki 2026-11-05
     if spec.mask:
         kbp = compute_kbp(Z, spec.kbm1)
         # ---> jsasaki 2026-11-05: review round 8 #6: mod_setup.F SIGMA_GTSZ

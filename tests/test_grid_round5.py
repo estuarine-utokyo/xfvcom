@@ -225,7 +225,8 @@ def _dat2(path, elems):
 
 def test_round5_element_records_are_placed_by_their_id(tmp_path):
     p = _dat2(tmp_path / "g.dat", "2 2 4 3 1\n1 1 2 3 1\n")
-    d = read_dat(p)
+    # jsasaki 2026-11-05: review round 9 #2: id placement is now the explicit permissive mode
+    d = read_dat(p, allow_unordered=True)
     assert d["nv"].T.tolist() == [[0, 1, 2], [1, 3, 2]]
 
 
@@ -238,5 +239,6 @@ def test_round5_element_records_are_placed_by_their_id(tmp_path):
     ],
 )
 def test_round5_bad_element_record_ids_are_refused(tmp_path, elems, msg):
+    # jsasaki 2026-11-05: review round 9 #2: id checks of the permissive mode
     with pytest.raises(ValueError, match=msg):
-        read_dat(_dat2(tmp_path / "g.dat", elems))
+        read_dat(_dat2(tmp_path / "g.dat", elems), allow_unordered=True)

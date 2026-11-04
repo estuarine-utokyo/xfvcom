@@ -65,7 +65,8 @@ def test_round4_node_records_are_placed_by_their_id(tmp_path):
         tmp_path / "r_grd.dat",
         "2 401000.0 3900000.0 0.0\n1 400000.0 3900000.0 0.0\n3 400000.0 3901000.0 0.0\n",
     )
-    d = read_dat(p)
+    # jsasaki 2026-11-05: review round 9 #2: id placement is now the explicit permissive mode
+    d = read_dat(p, allow_unordered=True)
     assert d["x"].tolist() == [400000.0, 401000.0, 400000.0]
     assert d["y"].tolist() == [3900000.0, 3900000.0, 3901000.0]
 
@@ -84,7 +85,10 @@ def test_round4_bad_node_record_ids_are_refused(tmp_path, first, msg):
         f"{first} 400000.0 3900000.0 0.0\n2 401000.0 3900000.0 0.0\n"
         "3 400000.0 3901000.0 0.0\n",
     )
+    # jsasaki 2026-11-05: review round 9 #2: id checks of the permissive mode; strict refuses too
     with pytest.raises(ValueError, match=msg):
+        read_dat(p, allow_unordered=True)
+    with pytest.raises(ValueError):
         read_dat(p)
 
 

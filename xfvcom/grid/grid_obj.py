@@ -255,9 +255,17 @@ class FvcomGrid:
         *,
         utm_zone: int | None = None,
         northern: bool | None = None,
+        # jsasaki 2026-11-05: review round 9 #2: strict FVCOM row order unless asked otherwise
+        allow_unordered: bool = False,
     ) -> "FvcomGrid":
-        """Parse ``*_grd.dat`` and return a fully populated grid object."""
-        data = read_dat(path)
+        """Parse ``*_grd.dat`` and return a fully populated grid object.
+
+        Record ids must run 1..n in file order (FVCOM assigns records by row
+        position); ``allow_unordered=True`` places them by id instead (see
+        :func:`~xfvcom.grid.dat_reader.read_dat`).
+        """
+        # jsasaki 2026-11-05: review round 9 #2: pass the ordering mode through
+        data = read_dat(path, allow_unordered=allow_unordered)
 
         # UTM zone & hemisphere – file hint < user override ----------------
         zone = utm_zone or data["zone"]

@@ -674,7 +674,10 @@ def main() -> int:
 
     # ---- load FVCOM-side metadata once ----
     print(f"[grid] reading FVCOM mesh from {args.fvcom_grid}")
-    mesh = FvcomGrid.from_dat(args.fvcom_grid, utm_zone=args.utm_zone)
+    # jsasaki 2026-11-05: review round 9 #2: FVCOM's row-order semantics (ids 1..n in file order)
+    mesh = FvcomGrid.from_dat(
+        args.fvcom_grid, utm_zone=args.utm_zone, allow_unordered=False
+    )
     if mesh.lat is None or mesh.lon is None:
         sys.exit("FvcomGrid lacks lon/lat — check utm_zone and the *_grd.dat file")
     n_nodes = mesh.node

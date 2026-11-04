@@ -24,7 +24,18 @@ def _is_int(tok: str) -> bool:
     return tok.lstrip("+-").isdigit()
 
 
-def read_dat(path: str | Path) -> _GridData:
+# jsasaki 2026-11-05: review round 9 #2: FVCOM places records by row position; strict by default
+def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
+    """Read an FVCOM ``*_grd.dat`` (connectivity block, then node block).
+
+    FVCOM's ``READ_COLDSTART_CONNECTIVITY`` / ``READ_COLDSTART_COORDS``
+    (``mod_input.F``) assign each element and node record by its ROW POSITION
+    and ignore the record's own id.  By default (``allow_unordered=False``)
+    the ids must therefore run 1..n in file order, so that the mesh read here
+    is the mesh FVCOM uses; a file that breaks this raises :class:`ValueError`.
+    ``allow_unordered=True`` instead places each record by its own id (unique,
+    1..n), which reconstructs a reordered file but NOT what FVCOM reads.
+    """
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(path)
@@ -81,6 +92,13 @@ def read_dat(path: str | Path) -> _GridData:
             raise ValueError(f"element record id {eid} outside 1..{nele} (1-based)")
         if seen_elem[eid - 1]:
             raise ValueError(f"element record id {eid} appears more than once")
+        # jsasaki 2026-11-05: review round 9 #2: FVCOM reads element row k as element k
+        if not allow_unordered and eid != read_elem + 1:
+            raise ValueError(
+                f"element record {read_elem + 1} carries id {eid}; FVCOM assigns "
+                "connectivity by row position, so the ids must run 1..n in order "
+                "(read_dat(..., allow_unordered=True) places records by id instead)"
+            )
         seen_elem[eid - 1] = True
         nv[:, eid - 1] = [ids[0] - 1, ids[1] - 1, ids[2] - 1]
         # <--- jsasaki 2026-11-05
@@ -110,6 +128,14 @@ def read_dat(path: str | Path) -> _GridData:
             raise ValueError(f"node record id {nid} outside 1..{node} (1-based)")
         if seen[nid - 1]:
             raise ValueError(f"node record id {nid} appears more than once")
+        # jsasaki 2026-11-05: review round 9 #2: FVCOM reads node row k as node k (ignores J)
+        if not allow_unordered and nid != read_node + 1:
+            raise ValueError(
+                f"node record {read_node + 1} carries id {nid}; FVCOM assigns "
+                "coordinates by row position (mod_input.F READ_COLDSTART_COORDS), "
+                "so the ids must run 1..n in order "
+                "(read_dat(..., allow_unordered=True) places records by id instead)"
+            )
         seen[nid - 1] = True
         x[nid - 1] = xv
         y[nid - 1] = yv

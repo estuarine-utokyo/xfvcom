@@ -99,6 +99,19 @@ _MAX_KEY = 40
 #: SIGMA COORDINATE TYPE values FVCOM selects (case-sensitive SELECT CASE)
 _STYPES = ("UNIFORM", "GEOMETRIC", "TANH", "GENERALIZED", "S_COORDINATE", "SIGMAZ")
 # <--- jsasaki 2026-11-05
+# ---> jsasaki 2026-11-05: review round 9 #4: SCAN_FILE's line-continuation
+# suffix (mod_utils.F ENDLINE): two backslashes in the IFORT/COMPAQ/IRIX build,
+# four otherwise.  A line whose space-trimmed text ends in two backslashes is
+# continued by every build (the four-backslash suffix ends in two as well), and
+# FVCOM joins the next line onto it BEFORE looking for comments or keys.
+_CONT_SUFFIX = "\\\\"  # two characters: backslash backslash
+# <--- jsasaki 2026-11-05
+
+
+def _is_continued(line: str) -> bool:
+    """True when FVCOM's SCAN_FILE would join the next line onto ``line``."""
+    t = line.rstrip(" ")
+    return len(t) > 1 and t.endswith(_CONT_SUFFIX)
 
 
 def _fvcom_type(val: str) -> str:
@@ -262,11 +275,24 @@ def read_sigma_dat(path: str | Path) -> SigmaFile:
     if text_lines and text_lines[-1] == "":
         text_lines.pop()
     for lineno, raw_line in enumerate(text_lines, start=1):
+        # ---> jsasaki 2026-11-05: review round 9 #4: continuations are joined
+        # before comments are recognised, so a continued comment swallows the
+        # next line (a key there is lost to FVCOM); not reproduced -- rejected
+        if _is_continued(raw_line):
+            raise ValueError(
+                f"{path}: line {lineno} ends in a backslash pair, FVCOM's line-"
+                "continuation suffix; FVCOM joins the next line onto it (onto a "
+                "comment, too, which hides the next key) -- remove the trailing "
+                "backslashes"
+            )
+        # <--- jsasaki 2026-11-05
+        # jsasaki 2026-11-05: review round 9 #3: SCAN_FILE passes ADJUSTL(TLINE)
         lead = raw_line.lstrip(" ")
         if not lead.rstrip(" ") or lead.startswith("!"):
             continue  # GET_VALUE: blank or comment line
-        bang = raw_line.find("!")
-        body = raw_line if bang < 0 else raw_line[:bang]
+        # jsasaki 2026-11-05: review round 9 #3: comment/key/value split on the adjusted line
+        bang = lead.find("!")
+        body = lead if bang < 0 else lead[:bang]
         if "=" not in body:
             continue  # GET_VALUE: no '=' -> "no data"
         if len(raw_line.encode()) > _MAX_LINE:
@@ -283,7 +309,11 @@ def read_sigma_dat(path: str | Path) -> SigmaFile:
                 "string and is silently replaced by the default) -- use spaces and "
                 "Unix line endings"
             )
-        body = body.replace(",", " ").lstrip(" ")
+        # jsasaki 2026-11-05: review round 9 #3: FVCOM's order -- ADJUSTL first
+        # (above), THEN commas -> blanks, and no second ADJUSTL of the key: a
+        # leading comma leaves a leading blank in the key, which then matches no
+        # FVCOM key (rejected below as a misspelling of a known key)
+        body = body.replace(",", " ")
         key, _, val = body.partition("=")
         # VARNAME = TEXT_LINE(1:EQLOC-1) into CHARACTER(40), compared after TRIM
         key = key[:_MAX_KEY].rstrip(" ")
@@ -419,7 +449,9 @@ def _ffmt(x: float) -> str:
     x = float(x)
     if not np.isfinite(x):
         raise ValueError(f"cannot write the non-finite value {x} to a sigma.dat")
-    s = f"{x:.10g}"
+    # jsasaki 2026-11-05: review round 9 #5: the shortest EXACT spelling (repr), so
+    # that reading the file back gives the same float64 (no rounding to zero)
+    s = repr(x)
     if "." not in s:
         if "e" in s:
             mant, _, exp = s.partition("e")
@@ -469,10 +501,12 @@ def _list_line(key: str, toks: list[str]) -> str:
         short[0] = f"{mant}.0{e}{exp}"
     line = f"{key} = {' '.join(short)}"
     if len(line) > _MAX_LINE:
+        # jsasaki 2026-11-05: review round 9 #5: values are exact now; say how to shorten them
         raise ValueError(
             f"{key}: the value list needs {len(line)} characters even in its "
             f"shortest exact form; FVCOM's SCAN_FILE reads only {_MAX_LINE} "
-            "characters per line -- use fewer levels or shorter values"
+            "characters per line -- use fewer levels or shorter values "
+            "(e.g. round the levels to a few decimals before building the spec)"
         )
     return line
     # <--- jsasaki 2026-11-05
@@ -484,6 +518,14 @@ def gtsz_to_lines(spec: GtszSpec, *, header_comment: str | None = None) -> list[
     lines: list[str] = []
     if header_comment:
         for cl in header_comment.splitlines():
+            # jsasaki 2026-11-05: review round 9 #4: a continued comment swallows the next line
+            if _is_continued(f"! {cl}"):
+                raise ValueError(
+                    f"header comment line {cl!r} ends in a backslash pair, FVCOM's "
+                    "line-continuation suffix: FVCOM would join the next line (a "
+                    "key) onto the comment and lose it -- remove the trailing "
+                    "backslashes"
+                )
             lines.append(f"! {cl}")
     lines.append(f"NUMBER OF SIGMA LEVELS = {spec.kb}")
     lines.append("SIGMA COORDINATE TYPE = SIGMAZ")
@@ -497,6 +539,21 @@ def gtsz_to_lines(spec: GtszSpec, *, header_comment: str | None = None) -> list[
     # jsasaki 2026-11-05: review round 7 #2: always a decimal point
     lines.append(f"GTSZ L2 = {_ffmt(spec.l2)}")
     lines.append(f"GTSZ NZ = {spec.nz}")
+    # ---> jsasaki 2026-11-05: review round 9 #6: FVCOM's SCAN_FILE (and
+    # read_sigma_dat) cannot read a one-value list for a mandatory vector
+    if spec.nz > 0 and len(spec.zlev) < 2:
+        raise ValueError(
+            f"GTSZ ZLEV has {len(spec.zlev)} value(s); FVCOM's SCAN_FILE does not "
+            "read a one-value list (it returns -4 and FVCOM stops), so a file with "
+            "GTSZ NZ = 1 cannot be written -- use at least two z-levels"
+        )
+    if len(spec.bpg_ref_zlev) == 1:
+        raise ValueError(
+            "BPG REF ZLEV has one value; FVCOM's SCAN_FILE does not read a "
+            "one-value list (it returns -4 and FVCOM stops) -- use at least two "
+            "reference levels or none"
+        )
+    # <--- jsasaki 2026-11-05
     if spec.nz > 0:
         # jsasaki 2026-11-05: review round 8 #5: within the scanner limits
         lines.append(_list_line("GTSZ ZLEV", [_ffmt(z) for z in spec.zlev]))
@@ -505,18 +562,21 @@ def gtsz_to_lines(spec: GtszSpec, *, header_comment: str | None = None) -> list[
         lines.append(f"GTSZ SMOOTH = {_ffmt(spec.smooth)}")
     lines.append(f"GTSZ MASK = {'T' if spec.mask else 'F'}")
     lines.append(f"GTSZ SADAPT = {'T' if spec.sadapt else 'F'}")
-    lines.append(f"GTSZ SMAX = {spec.smax:.6f}")
+    # jsasaki 2026-11-05: review round 9 #5: exact, decimal-bearing (was .6f: 4e-7 -> 0)
+    lines.append(f"GTSZ SMAX = {_ffmt(spec.smax)}")
     if spec.lowsig:
         lines.append("GTSZ LOWSIG = T")
     if spec.dref > 0.0:
-        # .6f, NOT :g -- FVCOM's SCAN_FILE type-detects "30" as integer and
+        # a decimal point always, NOT :g -- FVCOM's SCAN_FILE type-detects "30" as integer and
         # returns -3 against an FSCAL request, silently zeroing the cap
-        lines.append(f"GTSZ DREF = {spec.dref:.6f}")
+        # jsasaki 2026-11-05: review round 9 #5: exact, decimal-bearing (_ffmt)
+        lines.append(f"GTSZ DREF = {_ffmt(spec.dref)}")
     # jsasaki 2026-11-05: review round 7 #2: FVCOM ignores a one-value list
     # (a single lower-band layer has fraction 1 either way)
     if len(spec.lowfrac) >= 2:
         # jsasaki 2026-11-05: review round 8 #5: within the scanner limits
-        lines.append(_list_line("GTSZ LOWFRAC", [f"{f:.6f}" for f in spec.lowfrac]))
+        # jsasaki 2026-11-05: review round 9 #5: exact, decimal-bearing (1e-7 stayed 0.000000)
+        lines.append(_list_line("GTSZ LOWFRAC", [_ffmt(f) for f in spec.lowfrac]))
     if spec.dye_nowall:
         lines.append("GTSZ DYE_NOWALL = T")
     if spec.bpg_ref_zlev:
