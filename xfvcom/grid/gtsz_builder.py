@@ -37,6 +37,7 @@ from .gtsz import (
     build_coordinate,
     compute_kbp,
     compute_kbp1_frac1,
+    sband_reshape,
 )
 
 __all__ = [
@@ -260,7 +261,15 @@ def suggest_zlev(
         dz = min(dz * stretch, dz_max)
     # jsasaki 2026-11-05: review round 9 #5: micrometre-rounded levels, so that the
     # exact sigma.dat spelling of a long stretched set still fits FVCOM's 400-char line
-    levels = [round(v, 6) for v in levels]
+    # ---> jsasaki 2026-11-05: review round 10 #3: rounding must not break the
+    # ZLEV contract (a level rounded to -0.0, or two levels rounded together);
+    # in that case the unrounded levels are kept (the writer still raises its
+    # 400-character error if their exact spelling does not fit)
+    rounded = [round(v, 6) for v in levels]
+    r = np.asarray(rounded, dtype=np.float64)
+    if (r < 0.0).all() and (np.diff(r) < 0.0).all():
+        levels = rounded
+    # <--- jsasaki 2026-11-05
     # ensure the last level is at least as deep as the bed
     if levels[-1] > -float(h_max):
         levels.append(-float(h_max))
@@ -270,12 +279,102 @@ def suggest_zlev(
 # ===========================================================================
 #  Assemble the coordinate
 # ===========================================================================
-def build_gtsz(mesh: MeshInputs, spec: GtszSpec) -> GtszCoordinate:
+#: FVCOM ``REAL(SP)`` precision -> numpy dtype (``SP`` is double with ``-DDOUBLE_PRECISION``)
+_MODEL_DTYPES: dict[str, type[np.floating]] = {
+    "double": np.float64,
+    "single": np.float32,
+}
+
+
+def _lowsig_thickness_sp(
+    h: NDArray[np.float64],
+    href: NDArray[np.float64],
+    spec: GtszSpec,
+    dtype: type[np.floating],
+) -> NDArray[np.floating]:
+    """Physical LOWSIG layer thicknesses ``(Z(K)-Z(K+1))*H``, shape ``(M, KB-1)``,
+    evaluated in FVCOM's ``REAL(SP)`` precision ``dtype``.
+
+    Port of the ``GTSZ_LOWSIG`` branch of ``mod_setup.F::SIGMA_GTSZ`` and of the
+    ``GTSZ LOWFRAC`` reading in ``mod_input.F`` (conversion to ``SP``, positivity,
+    ``|SUM-1| <= 1e-4``, renormalisation by ``SUM`` and the sequential ``FRCUM``
+    accumulation), at ``ETA0 = 0``.  ``SBAND`` is the double-precision reshape
+    rounded to ``dtype`` (within one unit of the last place of FVCOM's).
+    """
+    # jsasaki 2026-11-05: review round 10 #2: new helper (startup check in model precision)
+    dt = dtype
+    kb, k1 = spec.kb, spec.k1
+    H = np.asarray(h, dtype=dt)
+    hr = np.minimum(np.asarray(href, dtype=dt), H)
+    if spec.dref > 0.0:
+        hr = np.minimum(hr, dt(spec.dref))
+    beta_up = dt(k1 - 1) / dt(kb - 1)
+    dup = beta_up * H
+    if spec.smooth > 0.0:
+        sm = dt(spec.smooth)
+        w = dt(0.5) * (dt(1.0) + np.tanh((dup - hr) / sm))
+        dup = w * hr + (dt(1.0) - w) * dup
+    else:
+        dup = np.minimum(hr, dup)
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        sigref = -dup / H
+        sband = sband_reshape(
+            kb, k1, spec.base, p1=spec.p1, l1=spec.l1, l2=spec.l2
+        ).astype(dt)
+        Z = np.empty((H.shape[0], kb), dtype=dt)
+        Z[:, :k1] = sigref[:, None] * sband[None, :]
+        if spec.lowfrac:
+            lf = np.asarray(spec.lowfrac, dtype=dt)
+            if not (np.isfinite(lf).all() and (lf > dt(0.0)).all()):
+                raise ValueError(
+                    "build_gtsz: a GTSZ LOWFRAC fraction is not positive in the "
+                    f"model's {np.dtype(dt).name} precision; FVCOM stops at startup"
+                )
+            fsum = dt(0.0)
+            for f in lf:
+                fsum = dt(fsum + f)
+            if abs(fsum - dt(1.0)) > dt(1.0e-4):
+                raise ValueError(
+                    "build_gtsz: GTSZ LOWFRAC fractions do not sum to 1 in the "
+                    f"model's {np.dtype(dt).name} precision; FVCOM stops at startup"
+                )
+            lf = lf / fsum
+            frcum = dt(0.0)
+            for k in range(k1 + 1, kb + 1):
+                frcum = dt(frcum + lf[k - k1 - 1])
+                Z[:, k - 1] = sigref + (dt(-1.0) - sigref) * frcum
+        else:
+            for k in range(k1 + 1, kb + 1):
+                Z[:, k - 1] = sigref + (dt(-1.0) - sigref) * (dt(k - k1) / dt(kb - k1))
+        Z[:, 0] = dt(0.0)
+        Z[:, kb - 1] = dt(-1.0)
+        dz: NDArray[np.floating] = (Z[:, :-1] - Z[:, 1:]) * H[:, None]
+    return dz
+
+
+def build_gtsz(
+    mesh: MeshInputs, spec: GtszSpec, *, model_precision: str = "double"
+) -> GtszCoordinate:
     """Build a :class:`~xfvcom.grid.gtsz.GtszCoordinate` over ``mesh`` for ``spec``.
 
     Computes ``H_ref`` (SADAPT only), the sigma field ``Z``, and the masking maps
     ``KBP`` / ``KBP1`` / ``FRAC1`` (when ``spec.mask``).
+
+    ``model_precision`` is the ``REAL(SP)`` precision of the FVCOM build that will
+    read the coordinate: ``"double"`` (default; the TB-FVCOM build, compiled with
+    ``-DDOUBLE_PRECISION``) or ``"single"``.  FVCOM's LOWSIG startup checks
+    (LOWFRAC normalisation and accumulation, every layer thicker than 0) are
+    evaluated in that precision, so a layer that collapses only in a
+    single-precision build is rejected here.  The returned coordinate is always
+    float64.
     """
+    # ---> jsasaki 2026-11-05: review round 10 #2: explicit model precision
+    if model_precision not in _MODEL_DTYPES:
+        raise ValueError(
+            f"build_gtsz: model_precision must be one of {sorted(_MODEL_DTYPES)}, "
+            f"got {model_precision!r}"
+        )
+    # <--- jsasaki 2026-11-05
     spec.validate()
     # ---> jsasaki 2026-11-05: review round 9 #1: the depths must be finite, and a
     # LOWSIG coordinate needs H > 0 at every node (FVCOM's domain-wide check below)
@@ -314,6 +413,23 @@ def build_gtsz(mesh: MeshInputs, spec: GtszSpec) -> GtszCoordinate:
                 f"node {int(badn[0]) + 1} 1-based, thinnest {float(np.nanmin(dz)):g} "
                 "m); FVCOM stops at startup (mod_setup.F SIGMA_GTSZ) -- check H "
                 "and GTSZ K1 / KB / LOWFRAC"
+            )
+    # <--- jsasaki 2026-11-05
+    # ---> jsasaki 2026-11-05: review round 10 #2: a single-precision FVCOM build
+    # evaluates the same LOWSIG construction in REAL(4), where a thin layer can
+    # collapse to zero thickness (startup FATAL_ERROR) although it is positive here
+    if spec.lowsig and h.size and model_precision == "single":
+        assert href is not None  # LOWSIG requires SADAPT (validated)
+        dz32 = _lowsig_thickness_sp(h, href, spec, _MODEL_DTYPES[model_precision])
+        good = np.isfinite(dz32) & (dz32 > 0.0)
+        if not good.all():
+            badn = np.flatnonzero(~good.all(axis=1))
+            raise ValueError(
+                f"build_gtsz: in single precision (model_precision='single') GTSZ_LOWSIG "
+                f"produces {int((~good).sum())} non-positive layer thickness(es) at "
+                f"{badn.size} node(s) (first node {int(badn[0]) + 1} 1-based); a "
+                "single-precision FVCOM stops at startup (mod_setup.F SIGMA_GTSZ) -- "
+                "use thicker GTSZ LOWFRAC fractions or a double-precision build"
             )
     # <--- jsasaki 2026-11-05
     if spec.mask:

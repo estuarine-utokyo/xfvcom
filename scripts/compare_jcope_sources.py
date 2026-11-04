@@ -20,7 +20,15 @@ import numpy as np
 # jsasaki 2026-11-05: review round 2 #19: time-index comparison
 import pandas as pd
 import xarray as xr
+
+# ---> jsasaki 2026-11-05: review round 10 #5: the script directory must be on
+# sys.path BEFORE run_jcope_obc is imported (python -m scripts.compare_jcope_sources)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+# isort: off
 from run_jcope_obc import parse_obc_dat  # noqa: E402
+
+# isort: on
+# <--- jsasaki 2026-11-05
 
 from xfvcom.grid.grid_obj import FvcomGrid  # noqa: E402
 from xfvcom.io import FullDomainSource, JcopeGrid  # noqa: E402
@@ -30,8 +38,6 @@ from xfvcom.io.jcope_obc_generator import (  # noqa: E402
     _region_time_index,
     _validate_region_schema,
 )
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 STEP = {"TT": 0.01, "ST": 0.01, "UT": 0.001, "VT": 0.001, "EGT": 0.001}
 # jsasaki 2026-11-05: review round 3 #16: one explicit absolute axis tolerance (degree) for both

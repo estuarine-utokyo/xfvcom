@@ -114,6 +114,19 @@ def _is_continued(line: str) -> bool:
     return len(t) > 1 and t.endswith(_CONT_SUFFIX)
 
 
+def _fvcom_buffer(line: str) -> str:
+    """``line`` as it lands in SCAN_FILE's ``CHARACTER(LEN=400) INPLINE`` after
+    ``READ(UNIT,'(a)')``: the first 400 bytes (a longer line is truncated)."""
+    return line.encode()[:_MAX_LINE].decode("utf-8", errors="replace")
+
+
+def _is_continued_fvcom(line: str) -> bool:
+    """True when FVCOM would continue ``line`` either as written or after its
+    400-byte truncation (SCAN_FILE tests the suffix on the TRUNCATED buffer)."""
+    # jsasaki 2026-11-05: review round 10 #1: the suffix test runs on the truncated line
+    return _is_continued(line) or _is_continued(_fvcom_buffer(line))
+
+
 def _fvcom_type(val: str) -> str:
     """The type FVCOM's ``GET_VALUE`` assigns to a value already normalised by
     :func:`read_sigma_dat` (commas blanked, comment removed, space-trimmed)."""
@@ -198,9 +211,13 @@ def _get_float(path: Path, pairs: dict[str, str], key: str) -> float | None:
             ),
         )
     try:
-        return float(toks[0])
+        x = float(toks[0])
     except ValueError:
         raise _bad(path, key, val, "not a valid floating value") from None
+    # jsasaki 2026-11-05: review round 10 #4: an overflowing literal (1.0e999) converts to inf
+    if not np.isfinite(x):
+        raise _bad(path, key, val, "the value is not finite (overflow?)")
+    return x
 
 
 def _get_bool(path: Path, pairs: dict[str, str], key: str) -> bool | None:
@@ -242,9 +259,13 @@ def _get_fvec(path: Path, pairs: dict[str, str], key: str) -> tuple[float, ...] 
             "returns -4, i.e. the key counts as absent)",
         )
     try:
-        return tuple(float(t) for t in toks)
+        xs = tuple(float(t) for t in toks)
     except ValueError:
         raise _bad(path, key, val, "not a list of valid floating values") from None
+    # jsasaki 2026-11-05: review round 10 #4: an overflowing literal (1.0e999) converts to inf
+    if not np.isfinite(xs).all():
+        raise _bad(path, key, val, "a value is not finite (overflow?)")
+    return xs
 
 
 def read_sigma_dat(path: str | Path) -> SigmaFile:
@@ -278,12 +299,14 @@ def read_sigma_dat(path: str | Path) -> SigmaFile:
         # ---> jsasaki 2026-11-05: review round 9 #4: continuations are joined
         # before comments are recognised, so a continued comment swallows the
         # next line (a key there is lost to FVCOM); not reproduced -- rejected
-        if _is_continued(raw_line):
+        # jsasaki 2026-11-05: review round 10 #1: also after the 400-byte truncation
+        if _is_continued_fvcom(raw_line):
             raise ValueError(
                 f"{path}: line {lineno} ends in a backslash pair, FVCOM's line-"
-                "continuation suffix; FVCOM joins the next line onto it (onto a "
-                "comment, too, which hides the next key) -- remove the trailing "
-                "backslashes"
+                "continuation suffix (as written, or after FVCOM truncates the "
+                f"line to its {_MAX_LINE}-character buffer); FVCOM joins the next "
+                "line onto it (onto a comment, too, which hides the next key) -- "
+                "remove the trailing backslashes or shorten the line"
             )
         # <--- jsasaki 2026-11-05
         # jsasaki 2026-11-05: review round 9 #3: SCAN_FILE passes ADJUSTL(TLINE)
@@ -518,6 +541,17 @@ def gtsz_to_lines(spec: GtszSpec, *, header_comment: str | None = None) -> list[
     lines: list[str] = []
     if header_comment:
         for cl in header_comment.splitlines():
+            # ---> jsasaki 2026-11-05: review round 10 #1: FVCOM truncates a line to
+            # its 400-character buffer, which can expose a continuation suffix
+            if len(f"! {cl}".encode()) > _MAX_LINE:
+                raise ValueError(
+                    f"header comment line {cl[:40]!r}... is "
+                    f"{len(f'! {cl}'.encode())} characters long as written; FVCOM's "
+                    f"SCAN_FILE reads only the first {_MAX_LINE} (a truncated line "
+                    "can end in its continuation suffix and swallow the next key) "
+                    "-- split it into shorter lines"
+                )
+            # <--- jsasaki 2026-11-05
             # jsasaki 2026-11-05: review round 9 #4: a continued comment swallows the next line
             if _is_continued(f"! {cl}"):
                 raise ValueError(

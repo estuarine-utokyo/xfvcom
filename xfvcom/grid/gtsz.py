@@ -172,6 +172,9 @@ class GtszSpec:
         # i.e. BEFORE the K1/K2/NZ setup checks below): negative, strictly descending.
         if self.zlev:
             z = np.asarray(self.zlev, dtype=float)
+            # jsasaki 2026-11-05: review round 10 #4: NaN/inf pass the comparisons below silently
+            if not np.isfinite(z).all():
+                raise ValueError("GtszSpec: all GTSZ ZLEV must be finite")
             if np.any(z >= 0.0):
                 raise ValueError("GtszSpec: all GTSZ ZLEV must be negative")
             if np.any(np.diff(z) >= 0.0):
@@ -211,6 +214,11 @@ class GtszSpec:
                     raise ValueError(
                         "GtszSpec: GTSZ LOWFRAC must carry exactly KB-K1 values "
                         f"(got {len(self.lowfrac)}, need {self.kb - self.k1})"
+                    )
+                # jsasaki 2026-11-05: review round 10 #4: NaN/inf pass the comparisons below silently
+                if not np.isfinite(self.lowfrac).all():
+                    raise ValueError(
+                        "GtszSpec: all GTSZ LOWFRAC fractions must be finite"
                     )
                 if any(f <= 0.0 for f in self.lowfrac):
                     raise ValueError(
