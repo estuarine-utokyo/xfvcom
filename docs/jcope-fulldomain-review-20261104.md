@@ -820,3 +820,124 @@ VERDICT: FAIL (0 blocker, 0 major, 9 minor, 0 nit)
 ### Triage
 
 All 9 findings (minor) accepted. xfvcom 56b5870: #2 (writers keep unmasked float32 without a float64 round trip; measured extra peak 72 MB -> 4.3 MB on a 24 MB input), #3 (mesh node coordinates placed by validated record id), #4 (from_dataset honours start_index), #5 (1-D shapes), #6 (masked indices), #7 (netCDF fill marker rejected), #9 (complex/object times). jcopetda 6698843: #1 (declared levels add to measured damage), #8 (incomplete ranges are errors). No finding of any severity above minor remained after round 3's fixes.
+
+## Round 5 (commit 5fbc3bf reviewed; fixes in eece081)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `5fbc3bf` and jcopetda `6698843`. No files were modified.
+
+Validation included focused existing tests, diskless NetCDFs, filesystem mocks, and a real one-day build at the 13 production OBC nodes. That build produced finite forcing; all five raw variables matched regional data within packing tolerance. The complete suite and six-year job were not rerun.
+
+**Round-4 status**
+
+| # | Status | Verification |
+|---|---|---|
+| 1 | RESOLVED | Measured extreme damage and declared levels are combined. The reproduction replaces both outliers on the undeclared damaged level. |
+| 2 | RESOLVED | Suitable float32 arrays share memory without conversion copies. Both writers preserved ordinary, read-only and strided caller arrays; raw-profile overrides also remained unchanged. |
+| 3 | RESOLVED | Reordered node records populate coordinates by ID; duplicate and out-of-range IDs are rejected. |
+| 4 | RESOLVED | Explicit indexing argument and attribute are honored; exported connectivity carries `start_index=0`. Other reconstruction defects appear below. |
+| 5 | RESOLVED | Two-dimensional depth and geographic-coordinate arrays are rejected before interpolation. |
+| 6 | RESOLVED | Masked entries in either cell-index array are rejected. |
+| 7 | RESOLVED | Both writers reject the reserved marker in the reported forcing fields. Depth metadata has a separate omission below. |
+| 8 | RESOLVED | `UT:2-` now raises instead of becoming `{2}`. |
+| 9 | RESOLVED | Complex and object time arrays are rejected before conversion. |
+
+No caller-buffer mutation regression was reproduced from the float32 change. The following defects remain in the broader scope.
+
+1. **Major — Control-volume geometry depends on the coordinate origin.**  
+   Location: [xfvcom/grid/grid_obj.py:690](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/grid_obj.py:690).
+
+   **Reproduction:** Construct two triangles with:
+
+   ```python
+   x = 400000 + 5 * np.array([0., 1., 0., 1.])
+   y = 3900000 + 5 * np.array([0., 0., 1., 1.])
+   nv = np.array([[0, 1, 2], [1, 3, 2]]).T
+   ```
+
+   Triangle areas total **25 m²**, but `calculate_node_area_median_dual()` returns **20.833251953125 m²**. Moving the same mesh to the origin returns 25 m². Default `np.allclose` tolerances consider distinct boundary midpoints equal at UTM coordinate magnitudes, so a required vertex is removed.
+
+   **Fix:** Remove the final midpoint only when topology establishes an interior closure, using equality or a small absolute tolerance with `rtol=0`. Translate polygon coordinates before the shoelace calculation to reduce cancellation. Add translated-mesh coverage. The supplied Tokyo Bay mesh did not exhibit this error in the checked boundary-node areas.
+
+2. **Minor — Three-element connectivity is silently misinterpreted after transposition.**  
+   Location: [xfvcom/grid/grid_obj.py:124](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/grid_obj.py:124).
+
+   **Reproduction:** Export a grid whose triangle rows are `[[0,1,2], [1,3,2], [2,3,4]]`, transpose the dataset so `nv.dims == ("nele", "three")`, then call `from_dataset`. Its `(3,3)` shape prevents transposition. Loaded triangles become `[[0,1,2], [1,3,3], [2,2,4]]`. In the reproduced geometry, areas change from `[1,2.5,1]` to `[1,0,0]`, despite explicit `start_index=0`.
+
+   **Fix:** Orient connectivity using dimension names. Validate the resulting shape; use shape inference only for unnamed inputs whose orientation is unambiguous.
+
+3. **Minor — The explicitly zero-based `nv_zero` fallback still shifts node IDs.**  
+   Location: [xfvcom/grid/grid_obj.py:107](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/grid_obj.py:107).
+
+   **Reproduction:** A five-node dataset containing only `nv_zero=(("nele","three"), [[1,2,3]])` produces triangle `[0,1,2]` through `from_dataset(ds, validate=False)`. Its known zero-based semantics are lost when renamed to `nv`, after which minimum-based inference subtracts one.
+
+   **Fix:** Preserve `start_index=0` when adopting `nv_zero`, unless the caller explicitly overrides it.
+
+4. **Minor — Fractional connectivity is truncated before validation.**  
+   Location: [xfvcom/grid/grid_obj.py:123](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/grid_obj.py:123).
+
+   **Reproduction:** Connectivity `[[0.9],[1.9],[2.9]]` with `start_index=0` is accepted as `[[0],[1],[2]]`, producing finite geometry. Bounds checks cannot detect the discarded fractions.
+
+   **Fix:** Validate the original connectivity’s real numeric type, finiteness, integrality and shape before converting to integers.
+
+5. **Minor — Grid round trips discard projection metadata.**  
+   Location: [xfvcom/grid/grid_obj.py:217](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/grid_obj.py:217), also `from_dataset` at line 144.
+
+   **Reproduction:** For a grid with `zone=54, northern=False`, `FvcomGrid.from_dataset(g.to_xarray())` returns `zone=None, northern=True`. Neither export nor reconstruction preserves these public fields. Previously supplied geographic coordinates may survive, concealing the lost projection information.
+
+   **Fix:** Serialize and restore the UTM zone and hemisphere, preferably through explicit CRS metadata. Include southern-hemisphere round trips in coverage.
+
+6. **Minor — DAT element-record identifiers remain ignored.**  
+   Location: [xfvcom/grid/dat_reader.py:76](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:76).
+
+   **Reproduction:** A two-element file with records ordered `2 …`, then `1 …`, is accepted and stores element 2 in column zero. Two records both identified as element 1 are also accepted. Element-numbered operations such as `calculate_element_area([1])` consequently address row position instead of the declared element.
+
+   **Fix:** Validate element IDs for range and uniqueness and populate connectivity by ID, matching the corrected node-record handling.
+
+7. **Minor — The regional API can reinterpret undecoded numeric time as nanoseconds.**  
+   Location: [xfvcom/io/jcope_obc_generator.py:275](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:275).
+
+   **Reproduction:** Give the regional dataset numeric Unix-second coordinates `1577836800 + 3600*np.arange(24)` without CF time units. Construction succeeds, generates finite fields, and interprets the first time as approximately **1970-01-01 00:00:01.577836544**, with microsecond-scale intervals. `_validate_time` accepts the resulting increasing MJD axis.
+
+   The runner’s year/hour checks protect its normal CLI path; direct generator/writer use remains exposed.
+
+   **Fix:** Require decoded datetime coordinates before constructing `DatetimeIndex`, then validate nonmissing, ordered times. Reject undecoded numeric coordinates explicitly.
+
+8. **Minor — Square static grids can silently transpose bathymetry and ocean masks.**  
+   Location: [xfvcom/io/jcope_grid.py:66](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_grid.py:66).
+
+   **Reproduction:** On an 8×8 grid, transpose `h` and `mask` to dimensions `("lon","lat")`, preserving their named-coordinate meaning. Construction still passes because validation checks shape only. An ocean lookup that selected `(j=3,i=6)` then selects `(j=5,i=6)`. Constant valid bathymetry allows this change through geometry validation.
+
+   This matters for the production grid’s square 1190×1190 shape: shape checks cannot establish dimension order.
+
+   **Fix:** Validate dimension names and normalize these variables with `.transpose("lat", "lon")` before extracting arrays, or explicitly reject unsupported ordering.
+
+9. **Minor — The reserved fill marker is still accepted as boundary depth.**  
+   Location: [xfvcom/io/jcope_obc_generator.py:904](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:904).
+
+   **Reproduction:** With otherwise valid inputs, call `write_tsobc_nc` using `obc_h=[netCDF4.default_fillvals["f4"]]`. The writer succeeds, but netCDF4 reads `obc_h` as masked. Its finite-positive check admits the reserved marker.
+
+   **Fix:** Reject the reserved float32 marker in `obc_h` before publication, consistently with forcing-field validation.
+
+10. **Minor — Reading the umask temporarily changes process-wide permissions.**  
+    Location: [xfvcom/io/jcope_obc_generator.py:838](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/jcope_obc_generator.py:838).
+
+    **Evidence:** `_current_umask` calls `os.umask(0)` before restoring the previous value. An injected interleaving with an original mask of `077` shows another thread’s ordinary file creation receiving mode **0666 instead of 0600**. Every successful atomic writer reaches this window.
+
+    **Fix:** Avoid changing process-wide umask during writes. Retain restrictive temporary-file permissions or apply an explicit permission policy; a writer-local lock cannot protect unrelated threads.
+
+11. **Minor — Source comparison permits an absent vertical coordinate.**  
+    Location: [scripts/compare_jcope_sources.py:69](/home/pj24001722/ku40000343/Github/xfvcom/scripts/compare_jcope_sources.py:69).
+
+    **Reproduction:** `check_alignment(src, grid, reg.drop_vars("level"))` returns all 24 selected positions successfully. Vertical validation runs only when the coordinate exists, although the generator requires it. Thus numerical comparison can proceed without establishing the regional level ordering.
+
+    **Fix:** Require `level` on its own dimension and verify exactly `0..45`, sharing the generator’s regional-schema validation where practical.
+
+## Verdict
+
+VERDICT: FAIL (0 blocker, 1 major, 10 minor, 0 nit)
+
+### Triage
+
+All 11 findings accepted (1 major pre-existing in grid_obj.calculate_node_area_median_dual: area depended on the coordinate origin; the TokyoBay per-node areas agree with the old function to 8.4e-9 relative and their total now equals the total triangle area). Fixed in xfvcom eece081 with 41 new tests (37 failed on the old code): #1 topology-based midpoint removal and translated shoelace; #2/#4 connectivity orientation by dimension names, integral/finite check; #3 nv_zero keeps zero base; #5 utm_zone/hemisphere round trip; #6 dat element ids; #7 decoded region time; #8 JcopeGrid dimension order; #9 fill marker in obc_h/time; #10 umask read from /proc, never set; #11 compare script shares the generator's regional schema validation. jcopetda: nothing in this round.
