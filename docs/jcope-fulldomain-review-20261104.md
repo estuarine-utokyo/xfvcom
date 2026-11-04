@@ -1607,3 +1607,104 @@ VERDICT: FAIL (0 blocker, 0 major, 2 minor, 1 nit)
 ### Triage
 
 All 3 findings accepted (2 minor, 1 nit). xfvcom 4e137cb (tests/test_round11_review.py): #1 _sband_sp evaluates SBAND in float32 in FVCOM's operation order for the single-precision startup check (numpy float32 tanh/pow stands in for tanhf/powf; the reviewer's saturating case raises in 'single', builds in 'double'), #2 32-bit INTEGER range checks in the reader, validate() and the writer (decimal-less DREF that cannot be read as an integer is now rejected), #3 precision documentation. All 2,993 *sigma*.dat files parse identically.
+
+## Round 12 (commit e1831c7 reviewed; fixes in 2b0b2db, jcopetda bd548f7)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `e1831c7`, including fix commit `4e137cb`, and jcopetda `41c46e4`. No files were modified.
+
+| Round-11 finding | Status | Reason |
+|---|---|---|
+| 1. Single-precision SBAND | PARTIAL | The reported saturation case is rejected, but NumPy/libm differences still permit a model-invalid column; finding 1 below. |
+| 2. INTEGER range | PARTIAL | Reported K1/K2 and integer-form DREF cases are fixed. Inactive numeric entries still bypass validation despite reaching FVCOM’s INTEGER parser; finding 2. |
+| 3. Precision documentation | RESOLVED | The documentation now distinguishes single- and double-precision builds correctly. |
+
+Validation included 119 passing selected tests, in-memory parser and filesystem mocks, diskless NetCDF writers, and production-day checks at all 13 Tokyo Bay OBC nodes. Uniform, SADAPT, LOWSIG, NPZ and depth-control paths produced finite forcing. All five source variables matched the regional archive within packing tolerance. Both provisional repair days were exercised. The full suite and annual builds were not run; read-only import adaptations were necessary.
+
+No additional regression was substantiated in the exercised FvcomGrid consumers or regional path.
+
+1. **Minor — SBAND validation still accepts a column that collapses with `tanhf`.**  
+   Location: [gtsz_builder.py:317](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/gtsz_builder.py:317). Incomplete round-11 fix.
+
+   **Reproduction:** On a triangle with three 10 m depths:
+
+   ```python
+   spec = GtszSpec(
+       kb=31, base=3, k1=10, sadapt=True, lowsig=True,
+       l1=0.1, l2=8.8,
+   )
+   build_gtsz(mesh, spec, model_precision="single")
+   ```
+
+   Construction succeeds; the returned minimum physical thickness is approximately **0.01171035 m**.
+
+   Replaying the single-precision expressions with `libm.so.6:tanhf`, through `ctypes`, makes the first two interfaces zero and the minimum thickness **0 m**. FVCOM’s LOWSIG startup check rejects that column. Substituting `tanhf` into the existing thickness helper reproduces the failure directly.
+
+   The documented possible ULP difference therefore affects an actual acceptance decision.
+
+   **Fix:** Use a model-compatible scalar math backend, or conservatively reject near-saturation shapes whose interface separation is insufficient to survive the runtime’s rounding uncertainty.
+
+2. **Minor — Inactive vector entries bypass FVCOM’s unconditional numeric parsing.**  
+   Location: [sigma_dat.py:454](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:454). Incomplete INTEGER-range protection.
+
+   **Reproduction:** This reads and builds successfully:
+
+   ```text
+   NUMBER OF SIGMA LEVELS = 5
+   SIGMA COORDINATE TYPE = SIGMAZ
+   GTSZ BASE = 1
+   GTSZ NZ = 0
+   GTSZ ZLEV = -2147483649 -2147483650
+   ```
+
+   The resulting column is `[0, -0.25, -0.5, -0.75, -1]`. An inactive `GTSZ LOWFRAC = 99999999999` is likewise accepted.
+
+   FVCOM’s `SCAN_FILE` calls `GET_VALUE` **before matching the requested key**. Decimal-less tokens enter its 32-bit `INTVAL` buffer through an internal `READ` without `IOSTAT` ([mod_utils.F:2814](/home/pj24001722/ku40000343/Github/FVCOM/src/mod_utils.F:2814)). Consequently these entries terminate model reading even when their coordinate feature is inactive.
+
+   **Fix:** Validate numeric syntax and integer range while scanning every reachable numeric line, independently of whether its key is subsequently consumed.
+
+3. **Minor — The mesh reader rejects valid FVCOM records without unused trailing columns.**  
+   Locations: [dat_reader.py:81](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:81), [dat_reader.py:119](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:119). Pre-existing.
+
+   **Reproduction:** With otherwise valid headers and sequential IDs, use three-column node records:
+
+   ```text
+   1 400000.0 3900000.0
+   2 401000.0 3900000.0
+   3 400000.0 3901000.0
+   ```
+
+   `read_dat()` reports `Node block ended prematurely (0/3)`. Four-column element records such as `1 1 2 3` similarly produce `Element block ended prematurely`.
+
+   FVCOM reads exactly `J,X1,Y1` for coordinates and `J,N1,N2,N3` for connectivity. The additional columns required by Python are unused by those readers. This affects both runner mesh loading and `--sigma-dat`.
+
+   **Fix:** Accept the required three node fields and four element fields, preserving support for trailing columns and existing ID/order validation.
+
+4. **Minor — Provisional-tree reconciliation can create a `static/` symlink loop.**  
+   Location: [make_provisional_tree.py:255](/home/pj24001722/ku40000343/Github/jcopetda/tools/make_provisional_tree.py:255). Pre-existing.
+
+   **Reproduction:** Start with separate roots:
+
+   ```text
+   /source/static -> /output/static
+   /output/static -> /payload/static
+   ```
+
+   A filesystem-mocked execution of the actual `main()` succeeds and replaces `/output/static` with a link to `/source/static`. Both published paths then form a loop. The source-year and day-file preflight checks never inspect `static/`.
+
+   **Fix:** Preflight the resolved static source before reconciliation; reject sources resolving into the output tree or aliasing the destination entry.
+
+5. **Nit — The numeric diagnostic recommends an invalid exponent literal.**  
+   Location: [sigma_dat.py:228](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/sigma_dat.py:228). Pre-existing.
+
+   **Reproduction:** `GTSZ SMAX = 8e-4` correctly raises, but recommends writing **`8e-4.0`**, which is invalid numeric syntax.
+
+   **Fix:** Insert the decimal point into the mantissa, recommending `8.0e-4`, or format the parsed value through `_ffmt()`.
+
+## Verdict
+VERDICT: FAIL (0 blocker, 0 major, 4 minor, 1 nit)
+
+### Triage
+
+All 5 findings accepted (4 minor, 1 nit). xfvcom 2b0b2db (tests/test_round12_review.py): #1 the single-precision check calls libm tanhf/powf through ctypes (numpy float32 fallback) and rejects separations within 16 float32 ulps (SP_MIN_ULP); double builds unchanged; the 8 LOWSIG production sigma.dat files build in both modes, #2 every numeric key=value line within the first 201 lines is validated (32-bit integer range / finite real) even when its key is unused, #3 mesh node records need J X Y and element records J N1 N2 N3 only (14 further real grid files now read; the 25 that read before read identically), #5 diagnostic recommends 8.0e-4. jcopetda bd548f7: #4 static/ is preflighted for aliases. All 3,756 *sigma*.dat files parse identically.
