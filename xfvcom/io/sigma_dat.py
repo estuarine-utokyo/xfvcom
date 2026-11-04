@@ -36,7 +36,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ..grid.gtsz import GtszSpec
+# jsasaki 2026-11-05: review round 11 #2: FVCOM's 32-bit INTEGER range
+from ..grid.gtsz import FORTRAN_INT_MAX, FORTRAN_INT_MIN, GtszSpec
 
 __all__ = ["SigmaFile", "read_sigma_dat", "write_sigma_dat", "gtsz_to_lines"]
 
@@ -162,9 +163,28 @@ def _get_int(path: Path, pairs: dict[str, str], key: str) -> int | None:
             "(e.g. '31', not '31.0'); any other form is not read as written",
         )
     try:
-        return int(val.split()[0])
+        # jsasaki 2026-11-05: review round 11 #2: keep the value for the range check
+        iv = int(val.split()[0])
     except ValueError:
         raise _bad(path, key, val, "not a valid integer") from None
+    # jsasaki 2026-11-05: review round 11 #2: GET_VALUE reads into a 32-bit INTEGER
+    _check_int32(path, key, val, iv)
+    return iv
+
+
+# jsasaki 2026-11-05: review round 11 #2: new helper
+def _check_int32(path: Path, key: str, val: str, iv: int) -> None:
+    """Reject an integer FVCOM's ``GET_VALUE`` cannot hold: it reads the value
+    into a default 32-bit ``INTEGER`` with an internal ``READ`` without
+    ``IOSTAT``, so an out-of-range value stops FVCOM's reader."""
+    if not FORTRAN_INT_MIN <= iv <= FORTRAN_INT_MAX:
+        raise _bad(
+            path,
+            key,
+            val,
+            f"outside FVCOM's 32-bit INTEGER range [{FORTRAN_INT_MIN}, "
+            f"{FORTRAN_INT_MAX}]; FVCOM's reader stops on it",
+        )
 
 
 #: FVCOM's fallback for a floating key it cannot read (mod_input.F)
@@ -214,6 +234,15 @@ def _get_float(path: Path, pairs: dict[str, str], key: str) -> float | None:
         x = float(toks[0])
     except ValueError:
         raise _bad(path, key, val, "not a valid floating value") from None
+    # jsasaki 2026-11-05: review round 11 #2: an integer-form DREF is read as an INTEGER
+    if typ == "integer":
+        try:
+            ival = int(toks[0])
+        except ValueError:
+            raise _bad(
+                path, key, val, "FVCOM reads this decimal-less form as an INTEGER"
+            ) from None
+        _check_int32(path, key, val, ival)
     # jsasaki 2026-11-05: review round 10 #4: an overflowing literal (1.0e999) converts to inf
     if not np.isfinite(x):
         raise _bad(path, key, val, "the value is not finite (overflow?)")

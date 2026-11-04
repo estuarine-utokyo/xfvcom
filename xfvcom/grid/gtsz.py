@@ -33,8 +33,11 @@ and ``FVCOM/docs/sigma-z-physics-consistency.md``.
 
 The coordinate is evaluated at ``eta = 0`` (cold-start at-rest), so the result
 matches the ``siglay`` / ``siglev`` written into an FVCOM output NetCDF (the
-bit-faithful check). FVCOM uses single precision internally; this port uses
-float64, so agreement is to single-precision round-off (~1e-5), not bit-exact.
+bit-faithful check). This port computes in float64.  FVCOM's ``REAL(SP)`` is
+double precision in a ``-DDOUBLE_PRECISION`` build (``mod_prec.F``; the
+TB-FVCOM default), where agreement is to double-precision round-off; in a
+single-precision build ``SP`` is ``REAL(4)`` and agreement is only to
+single-precision round-off (~1e-5).
 """
 
 from __future__ import annotations
@@ -47,6 +50,8 @@ from numpy.typing import NDArray
 # --- Fortran constants (mod_setup.F::SIGMA_GTSZ) ----------------------------
 SMALL = 1.0e-6  #: degenerate-tail ramp step (Fortran ``SMALL``)
 DZ_MIN_KBP = 1.0e-4  #: sigma-thickness below this => killed (degenerate) layer
+# jsasaki 2026-11-05: review round 11 #2: range of FVCOM's default 32-bit INTEGER
+FORTRAN_INT_MIN, FORTRAN_INT_MAX = -(2**31), 2**31 - 1
 
 __all__ = [
     "SMALL",
@@ -130,6 +135,21 @@ class GtszSpec:
         """Replicate the Fortran startup ``FATAL_ERROR`` checks (mod_setup.F /
         mod_input.F), so a malformed spec is rejected here rather than at FVCOM
         startup."""
+        # ---> jsasaki 2026-11-05: review round 11 #2: FVCOM reads the integer keys
+        # into a default 32-bit INTEGER; a larger value stops its reader
+        for key, iv in (
+            ("NUMBER OF SIGMA LEVELS", self.kb),
+            ("GTSZ BASE", self.base),
+            ("GTSZ K1", self.k1),
+            ("GTSZ K2", self.k2),
+            ("GTSZ NZ", self.nz),
+        ):
+            if iv is not None and not FORTRAN_INT_MIN <= int(iv) <= FORTRAN_INT_MAX:
+                raise ValueError(
+                    f"GtszSpec: {key} = {iv} is outside FVCOM's 32-bit INTEGER range "
+                    f"[{FORTRAN_INT_MIN}, {FORTRAN_INT_MAX}]"
+                )
+        # <--- jsasaki 2026-11-05
         # jsasaki 2026-11-05: review round 8 #7: FVCOM CHECK_LAYER_COUNT accepts KB >= 3 (two layers)
         if self.kb < 3:
             raise ValueError(

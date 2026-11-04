@@ -37,7 +37,6 @@ from .gtsz import (
     build_coordinate,
     compute_kbp,
     compute_kbp1_frac1,
-    sband_reshape,
 )
 
 __all__ = [
@@ -286,6 +285,44 @@ _MODEL_DTYPES: dict[str, type[np.floating]] = {
 }
 
 
+# jsasaki 2026-11-05: review round 11 #1: new helper (SBAND in model precision)
+def _sband_sp(spec: GtszSpec, dtype: type[np.floating]) -> NDArray[np.floating]:
+    """``SBAND(1:K1)`` of ``mod_setup.F::SIGMA_GTSZ`` evaluated in ``REAL(SP)``
+    precision ``dtype``: the base shape, ``SAK1`` with its ``|SAK1| < SMALL``
+    guard, and the normalisation ``SBAND(K)/SAK1``, operation by operation in the
+    Fortran order with ``GTSZ P1/L1/L2`` converted to ``dtype``.
+
+    numpy's float32 ``tanh`` / power stand in for the Fortran runtime's ``tanhf`` /
+    ``powf``; they can differ from a given libm by one unit in the last place,
+    which in principle matters only for a case sitting exactly at the boundary
+    where the A3 shape saturates (two interfaces rounding to the same value).
+    """
+    dt = dtype
+    kb, k1 = spec.kb, spec.k1
+    p1, l1, l2 = dt(spec.p1), dt(spec.l1), dt(spec.l2)
+    khalf = (kb + 1) // 2
+    sb = np.empty(k1, dtype=dt)
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        for k in range(1, k1 + 1):
+            if spec.base == 1:
+                sb[k - 1] = dt(1 - k) / dt(kb - 1)
+            elif spec.base == 2:
+                if k <= khalf:
+                    sb[k - 1] = dt(-0.5) * (dt(2 * k - 2) / dt(kb - 1)) ** p1
+                else:
+                    sb[k - 1] = dt(0.5) * (dt(2 * kb - 2 * k) / dt(kb - 1)) ** p1 - dt(
+                        1.0
+                    )
+            else:
+                num = np.tanh((dt(1 - k) * l1 + dt(kb - k) * l2) / dt(kb - 1))
+                sb[k - 1] = (num - np.tanh(l2)) / (np.tanh(l1) + np.tanh(l2))
+        sak1 = sb[k1 - 1]
+        if abs(sak1) < dt(SMALL):
+            sak1 = dt(-SMALL)
+        out: NDArray[np.floating] = (sb / sak1).astype(dt)
+    return out
+
+
 def _lowsig_thickness_sp(
     h: NDArray[np.float64],
     href: NDArray[np.float64],
@@ -298,8 +335,7 @@ def _lowsig_thickness_sp(
     Port of the ``GTSZ_LOWSIG`` branch of ``mod_setup.F::SIGMA_GTSZ`` and of the
     ``GTSZ LOWFRAC`` reading in ``mod_input.F`` (conversion to ``SP``, positivity,
     ``|SUM-1| <= 1e-4``, renormalisation by ``SUM`` and the sequential ``FRCUM``
-    accumulation), at ``ETA0 = 0``.  ``SBAND`` is the double-precision reshape
-    rounded to ``dtype`` (within one unit of the last place of FVCOM's).
+    accumulation), at ``ETA0 = 0``.  ``SBAND`` comes from :func:`_sband_sp`.
     """
     # jsasaki 2026-11-05: review round 10 #2: new helper (startup check in model precision)
     dt = dtype
@@ -318,9 +354,8 @@ def _lowsig_thickness_sp(
         dup = np.minimum(hr, dup)
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
         sigref = -dup / H
-        sband = sband_reshape(
-            kb, k1, spec.base, p1=spec.p1, l1=spec.l1, l2=spec.l2
-        ).astype(dt)
+        # jsasaki 2026-11-05: review round 11 #1: SBAND itself in model precision
+        sband = _sband_sp(spec, dt)
         Z = np.empty((H.shape[0], kb), dtype=dt)
         Z[:, :k1] = sigref[:, None] * sband[None, :]
         if spec.lowfrac:
