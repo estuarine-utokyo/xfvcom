@@ -23,10 +23,15 @@ from __future__ import annotations
 
 import argparse
 import os
+
+# jsasaki 2026-11-05: review round 2 #2 #4 #11 #12: strict parsers, time-axis and cache checks
+import re
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from numpy.typing import NDArray
 
 from xfvcom.grid.grid_obj import FvcomGrid
@@ -37,6 +42,13 @@ from xfvcom.io import (
     write_elevation_nc,
     write_tsobc_nc,
 )
+
+# jsasaki 2026-11-05: review round 2 #2 #11 #12: constants of the strict parsers / time-axis check
+_OBC_HEADER = re.compile(r"^OBC Node Number\s*=\s*(\d+)$")
+_DEP_HEADER = re.compile(r"^Node Number\s*=\s*(\d+)$")
+DEP_XY_ATOL = 1e-3  # depth-file coordinates are written with 6 decimals
+_HOUR = 1.0 / 24.0  # days
+_STEP_TOL = 1e-6  # days (0.09 s)
 
 
 def parse_year_spec(spec: str) -> list[int]:
@@ -70,49 +82,114 @@ def format_year_label(years: list[int]) -> str:
     return f"{min(years)}-{max(years)}"
 
 
+def _declared_block(path: Path, header: re.Pattern) -> tuple[int, list[str]]:
+    """The count N of the one header line ``... = N`` and the non-blank records after it."""
+    lines = [s.strip() for s in path.read_text().splitlines()]
+    lines = [s for s in lines if s]
+    m = header.match(lines[0]) if lines else None
+    if m is None:
+        raise ValueError(f"{path}: the first line is not the header {header.pattern!r}")
+    n = int(m.group(1))
+    records = lines[1:]
+    if n < 1 or len(records) != n:
+        raise ValueError(
+            f"{path}: the header declares {n} record(s), the file holds {len(records)}"
+        )
+    return n, records
+
+
 def parse_obc_dat(path: Path) -> np.ndarray:
-    """Return the 1-based OBC node IDs from a FVCOM ``*_obc.dat`` file."""
+    """Return the 1-based OBC node IDs from a FVCOM ``*_obc.dat`` file.
+
+    The file is ``OBC Node Number = N`` followed by exactly N records ``index node_id type`` (three
+    integers); anything else is an error.
+    """
+    # ---> jsasaki 2026-11-05: review round 2 #11: one recognised header, its count enforced, every
+    # record (the first included) parsed strictly
+    _n, records = _declared_block(Path(path), _OBC_HEADER)
     nodes: list[int] = []
-    with path.open() as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("OBC Node Number"):
-                continue
-            parts = line.split()
-            # jsasaki 2026-11-04: review round 1 #12: a malformed record is an error, not skipped
-            if len(parts) < 2:
-                raise ValueError(f"{path}: malformed OBC record {line!r}")
-            try:
-                nodes.append(int(parts[1]))
-            except ValueError:
-                if not nodes:  # a header-like first line
-                    continue
-                raise ValueError(f"{path}: malformed OBC record {line!r}") from None
-    if not nodes:
-        raise ValueError(f"no OBC nodes parsed from {path}")
+    for line in records:
+        parts = line.split()
+        try:
+            if len(parts) != 3:
+                raise ValueError
+            _idx, node, _type = (int(x) for x in parts)
+        except ValueError:
+            raise ValueError(f"{path}: malformed OBC record {line!r}") from None
+        nodes.append(node)
+    # <--- jsasaki 2026-11-05
     if min(nodes) < 1 or len(set(nodes)) != len(nodes):
         raise ValueError(f"{path}: OBC node IDs must be unique and >= 1")
     return np.asarray(nodes, dtype=np.int32)
 
 
-def parse_dep_dat(path: Path) -> np.ndarray:
-    """Return the bathymetry column from a FVCOM ``*_dep.dat`` file."""
-    depths: list[float] = []
-    with path.open() as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("Node Number"):
-                continue
-            parts = line.split()
-            if len(parts) < 3:
-                continue
-            try:
-                depths.append(float(parts[2]))
-            except ValueError:
-                continue
-    if not depths:
-        raise ValueError(f"no depths parsed from {path}")
-    return np.asarray(depths, dtype=np.float32)
+def parse_dep_dat(path: Path, node_xy: np.ndarray | None = None) -> np.ndarray:
+    """Return the bathymetry column from a FVCOM ``*_dep.dat`` file.
+
+    The file is ``Node Number = N`` followed by exactly N records ``x y h``. With ``node_xy``
+    (``(N, 2)``, the mesh's node coordinates in the grid file's order) the depth file's coordinates
+    must match them row by row (within ``DEP_XY_ATOL`` coordinate units), so a reordered depth file
+    or one of another mesh is refused instead of putting depths on the wrong nodes.
+    """
+    # ---> jsasaki 2026-11-05: review round 2 #12: the whole declared block, strictly, with coordinates
+    _n, records = _declared_block(Path(path), _DEP_HEADER)
+    rows: NDArray[np.float64] = np.empty((len(records), 3), dtype=np.float64)
+    for k, line in enumerate(records):
+        parts = line.split()
+        try:
+            if len(parts) != 3:
+                raise ValueError
+            rows[k] = [float(x) for x in parts]
+        except ValueError:
+            raise ValueError(f"{path}: malformed depth record {line!r}") from None
+    if not np.isfinite(rows).all():
+        raise ValueError(f"{path}: non-finite coordinate or depth")
+    if node_xy is not None:
+        xy = np.asarray(node_xy, dtype=np.float64)
+        if xy.shape != (rows.shape[0], 2):
+            raise ValueError(
+                f"{path}: {rows.shape[0]} depth records for a mesh of {xy.shape[0]} nodes"
+            )
+        dev = np.abs(rows[:, :2] - xy).max(axis=1)
+        if (dev > DEP_XY_ATOL).any():
+            k = int(np.argmax(dev))
+            raise ValueError(
+                f"{path}: record {k + 1} sits at ({rows[k, 0]}, {rows[k, 1]}), mesh node {k + 1} at "
+                f"({xy[k, 0]}, {xy[k, 1]}): the depth file does not belong to this mesh / node order"
+            )
+    return rows[:, 2].astype(np.float32)
+    # <--- jsasaki 2026-11-05
+
+
+def check_time_axis(
+    years: list[int], mjd_by_year: dict[int, np.ndarray], allow_gaps: bool = False
+) -> None:
+    """Each source's times lie in its own year with hourly steps; the concatenation is hourly too.
+
+    Only between two sources of non-consecutive years (with --allow-year-gaps) may the step be longer;
+    it must still be positive. Duplicated or backward times are always refused.
+    """
+    # jsasaki 2026-11-05: review round 2 #2: the actual periods, not only the year list, are checked
+    epoch = pd.Timestamp("1858-11-17")
+    for y in years:
+        t = np.asarray(mjd_by_year[y], dtype=np.float64)
+        lo = (pd.Timestamp(f"{y}-01-01") - epoch) / pd.Timedelta(days=1)
+        hi = (pd.Timestamp(f"{y + 1}-01-01") - epoch) / pd.Timedelta(days=1)
+        if t.size == 0 or t.min() < lo - _STEP_TOL or t.max() > hi - _HOUR + _STEP_TOL:
+            raise SystemExit(f"the source for {y} has times outside the year {y}")
+        if t.size > 1 and (np.abs(np.diff(t) - _HOUR) > _STEP_TOL).any():
+            raise SystemExit(
+                f"the source for {y} is not an hourly series without duplicates or gaps"
+            )
+    for a, b in zip(years, years[1:]):
+        step = float(mjd_by_year[b][0] - mjd_by_year[a][-1])
+        if abs(step - _HOUR) <= _STEP_TOL:
+            continue
+        if step <= 0 or not (allow_gaps and b != a + 1):
+            raise SystemExit(
+                f"the time axis jumps by {step * 24:g} h between {a} and {b} "
+                f"(must be 1 h{'' if allow_gaps else '; --allow-year-gaps permits skipped years only'})"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -127,46 +204,80 @@ def _profile_cache_path(cache_dir, year):
     return Path(cache_dir) / f"obc_raw_profiles_{year}.npz"
 
 
-def _load_profile_cache(cache_dir, year, region_nc, obc_ids):
+def _file_identity(path) -> tuple[str, int, int]:
+    p = Path(path).expanduser().resolve()
+    st = p.stat()
+    return str(p), int(st.st_size), int(st.st_mtime_ns)
+
+
+def _profile_fingerprint(
+    region_nc, basic_nc, obc_ids, obc_lat, obc_lon, cell_j, cell_i, time_mjd
+) -> dict[str, np.ndarray]:
+    """What the cached profiles depend on: source file, grid file, nodes, their cells and times."""
+    # jsasaki 2026-11-05: review round 2 #4: the cache is bound to all of these
+    sp, ss, sm = _file_identity(region_nc)
+    gp, gs, gm = _file_identity(basic_nc)
+    return {
+        "src_path": np.asarray(sp),
+        "src_size": np.asarray(ss, dtype=np.int64),
+        "src_mtime_ns": np.asarray(sm, dtype=np.int64),
+        "grid_path": np.asarray(gp),
+        "grid_size": np.asarray(gs, dtype=np.int64),
+        "grid_mtime_ns": np.asarray(gm, dtype=np.int64),
+        "obc_nodes": np.asarray(obc_ids, dtype=np.int32),
+        "obc_lat": np.asarray(obc_lat, dtype=np.float64),
+        "obc_lon": np.asarray(obc_lon, dtype=np.float64),
+        "cell_j": np.asarray(cell_j, dtype=np.int64),
+        "cell_i": np.asarray(cell_i, dtype=np.int64),
+        "time_mjd": np.asarray(time_mjd, dtype=np.float64),
+    }
+
+
+def _load_profile_cache(cache_dir, year, fingerprint):
     """Return the cached raw profiles dict if a valid cache exists, else None.
 
-    Invalidated when the OBC node list differs or the region archive's byte size
-    changed (i.e. the JCOPE data was regenerated).
+    Valid means: every fingerprint entry (source path/size/mtime, grid file identity, node ids and
+    coordinates, selected cells, time axis) is identical and each profile has the shape
+    ``(n_time, 46, n_obc)``. Anything else -- including an unreadable file -- means rebuild.
     """
+    # ---> jsasaki 2026-11-05: review round 2 #4: full fingerprint; the whole file is read and
+    # validated inside the try block
     if not cache_dir:
         return None
     p = _profile_cache_path(cache_dir, year)
     if not p.exists():
         return None
+    n_time = fingerprint["time_mjd"].size
+    n_obc = fingerprint["obc_nodes"].size
     try:
-        d = np.load(p)
+        with np.load(p, allow_pickle=False) as d:
+            for k, v in fingerprint.items():
+                if k not in d.files or not np.array_equal(d[k], v):
+                    return None
+            raw = {k[4:]: np.array(d[k]) for k in d.files if k.startswith("var_")}
+        if not raw or any(a.shape != (n_time, 46, n_obc) for a in raw.values()):
+            return None
+        return raw
     except Exception:
         return None
-    if not np.array_equal(
-        np.asarray(d["obc_nodes"]), np.asarray(obc_ids, dtype=np.int32)
-    ):
-        return None
-    if int(d["region_size"]) != int(Path(region_nc).stat().st_size):
-        return None  # region archive changed -> cache stale
-    return {k[4:]: d[k] for k in d.files if k.startswith("var_")}
+    # <--- jsasaki 2026-11-05
 
 
-def _save_profile_cache(cache_dir, year, region_nc, obc_ids, raw):
+def _save_profile_cache(cache_dir, year, fingerprint, raw):
     if not cache_dir:
         return
     p = _profile_cache_path(cache_dir, year)
     p.parent.mkdir(parents=True, exist_ok=True)
-    st = Path(region_nc).stat()
-    tmp = p.parent / (p.name + ".tmp")
-    with open(tmp, "wb") as fh:  # pass a handle so np.savez does NOT append '.npz'
-        np.savez(
-            fh,
-            obc_nodes=np.asarray(obc_ids, dtype=np.int32),
-            region_size=np.int64(st.st_size),
-            region_mtime=np.float64(st.st_mtime),
-            **{f"var_{k}": v for k, v in raw.items()},
-        )
-    tmp.replace(p)  # atomic swap (each year writes its own file)
+    # jsasaki 2026-11-05: review round 2 #4 #16: fingerprint stored; unique temporary, removed on failure
+    fd, name = tempfile.mkstemp(prefix=f".{p.name}.", suffix=".tmp", dir=p.parent)
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as fh:  # a handle: np.savez does NOT append '.npz'
+            np.savez(fh, **fingerprint, **{f"var_{k}": v for k, v in raw.items()})
+        tmp.replace(p)  # atomic swap (each year writes its own file)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
 
 
 def _process_year(
@@ -208,11 +319,22 @@ def _process_year(
     tsobc = None
     if not no_tsobc:
         if profile_cache_dir:
-            raw = _load_profile_cache(profile_cache_dir, year, region_nc, obc_ids)
+            # jsasaki 2026-11-05: review round 2 #4: cache bound to a full fingerprint
+            fp = _profile_fingerprint(
+                region_nc,
+                basic_nc,
+                obc_ids,
+                obc_lat,
+                obc_lon,
+                gen._jr,
+                gen._ir,
+                gen.mjd,
+            )
+            raw = _load_profile_cache(profile_cache_dir, year, fp)
             hit = raw is not None
             if raw is None:
                 raw = gen.read_raw_profiles()
-                _save_profile_cache(profile_cache_dir, year, region_nc, obc_ids, raw)
+                _save_profile_cache(profile_cache_dir, year, fp, raw)
             print(
                 f"[cache] year {year}: profile cache {'HIT' if hit else 'MISS (built)'}",
                 flush=True,
@@ -220,6 +342,9 @@ def _process_year(
             tsobc = gen.build_tsobc_arrays(raw_profiles=raw)
         else:
             tsobc = gen.build_tsobc_arrays()
+    # jsasaki 2026-11-05: review round 2 #18: provenance from the source this worker actually read
+    prov_ts = gen.source_lines(["TT", "ST"])
+    elevation = None if no_elevation else gen.build_elevation_array()
     out = {
         "year": year,
         "mjd": gen.mjd.copy(),
@@ -227,7 +352,9 @@ def _process_year(
         "siglay": gen.siglay,
         "obc_h_jcope": gen.obc_h_jcope.copy(),
         "tsobc": tsobc,
-        "elevation": None if no_elevation else gen.build_elevation_array(),
+        "elevation": elevation,
+        "prov_ts": prov_ts,
+        "prov_el": gen.source_lines(["EGT"]),
     }
     gen.close()
     return out
@@ -354,8 +481,10 @@ def main() -> int:
         "The JCOPE T/S profiles at the OBC cells are bathymetry-INDEPENDENT "
         "(fixed OBC node lat/lon), so caching them once lets every later "
         "depth-variant OBC rebuild skip the ~27 GB/year region read and redo "
-        "only the cheap vertical interpolation. Cache is invalidated if the OBC "
-        "node list or the region archive's byte size changes. Omit to disable.",
+        # jsasaki 2026-11-05: review round 2 #4: the help names the full fingerprint
+        "only the cheap vertical interpolation. Cache is invalidated if the region "
+        "file (path, size, mtime), the grid file, the OBC nodes or their coordinates, "
+        "the selected cells or the time axis change. Omit to disable.",
     )
     year_group = parser.add_mutually_exclusive_group(required=True)
     year_group.add_argument(
@@ -402,7 +531,14 @@ def main() -> int:
     elif len(years) == 1 and args.region_nc is not None:
         region_paths = [args.region_nc]
     elif args.region_pattern is not None:
+        # jsasaki 2026-11-05: review round 2 #2: one distinct file per year
+        if len(years) > 1 and "{year}" not in args.region_pattern:
+            sys.exit(
+                "--region-pattern must contain {year} when several years are built"
+            )
         region_paths = [Path(args.region_pattern.format(year=y)) for y in years]
+        if len({p.expanduser().resolve() for p in region_paths}) != len(region_paths):
+            sys.exit("--region-pattern gives the same file for different years")
     elif len(years) == 1:
         sys.exit("single-year run needs either --region-nc or --region-pattern")
     else:
@@ -423,7 +559,13 @@ def main() -> int:
     print(f"  nodes: {n_nodes}, elements: {mesh.nele}")
 
     print(f"[grid] reading FVCOM depth from {args.fvcom_dep}")
-    h_all = parse_dep_dat(args.fvcom_dep)
+    # jsasaki 2026-11-05: review round 2 #12: the depth rows must sit on the mesh nodes, in order
+    try:
+        h_all = parse_dep_dat(
+            args.fvcom_dep, np.column_stack([np.asarray(mesh.x), np.asarray(mesh.y)])
+        )
+    except ValueError as e:
+        sys.exit(str(e))
     if h_all.size != n_nodes:
         sys.exit(
             f"depth file has {h_all.size} rows; grid has {n_nodes} nodes — mismatch"
@@ -581,6 +723,8 @@ def main() -> int:
             tsobc_fields_by_year[y] = r["tsobc"]
         if not args.no_elevation:
             elevation_by_year[y] = r["elevation"]
+    # jsasaki 2026-11-05: review round 2 #2: validate the actual periods and the joined axis
+    check_time_axis(years, mjd_by_year, args.allow_year_gaps)
     siglev = results[0]["siglev"]
     siglay = results[0]["siglay"]
     obc_h_jcope_first = results[0]["obc_h_jcope"]
@@ -604,13 +748,9 @@ def main() -> int:
 
     label = format_year_label(years)
     # jsasaki 2026-11-04: a FullDomainSource carries its own label
-    source_files = [
-        line
-        for p in region_paths
-        for line in (
-            p.provenance() if isinstance(p, FullDomainSource) else [Path(p).name]
-        )
-    ]
+    # jsasaki 2026-11-05: review round 2 #18: collected from the workers' sources (what they read)
+    source_files_ts = [line for r in results for line in r["prov_ts"]]
+    source_files_el = [line for r in results for line in r["prov_el"]]
 
     if not args.no_tsobc:
         time_mjd = np.concatenate([mjd_by_year[y] for y in years])
@@ -628,7 +768,7 @@ def main() -> int:
             siglev=siglev,
             siglay=siglay,
             fields=fields_concat,
-            source_files=source_files,
+            source_files=source_files_ts,  # jsasaki 2026-11-05: review round 2 #18: T/S provenance
         )
 
     if not args.no_elevation:
@@ -641,7 +781,7 @@ def main() -> int:
             time_mjd=time_mjd,
             obc_nodes=obc_ids,
             elevation=elevation_concat,
-            source_files=source_files,
+            source_files=source_files_el,  # jsasaki 2026-11-05: review round 2 #18: EGT provenance
         )
 
     grid.close()

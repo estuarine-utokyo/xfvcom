@@ -199,3 +199,49 @@ class TestDepthAndProfile:
         with JcopeGrid(synthetic_basic_nc) as g:
             with pytest.raises(ValueError, match="kind"):
                 g.profile("X", 17.0, 117.0)
+
+
+# ---------------------------------------------------------------------------
+# review round 2 (gpt-6.1-sol) #1: nearest ocean measured from the requested position
+# ---------------------------------------------------------------------------
+
+
+def _basic_with_mask(path, mask):
+    jm, im = mask.shape
+    dx = 1.0 / 36.0
+    with nc.Dataset(path, "w") as ds:
+        ds.createDimension("lat", jm)
+        ds.createDimension("lon", im)
+        ds.createDimension("level", 2)
+        ds.createVariable("lat", "f8", ("lat",))[:] = 17.0 + np.arange(jm) * dx
+        ds.createVariable("lon", "f8", ("lon",))[:] = 117.0 + np.arange(im) * dx
+        ds.createVariable("h", "f4", ("lat", "lon"))[:] = np.where(mask, 100.0, 0.0)
+        ds.createVariable("mask", "i1", ("lat", "lon"))[:] = mask.astype(np.int8)
+        ds.createVariable("ZZ", "f4", ("level", "lat", "lon"))[:] = -1.0
+        ds.grid_origin_lon, ds.grid_origin_lat = 117.0, 17.0
+        ds.grid_dx_deg = ds.grid_dy_deg = dx
+    return path
+
+
+def test_nearest_ocean_searches_the_whole_radius(tmp_path):
+    # The first non-empty square (Chebyshev radius 9) holds (j0+8, i0+9), squared distance 145;
+    # (j0, i0+10) at radius 10 is nearer (squared distance 100) and must win.
+    mask = np.zeros((40, 40), dtype=bool)
+    j0, i0 = 15, 15
+    mask[j0 + 8, i0 + 9] = True
+    mask[j0, i0 + 10] = True
+    with JcopeGrid(_basic_with_mask(tmp_path / "b.nc", mask)) as g:
+        j, i = g.find_nearest_ocean(17.0 + j0 * g.dy, 117.0 + i0 * g.dx)
+        assert (int(j), int(i)) == (j0, i0 + 10)
+
+
+def test_nearest_ocean_uses_the_fractional_position(tmp_path):
+    # Land at the rounded cell (5, 5); ocean at (5, 4) and (5, 6), equally far from the rounded
+    # cell. The requested point lies at i = 5.4, so (5, 6) is nearer.
+    mask = np.zeros((11, 11), dtype=bool)
+    mask[5, 4] = mask[5, 6] = True
+    with JcopeGrid(_basic_with_mask(tmp_path / "b.nc", mask)) as g:
+        j, i = g.find_nearest_ocean(17.0 + 5 * g.dy, 117.0 + 5.4 * g.dx)
+        assert (int(j), int(i)) == (5, 6)
+        j, i = g.find_nearest_ocean(17.0 + 5 * g.dy, 117.0 + 4.6 * g.dx)
+        assert (int(j), int(i)) == (5, 4)

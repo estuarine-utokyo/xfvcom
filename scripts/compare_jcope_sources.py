@@ -16,6 +16,9 @@ import sys
 from pathlib import Path
 
 import numpy as np
+
+# jsasaki 2026-11-05: review round 2 #19: time-index comparison
+import pandas as pd
 import xarray as xr
 from run_jcope_obc import parse_obc_dat  # noqa: E402
 
@@ -25,6 +28,37 @@ from xfvcom.io import FullDomainSource, JcopeGrid  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 STEP = {"TT": 0.01, "ST": 0.01, "UT": 0.001, "VT": 0.001, "EGT": 0.001}
+
+
+def check_alignment(src, grid, reg) -> np.ndarray:
+    """Refuse misaligned sources; return the region-file positions of the archive's hours."""
+    # ---> jsasaki 2026-11-05: review round 2 #19: the archive's own axes against basic.nc, the
+    # vertical index of the region file, and the exact hours selected from both sources
+    assert src.lat is not None and src.lon is not None
+    if not (
+        src.lat.shape == grid.lat.shape
+        and src.lon.shape == grid.lon.shape
+        and np.allclose(src.lat, grid.lat, rtol=0, atol=1e-6)
+        and np.allclose(src.lon, grid.lon, rtol=0, atol=1e-6)
+    ):
+        sys.exit("the archive's lat/lon axes are not the grid file's")
+    if "level" in reg.variables and not np.array_equal(
+        np.asarray(reg["level"].values), np.arange(46)
+    ):
+        sys.exit("the region file's level axis is not 0..45")
+    r_time = pd.DatetimeIndex(reg["time"].values)
+    want = pd.DatetimeIndex(src.time_index)
+    if not r_time.is_unique:
+        sys.exit("the region file's time axis has duplicate times")
+    pos = r_time.get_indexer(want)
+    if (pos < 0).any():
+        sys.exit(
+            f"{int((pos < 0).sum())} hour(s) of the period are absent from the region file"
+        )
+    if not r_time[pos].equals(want):
+        sys.exit("the region file's selected times differ from the archive's")
+    return pos
+    # <--- jsasaki 2026-11-05
 
 
 def main() -> int:
@@ -64,11 +98,14 @@ def main() -> int:
         )
     ):
         sys.exit("the region file's axes are not a block of the grid's")
+    # jsasaki 2026-11-05: review round 2 #19: alignment checked before any value
+    pos = check_alignment(src, grid, reg)
     pts = dict(
         lat=xr.DataArray(jj - int(j0), dims="n"),
         lon=xr.DataArray(ii - int(i0), dims="n"),
     )
-    tsel = dict(time=slice(src.time_index[0], src.time_index[-1]))
+    # jsasaki 2026-11-05: review round 2 #19: select by the exact positions checked above
+    tsel = dict(time=pos)
     bad = 0
     for name in ("TT", "ST", "UT", "VT", "EGT"):
         got = (
@@ -76,7 +113,8 @@ def main() -> int:
             if name != "EGT"
             else src.read_2d(name, jj, ii)
         )
-        sub = reg[name].sel(**tsel).isel(**pts)
+        # jsasaki 2026-11-05: review round 2 #19: positional time selection
+        sub = reg[name].isel(**tsel).isel(**pts)
         ref = sub.transpose("time", ..., "n").values
         assert got.shape == ref.shape, (name, got.shape, ref.shape)
         both = np.isfinite(got) & np.isfinite(ref)

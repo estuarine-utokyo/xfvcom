@@ -30,11 +30,13 @@ time step we therefore have:
 
 from __future__ import annotations
 
-import functools
 import os
+
+# jsasaki 2026-11-05: review round 2 #16: unique temporary files
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 import netCDF4 as nc
 import numpy as np
@@ -132,18 +134,19 @@ class JcopeObcGenerator:
         # instead of a jcopetda_region_YYYY.nc path; the region path is unchanged.
         self._src: FullDomainSource | None = None
         self._region_ds: xr.Dataset | None = None
+        # jsasaki 2026-11-05: review round 2 #18: source_files is a property evaluated at write time
+        # (a FullDomainSource reports only what was read by then)
         if isinstance(region_nc, FullDomainSource):
             self._src = region_nc
             self.region_nc_path = region_nc.root
             self.source_name = region_nc.name
-            self.source_files = region_nc.provenance()
         else:
             self.region_nc_path = Path(region_nc).expanduser().resolve()
             self._region_ds = xr.open_dataset(self.region_nc_path)
             self.source_name = self.region_nc_path.name
-            self.source_files = [self.source_name]
 
-        self.obc_nodes = np.asarray(obc_nodes, dtype=np.int32)
+        # jsasaki 2026-11-05: review round 2 #13: node ids are validated, not silently coerced
+        self.obc_nodes = _validate_obc_nodes(obc_nodes)
         self.obc_lat = np.asarray(obc_lat, dtype=np.float64)
         self.obc_lon = np.asarray(obc_lon, dtype=np.float64)
         self.obc_h_fvcom = np.asarray(obc_h_fvcom, dtype=np.float32)
@@ -151,11 +154,13 @@ class JcopeObcGenerator:
         # jsasaki 2026-11-04: review round 1 #10 #11: refuse physically invalid inputs
         if not (np.isfinite(self.obc_lat).all() and np.isfinite(self.obc_lon).all()):
             raise ValueError("obc_lat / obc_lon must be finite")
+        # jsasaki 2026-11-05: review round 2 #14: the grid extent plus HALF a spacing (the outer
+        # cells' own area), not a whole spacing
         if not (
-            self.obc_lat.min() >= grid.lat.min() - grid.dy
-            and self.obc_lat.max() <= grid.lat.max() + grid.dy
-            and self.obc_lon.min() >= grid.lon.min() - grid.dx
-            and self.obc_lon.max() <= grid.lon.max() + grid.dx
+            self.obc_lat.min() >= grid.lat.min() - 0.5 * grid.dy
+            and self.obc_lat.max() <= grid.lat.max() + 0.5 * grid.dy
+            and self.obc_lon.min() >= grid.lon.min() - 0.5 * grid.dx
+            and self.obc_lon.max() <= grid.lon.max() + 0.5 * grid.dx
         ):
             raise ValueError("an OBC node lies outside the JCOPE grid")
         if not (np.isfinite(self.obc_h_fvcom).all() and (self.obc_h_fvcom > 0).all()):
@@ -225,13 +230,9 @@ class JcopeObcGenerator:
 
         # jsasaki 2026-11-04: review round 1 #10: sigma coordinates must be finite, in [-1, 0] and
         # ordered from the surface (0) to the bed (-1)
-        for label, arr in (("siglay", self.siglay), ("siglev", self.siglev)):
-            if not np.isfinite(arr).all() or arr.max() > 0 or arr.min() < -1:
-                raise ValueError(f"{label} must be finite and within [-1, 0]")
-            if (np.diff(arr, axis=0) > 0).any():
-                raise ValueError(
-                    f"{label} must not increase with layer index (0 surface -> -1 bed)"
-                )
+        # jsasaki 2026-11-05: review round 2 #9: endpoints 0 / -1 and each siglay between its two
+        # siglev interfaces; the same check runs in write_tsobc_nc
+        _validate_sigma(self.siglev, self.siglay, n_obc)
         # Authoritative JCOPE depth and σ at the nearest ocean cell of each
         # OBC node. Both reads use basic.nc's mask, so they are consistent.
         self.obc_h_jcope: NDArray[np.float32] = grid.h_at(self.obc_lat, self.obc_lon)
@@ -243,6 +244,10 @@ class JcopeObcGenerator:
         self.obc_z_jcope: NDArray[np.float32] = zz_full[
             :, :N_JCOPE_ACTIVE_LEVELS
         ].astype(np.float32)
+        # jsasaki 2026-11-05: review round 2 #10: the sampled JCOPE geometry must be usable
+        _validate_jcope_geometry(
+            np.atleast_1d(self.obc_h_jcope), self.obc_z_jcope, self.obc_nodes
+        )
 
         # Map each OBC node to a (j_region, i_region) cell in region_nc.
         self._jr, self._ir = self._locate_in_region()
@@ -262,6 +267,17 @@ class JcopeObcGenerator:
         # jsasaki 2026-11-04: _region_ds is None in full-domain mode
         assert self._region_ds is not None
         return self._region_ds
+
+    @property
+    def source_files(self) -> list[str]:
+        """History lines naming the source (for an archive: what was read and repaired so far)."""
+        return self.source_lines()
+
+    def source_lines(self, jcope_names: Iterable[str] | None = None) -> list[str]:
+        """History lines naming the source, restricted to ``jcope_names`` (TT ST ... EGT) for an archive."""
+        if self._src is not None:
+            return self._src.provenance(jcope_names)
+        return [self.source_name]
 
     # ---------- lifecycle ---------- #
 
@@ -300,6 +316,8 @@ class JcopeObcGenerator:
             )
         # Region's local axes (the full-domain archive's axes are the grid's own)
         if self._src is not None:
+            # jsasaki 2026-11-05: review round 2 #6: the axes are Optional until a file is inspected
+            assert self._src.lat is not None and self._src.lon is not None
             r_lat, r_lon = self._src.lat, self._src.lon
         else:
             r_lat = np.asarray(self._ds["lat"].values)
@@ -484,11 +502,16 @@ class JcopeObcGenerator:
             out[v] = self._interp_to_fvcom_sigma(
                 jcope_field, self.obc_h_jcope, self.obc_h_fvcom
             )
+            # jsasaki 2026-11-05: review round 2 #3: non-finite forcing is an error, not a result
+            _check_finite(f"{v} ({jcope_name})", out[v], self.obc_nodes)
         return out
 
     def build_elevation_array(self) -> NDArray[np.float32]:
         """Return the ``(n_time, n_obc)`` SSH array, no NetCDF write."""
-        return self._read_variable_2d("EGT")
+        # jsasaki 2026-11-05: review round 2 #3: non-finite forcing is an error, not a result
+        elev = self._read_variable_2d("EGT")
+        _check_finite("elevation (EGT)", elev, self.obc_nodes)
+        return elev
 
     # ---------- public writers ---------- #
 
@@ -501,6 +524,8 @@ class JcopeObcGenerator:
     ) -> Path:
         """Write a FVCOM TIME SERIES OBC TS FILE for a single year."""
         fields = self.build_tsobc_arrays(variables=variables)
+        # jsasaki 2026-11-05: review round 2 #18: provenance of the variables of this file only
+        names = [_TSOBC_VAR_MAP[v][0] for v in fields]
         return write_tsobc_nc(
             out_path,
             time_mjd=self.mjd,
@@ -511,7 +536,8 @@ class JcopeObcGenerator:
             fields=fields,
             title=title,
             # jsasaki 2026-11-04: source label of either archive kind
-            source_files=self.source_files,
+            # jsasaki 2026-11-05: review round 2 #18: evaluated after the read
+            source_files=self.source_lines(names),
         )
 
     def write_elevation(
@@ -521,38 +547,162 @@ class JcopeObcGenerator:
         title: str | None = None,
     ) -> Path:
         """Write a FVCOM TIME SERIES ELEVATION FORCING FILE for one year."""
+        # jsasaki 2026-11-05: review round 2 #18: read first, then the provenance of what was read
+        elevation = self.build_elevation_array()
         return write_elevation_nc(
             out_path,
             time_mjd=self.mjd,
             obc_nodes=self.obc_nodes,
-            elevation=self.build_elevation_array(),
+            elevation=elevation,
             title=title,
             # jsasaki 2026-11-04: source label of either archive kind
-            source_files=self.source_files,
+            source_files=self.source_lines(["EGT"]),
         )
+
+
+# ---> jsasaki 2026-11-05: review round 2 #3 #9 #10 #13: input validation shared by the generator and
+# the public writers
+SIGMA_TOL = 1e-6
+
+
+def _validate_obc_nodes(obc_nodes: ArrayLike) -> NDArray[np.int32]:
+    """Non-empty, 1-D, integral, positive, unique node ids representable as int32."""
+    a = np.asarray(obc_nodes)
+    if a.ndim != 1 or a.size == 0:
+        raise ValueError("obc_nodes must be a non-empty 1-D array")
+    if a.dtype.kind not in "iuf":
+        raise ValueError(f"obc_nodes must be integers (got dtype {a.dtype})")
+    if a.dtype.kind == "f" and not (np.isfinite(a).all() and (a == np.rint(a)).all()):
+        raise ValueError("obc_nodes must be integers")
+    if (a < 1).any() or (a > np.iinfo(np.int32).max).any():
+        raise ValueError("obc_nodes must be positive (1-based) int32 node ids")
+    if np.unique(a).size != a.size:
+        raise ValueError("obc_nodes must be unique")
+    return a.astype(np.int32)
+
+
+def _validate_sigma(
+    siglev: ArrayLike, siglay: ArrayLike, n_obc: int
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """FVCOM sigma interfaces (siglev) and layer centres (siglay), 1-D or (n_sig, n_obc).
+
+    siglev runs from 0 (surface) to -1 (bed) without increasing; each siglay lies between its two
+    interfaces. Collapsed (equal) interfaces are allowed; the layer centre then equals them.
+    """
+    sv = np.asarray(siglev, dtype=np.float64)
+    sl = np.asarray(siglay, dtype=np.float64)
+    if sv.ndim not in (1, 2) or sl.ndim != sv.ndim:
+        raise ValueError("siglev / siglay must both be 1-D or both 2-D (n_sig, n_obc)")
+    if sv.ndim == 2 and (sv.shape[1] != n_obc or sl.shape[1] != n_obc):
+        raise ValueError(
+            f"per-node siglay/siglev second dim must be n_obc={n_obc} "
+            f"(got {sl.shape[1]}, {sv.shape[1]})"
+        )
+    if sv.shape[0] != sl.shape[0] + 1 or sl.shape[0] < 1:
+        raise ValueError(
+            f"siglev rows ({sv.shape[0]}) must be siglay rows ({sl.shape[0]}) + 1, siglay rows >= 1"
+        )
+    if not (np.isfinite(sv).all() and np.isfinite(sl).all()):
+        raise ValueError("siglev / siglay must be finite")
+    if (np.abs(sv[0]) > SIGMA_TOL).any() or (np.abs(sv[-1] + 1.0) > SIGMA_TOL).any():
+        raise ValueError("siglev must run from 0 at the surface to -1 at the bed")
+    if (np.diff(sv, axis=0) > 0).any():
+        raise ValueError(
+            "siglev must not increase with layer index (0 surface -> -1 bed)"
+        )
+    if ((sl > sv[:-1] + SIGMA_TOL) | (sl < sv[1:] - SIGMA_TOL)).any():
+        raise ValueError("each siglay must lie between its two siglev interfaces")
+    return sv, sl
+
+
+def _validate_jcope_geometry(
+    h: NDArray, zz: NDArray, obc_nodes: NDArray[np.int32]
+) -> None:
+    """JCOPE depth finite positive; active layer centres finite, negative, deepening, above the bed."""
+    h64 = np.asarray(h, dtype=np.float64)
+    z64 = np.asarray(zz, dtype=np.float64)
+    for n, node in enumerate(obc_nodes):
+        if not (np.isfinite(h64[n]) and h64[n] > 0):
+            raise ValueError(
+                f"JCOPE depth at the cell of OBC node {int(node)} is {h64[n]} (not finite positive)"
+            )
+        z = z64[n]
+        if not (
+            np.isfinite(z).all()
+            and (z < 0).all()
+            and (np.diff(z) < 0).all()
+            and z[-1] >= -h64[n] * (1 + 1e-3) - 1e-3
+        ):
+            raise ValueError(
+                f"JCOPE layer-centre depths (ZZ) at the cell of OBC node {int(node)} are not finite, "
+                f"negative, strictly deepening and above the bed (h={h64[n]:g}): {z[:3]} ... {z[-3:]}"
+            )
+
+
+def _check_finite(label: str, arr: NDArray, obc_nodes: ArrayLike) -> None:
+    """Refuse a non-finite value of a (time, ..., n_obc) array, naming time index and node."""
+    nodes = np.asarray(obc_nodes)
+    step = 744  # one month of hours at a time: no full-size boolean temporary
+    for t0 in range(0, arr.shape[0], step):
+        blk = arr[t0 : t0 + step]
+        ok = np.isfinite(blk)
+        if not ok.all():
+            first = np.unravel_index(int(np.argmin(ok)), ok.shape)
+            node = int(first[-1])
+            raise ValueError(
+                f"{label}: non-finite value at time index {t0 + int(first[0])}, node "
+                f"{int(nodes[node]) if node < nodes.size else node} (column {node})"
+                + (f", layer {int(first[1])}" if len(first) == 3 else "")
+            )
+
+
+def _validate_time(time_mjd: ArrayLike) -> NDArray[np.float64]:
+    t = np.asarray(time_mjd, dtype=np.float64)
+    if t.ndim != 1 or t.size == 0 or not np.isfinite(t).all():
+        raise ValueError("time_mjd must be a non-empty, finite 1-D array")
+    if (np.diff(t) <= 0).any():
+        raise ValueError("time_mjd must be strictly increasing")
+    return t
+
+
+# <--- jsasaki 2026-11-05
 
 
 # ---------- module-level NC writers ---------- #
 
 
-def _atomic_write(impl):
-    """Write to a temporary sibling and rename on success, so a failure never destroys an existing file."""
+def _current_umask() -> int:
+    mask = os.umask(0)
+    os.umask(mask)
+    return mask
+
+
+def _atomic_write(out_path: str | Path, write: Callable[[Path], None]) -> Path:
+    """Write via a temporary sibling and rename on success, so a failure never destroys an existing file."""
     # jsasaki 2026-11-04: review round 1 #13: the writers truncated the destination before writing
-
-    @functools.wraps(impl)
-    def wrapper(out_path, *args, **kwargs):
-        final = Path(out_path).expanduser().resolve()
-        final.parent.mkdir(parents=True, exist_ok=True)
-        tmp = final.with_name(final.name + ".tmp")
-        try:
-            impl(tmp, *args, **kwargs)
-            os.replace(tmp, final)
-        finally:
-            if tmp.exists():
+    # ---> jsasaki 2026-11-05: review round 2 #16: a unique temporary created exclusively (mkstemp)
+    # in the destination directory; only that file is ever removed. Validation happens before.
+    final = Path(out_path).expanduser().resolve()
+    final.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(
+        prefix=f".{final.name}.", suffix=".tmp", dir=final.parent
+    )
+    os.close(fd)
+    tmp = Path(name)
+    done = False
+    try:
+        write(tmp)
+        os.chmod(tmp, 0o666 & ~_current_umask())
+        os.replace(tmp, final)
+        done = True
+    finally:
+        if not done:
+            try:
                 tmp.unlink()
-        return final
-
-    return wrapper
+            except FileNotFoundError:
+                pass
+    return final
+    # <--- jsasaki 2026-11-05
 
 
 def _format_history(source_files: Iterable[str]) -> str:
@@ -561,7 +711,6 @@ def _format_history(source_files: Iterable[str]) -> str:
     return f"Created {when} UTC from {sources}"
 
 
-@_atomic_write
 def write_tsobc_nc(
     out_path: str | Path,
     *,
@@ -579,31 +728,72 @@ def write_tsobc_nc(
     ``fields`` maps short variable keys (``"temp"`` / ``"salt"``) to
     ``(n_time, n_siglay, n_obc)`` float32 arrays already interpolated to
     the FVCOM σ grid (typically produced by
-    :meth:`JcopeObcGenerator.build_tsobc_arrays`).
+    :meth:`JcopeObcGenerator.build_tsobc_arrays`). Every input is validated
+    before anything is written; an existing file is replaced only on success.
     """
+    # ---> jsasaki 2026-11-05: review round 2 #3 #9 #13 #16: validate everything before the
+    # temporary file exists
+    time_mjd = _validate_time(time_mjd)
+    obc_nodes = _validate_obc_nodes(obc_nodes)
     n_time = int(time_mjd.size)
     n_obc = int(obc_nodes.size)
+    obc_h = np.asarray(obc_h, dtype=np.float32)
+    if obc_h.shape != (n_obc,) or not (np.isfinite(obc_h).all() and (obc_h > 0).all()):
+        raise ValueError(f"obc_h must be {n_obc} finite positive depths")
     # siglay/siglev may be 1-D (uniform, broadcast across nodes) or 2-D
     # (n_sig, n_obc) for a per-node sigma-z grid — take the layer count from
     # the leading axis either way.
-    siglay_arr = np.asarray(siglay)
-    siglev_arr = np.asarray(siglev)
+    siglev_arr, siglay_arr = _validate_sigma(siglev, siglay, n_obc)
     n_siglay = int(siglay_arr.shape[0])
     n_siglev = int(siglev_arr.shape[0])
+    if not fields:
+        raise ValueError("fields is empty")
     for v, arr in fields.items():
         if v not in _TSOBC_VAR_MAP:
             raise ValueError(
                 f"variable {v!r} is not supported (allowed: {sorted(_TSOBC_VAR_MAP)})"
             )
-        if arr.shape != (n_time, n_siglay, n_obc):
+        if np.shape(arr) != (n_time, n_siglay, n_obc):
             raise ValueError(
-                f"field {v!r} has shape {arr.shape}; "
+                f"field {v!r} has shape {np.shape(arr)}; "
                 f"expected ({n_time}, {n_siglay}, {n_obc})"
             )
+        _check_finite(f"field {v!r}", np.asarray(arr), obc_nodes)
+    sources = list(source_files)
 
-    out_path = Path(out_path).expanduser().resolve()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    def _write(path: Path) -> None:
+        _write_tsobc_file(
+            path,
+            time_mjd,
+            obc_nodes,
+            obc_h,
+            siglev_arr,
+            siglay_arr,
+            n_siglev,
+            n_siglay,
+            fields,
+            title,
+            sources,
+        )
 
+    return _atomic_write(out_path, _write)
+    # <--- jsasaki 2026-11-05
+
+
+def _write_tsobc_file(
+    out_path: Path,
+    time_mjd: NDArray[np.float64],
+    obc_nodes: NDArray[np.int32],
+    obc_h: NDArray[np.float32],
+    siglev_arr: NDArray[np.float64],
+    siglay_arr: NDArray[np.float64],
+    n_siglev: int,
+    n_siglay: int,
+    fields: dict[str, NDArray[np.float32]],
+    title: str | None,
+    source_files: list[str],
+) -> None:
+    n_obc = int(obc_nodes.size)
     with nc.Dataset(out_path, "w", format="NETCDF4") as ds:
         ds.createDimension("time", None)
         ds.createDimension("nobc", n_obc)
@@ -661,10 +851,7 @@ def write_tsobc_nc(
         )
         ds.history = _format_history(source_files)
 
-    return out_path
 
-
-@_atomic_write
 def write_elevation_nc(
     out_path: str | Path,
     *,
@@ -674,17 +861,39 @@ def write_elevation_nc(
     title: str | None = None,
     source_files: Iterable[str] = (),
 ) -> Path:
-    """Write a FVCOM TIME SERIES ELEVATION FORCING FILE from pre-computed arrays."""
+    """Write a FVCOM TIME SERIES ELEVATION FORCING FILE from pre-computed arrays.
+
+    Every input is validated before anything is written; an existing file is replaced only on success.
+    """
+    # ---> jsasaki 2026-11-05: review round 2 #3 #13 #16: validate everything before the temporary
+    # file exists
+    time_mjd = _validate_time(time_mjd)
+    obc_nodes = _validate_obc_nodes(obc_nodes)
     n_time = int(time_mjd.size)
     n_obc = int(obc_nodes.size)
-    if elevation.shape != (n_time, n_obc):
+    if np.shape(elevation) != (n_time, n_obc):
         raise ValueError(
-            f"elevation has shape {elevation.shape}; expected ({n_time}, {n_obc})"
+            f"elevation has shape {np.shape(elevation)}; expected ({n_time}, {n_obc})"
         )
+    _check_finite("elevation", np.asarray(elevation), obc_nodes)
+    sources = list(source_files)
 
-    out_path = Path(out_path).expanduser().resolve()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    def _write(path: Path) -> None:
+        _write_elevation_file(path, time_mjd, obc_nodes, elevation, title, sources)
 
+    return _atomic_write(out_path, _write)
+    # <--- jsasaki 2026-11-05
+
+
+def _write_elevation_file(
+    out_path: Path,
+    time_mjd: NDArray[np.float64],
+    obc_nodes: NDArray[np.int32],
+    elevation: NDArray[np.float32],
+    title: str | None,
+    source_files: list[str],
+) -> None:
+    n_obc = int(obc_nodes.size)
     with nc.Dataset(out_path, "w", format="NETCDF4") as ds:
         ds.createDimension("time", None)
         ds.createDimension("nobc", n_obc)
@@ -714,5 +923,3 @@ def write_elevation_nc(
             "produced by xfvcom.io.JcopeObcGenerator"
         )
         ds.history = _format_history(source_files)
-
-    return out_path

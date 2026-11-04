@@ -113,49 +113,50 @@ class JcopeGrid:
     ) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
         """For each requested point, return the nearest **ocean** cell.
 
-        Searches outward from the nominal nearest cell up to
-        ``max_radius_cells`` grid spacings. Raises ``ValueError`` if no
-        ocean cell is found within the radius.
+        Every ocean cell within ``max_radius_cells`` grid spacings (a square
+        around the nominal nearest cell) is a candidate; the one whose centre
+        is closest (Euclidean, in fractional cell units) to the REQUESTED
+        position wins, ties going to the first in (j, i) order. Raises
+        ``ValueError`` if no ocean cell is found within the radius.
         """
         lat_arr = np.atleast_1d(np.asarray(lat, dtype=np.float64))
         lon_arr = np.atleast_1d(np.asarray(lon, dtype=np.float64))
         n = lat_arr.size
 
         j0_all, i0_all = self.index_of(lat_arr, lon_arr)
+        # jsasaki 2026-11-05: review round 2 #1: distances from the requested (fractional) position
+        fj_all = (lat_arr - self.lat_origin) / self.dy
+        fi_all = (lon_arr - self.lon_origin) / self.dx
         out_j = np.empty(n, dtype=np.int64)
         out_i = np.empty(n, dtype=np.int64)
 
         for p in range(n):
             j0, i0 = int(j0_all[p]), int(i0_all[p])
             if self.mask[j0, i0]:
+                # the rounded (clipped) cell is the nearest cell of the grid
                 out_j[p], out_i[p] = j0, i0
                 continue
 
-            found = False
-            for r in range(1, max_radius_cells + 1):
-                # Ring of radius r around (j0, i0)
-                j_lo = max(j0 - r, 0)
-                j_hi = min(j0 + r + 1, self.jm)
-                i_lo = max(i0 - r, 0)
-                i_hi = min(i0 + r + 1, self.im)
-                box_mask = self.mask[j_lo:j_hi, i_lo:i_hi]
-                if not box_mask.any():
-                    continue
-                # Distances within the box (in grid cells)
-                jj: NDArray[np.int64]
-                ii: NDArray[np.int64]
+            # jsasaki 2026-11-05: review round 2 #1: search ALL candidates within the radius instead of
+            # stopping at the first non-empty square (that could pick a farther cell in a corner)
+            r = max_radius_cells
+            j_lo = max(j0 - r, 0)
+            j_hi = min(j0 + r + 1, self.jm)
+            i_lo = max(i0 - r, 0)
+            i_hi = min(i0 + r + 1, self.im)
+            box_mask = self.mask[j_lo:j_hi, i_lo:i_hi]
+            found = bool(box_mask.any())
+            if found:
                 jj, ii = np.meshgrid(
-                    np.arange(j_lo, j_hi),
-                    np.arange(i_lo, i_hi),
+                    np.arange(j_lo, j_hi, dtype=np.float64),
+                    np.arange(i_lo, i_hi, dtype=np.float64),
                     indexing="ij",
                 )
-                d2 = (jj - j0) ** 2 + (ii - i0) ** 2
-                d2 = np.where(box_mask, d2, np.iinfo(np.int64).max)
+                d2 = (jj - fj_all[p]) ** 2 + (ii - fi_all[p]) ** 2
+                d2 = np.where(box_mask, d2, np.inf)
                 idx = np.unravel_index(np.argmin(d2), d2.shape)
-                out_j[p] = j_lo + idx[0]
-                out_i[p] = i_lo + idx[1]
-                found = True
-                break
+                out_j[p] = j_lo + int(idx[0])
+                out_i[p] = i_lo + int(idx[1])
 
             if not found:
                 raise ValueError(

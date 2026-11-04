@@ -586,3 +586,206 @@ class TestPerNodeSigmaZ:
                 )
         finally:
             grid.close()
+
+
+# ---------------------------------------------------------------------------
+# review round 2 (gpt-6.1-sol)
+# ---------------------------------------------------------------------------
+
+_LATS = [LAT_ORIGIN + 3 * DY] * 3
+_LONS = [LON_ORIGIN + 6 * DX, LON_ORIGIN + 8 * DX, LON_ORIGIN + 5 * DX]
+_H = np.array([100.0, 200.0, 60.0], dtype=np.float32)
+
+
+def _kw(region_path, grid, **over):
+    kw = dict(
+        grid=grid,
+        region_nc=region_path,
+        obc_nodes=[101, 102, 103],
+        obc_lat=_LATS,
+        obc_lon=_LONS,
+        obc_h_fvcom=_H,
+        n_siglay=10,
+    )
+    kw.update(over)
+    return kw
+
+
+def test_round2_nonfinite_regional_forcing_is_refused(synthetic_archive):
+    # #3: an all-NaN regional TT column (node 102, global i=8 -> local 4) at hour 2
+    basic_path, region_path = synthetic_archive
+    with nc.Dataset(region_path, "r+") as ds:
+        ds["TT"][2, :, 3, 4] = np.nan
+    grid = JcopeGrid(basic_path)
+    try:
+        gen = JcopeObcGenerator(**_kw(region_path, grid))
+        with pytest.raises(ValueError, match=r"temp \(TT\).*time index 2, node 102"):
+            gen.build_tsobc_arrays()
+        gen.close()
+    finally:
+        grid.close()
+
+
+def test_round2_writers_refuse_nonfinite_values_before_writing(generator, tmp_path):
+    # #3: validation happens before the temporary file exists; an existing file is untouched
+    g = generator
+    fields = g.build_tsobc_arrays()
+    fields["temp"][1, 4, 2] = np.nan
+    out = tmp_path / "w" / "ts.nc"
+    out.parent.mkdir()
+    out.write_bytes(b"keep")
+    with pytest.raises(ValueError, match="time index 1, node 103"):
+        write_tsobc_nc(
+            out,
+            time_mjd=g.mjd,
+            obc_nodes=g.obc_nodes,
+            obc_h=g.obc_h_fvcom,
+            siglev=g.siglev,
+            siglay=g.siglay,
+            fields=fields,
+        )
+    elev = g.build_elevation_array()
+    elev[3, 0] = np.inf
+    with pytest.raises(ValueError, match="time index 3, node 101"):
+        write_elevation_nc(out, time_mjd=g.mjd, obc_nodes=g.obc_nodes, elevation=elev)
+    assert out.read_bytes() == b"keep"
+    assert sorted(p.name for p in out.parent.iterdir()) == ["ts.nc"]
+
+
+@pytest.mark.parametrize(
+    "sv, sl, match",
+    [
+        ([0.0, -0.2, -1.0], [-0.9, -0.95], "between"),
+        ([0.0, -0.2, -0.3], [-0.1, -0.25], "from 0 at the surface to -1"),
+        ([0.0, 0.0, 0.0], [0.0, 0.0], "from 0 at the surface to -1"),
+        ([0.1, -0.5, -1.0], [-0.2, -0.7], "from 0 at the surface to -1"),
+    ],
+)
+def test_round2_sigma_geometry_is_validated(synthetic_archive, sv, sl, match):
+    # #9: generator and public writer share the check
+    basic_path, region_path = synthetic_archive
+    sv_pn = np.repeat(np.asarray(sv)[:, None], 3, axis=1)
+    sl_pn = np.repeat(np.asarray(sl)[:, None], 3, axis=1)
+    grid = JcopeGrid(basic_path)
+    try:
+        with pytest.raises(ValueError, match=match):
+            JcopeObcGenerator(
+                **_kw(region_path, grid, siglay_per_node=sl_pn, siglev_per_node=sv_pn)
+            )
+    finally:
+        grid.close()
+    with pytest.raises(ValueError, match=match):
+        write_tsobc_nc(
+            Path(basic_path).parent / "never.nc",
+            time_mjd=np.array([1.0]),
+            obc_nodes=np.array([1, 2, 3]),
+            obc_h=_H,
+            siglev=sv_pn,
+            siglay=sl_pn,
+            fields={"temp": np.zeros((1, len(sl), 3), dtype=np.float32)},
+        )
+
+
+def test_round2_collapsed_layers_are_allowed(synthetic_archive):
+    basic_path, region_path = synthetic_archive
+    sv = np.repeat(np.array([0.0, -0.5, -0.5, -1.0])[:, None], 3, axis=1)
+    sl = 0.5 * (sv[:-1] + sv[1:])
+    grid = JcopeGrid(basic_path)
+    try:
+        gen = JcopeObcGenerator(
+            **_kw(region_path, grid, siglay_per_node=sl, siglev_per_node=sv)
+        )
+        assert np.isfinite(gen.build_tsobc_arrays()["temp"]).all()
+        gen.close()
+    finally:
+        grid.close()
+
+
+def test_round2_public_writer_refuses_bad_depths(generator, tmp_path):
+    g = generator
+    with pytest.raises(ValueError, match="obc_h"):
+        write_tsobc_nc(
+            tmp_path / "x.nc",
+            time_mjd=g.mjd,
+            obc_nodes=g.obc_nodes,
+            obc_h=-g.obc_h_fvcom,
+            siglev=g.siglev,
+            siglay=g.siglay,
+            fields=g.build_tsobc_arrays(),
+        )
+
+
+@pytest.mark.parametrize("bad", [np.nan, 5.0])
+def test_round2_invalid_jcope_geometry_is_refused(synthetic_archive, bad):
+    # #10: sampled ZZ must be finite, negative and deepening at the OBC cells
+    basic_path, region_path = synthetic_archive
+    with nc.Dataset(basic_path, "r+") as ds:
+        ds["ZZ"][10, 3, 6] = bad  # the cell of node 101
+    grid = JcopeGrid(basic_path)
+    try:
+        with pytest.raises(ValueError, match="ZZ.*OBC node 101"):
+            JcopeObcGenerator(**_kw(region_path, grid))
+    finally:
+        grid.close()
+
+
+@pytest.mark.parametrize(
+    "nodes, match",
+    [
+        ([0, 2, 3], "positive"),
+        ([1.9, 2, 3], "integers"),
+        ([1, 1, 3], "unique"),
+        ([[1, 2, 3]], "1-D"),
+        ([1 + 0j, 2, 3], "integers"),
+    ],
+)
+def test_round2_obc_node_ids_are_validated(synthetic_archive, nodes, match):
+    # #13: generator and both writers
+    basic_path, region_path = synthetic_archive
+    grid = JcopeGrid(basic_path)
+    try:
+        with pytest.raises(ValueError, match=match):
+            JcopeObcGenerator(**_kw(region_path, grid, obc_nodes=nodes))
+    finally:
+        grid.close()
+    with pytest.raises(ValueError, match=match):
+        write_elevation_nc(
+            Path(basic_path).parent / "never.nc",
+            time_mjd=np.array([1.0]),
+            obc_nodes=np.asarray(nodes),
+            elevation=np.zeros((1, 3), dtype=np.float32),
+        )
+
+
+def test_round2_domain_is_the_grid_plus_half_a_cell(synthetic_archive):
+    # #14
+    basic_path, region_path = synthetic_archive
+    grid = JcopeGrid(basic_path)
+    try:
+        with pytest.raises(ValueError, match="outside the JCOPE grid"):
+            JcopeObcGenerator(
+                **_kw(region_path, grid, obc_lat=[LAT_ORIGIN - 0.75 * DY] * 3)
+            )
+        gen = JcopeObcGenerator(
+            **_kw(region_path, grid, obc_lat=[LAT_ORIGIN - 0.4 * DY] * 3)
+        )
+        gen.close()
+    finally:
+        grid.close()
+
+
+def test_round2_writer_temporary_is_unique_and_exclusive(generator, tmp_path):
+    # #16: a pre-existing `<dest>.tmp` symlink is neither followed nor removed
+    g = generator
+    victim = tmp_path / "victim.txt"
+    victim.write_text("do not touch")
+    out = tmp_path / "e.nc"
+    (tmp_path / "e.nc.tmp").symlink_to(victim)
+    write_elevation_nc(
+        out, time_mjd=g.mjd, obc_nodes=g.obc_nodes, elevation=g.build_elevation_array()
+    )
+    assert victim.read_text() == "do not touch"
+    assert (tmp_path / "e.nc.tmp").is_symlink()
+    with nc.Dataset(out) as ds:
+        assert ds["elevation"].shape == (4, 3)
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".e.nc.")]

@@ -288,25 +288,57 @@ def test_interpolation_uses_the_day_outside_the_period(archives, tmp_path):
     assert any("interpolated in time" in x for x in src.provenance())
 
 
-def test_writers_do_not_destroy_an_existing_file_on_failure(archives, tmp_path):
+@pytest.mark.parametrize("which", ["tsobc", "elevation"])
+def test_writers_do_not_destroy_an_existing_file_on_failure(
+    archives, tmp_path, monkeypatch, which
+):
+    # review round 2 #27: valid inputs, a failure injected while the temporary file is being
+    # written (createVariable of the payload raises); the destination must survive and the
+    # temporary file must be gone.
+    import types
+
+    import xfvcom.io.jcope_obc_generator as gm
+
     basic, _region, root = archives
     g = _gen(basic, FullDomainSource(root, "2020-01-01", "2020-01-02"))
-    out = tmp_path / "ts.nc"
+    fields = g.build_tsobc_arrays()
+    elev = g.build_elevation_array()
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    out = outdir / "x.nc"
     out.write_bytes(b"precious")
-    with pytest.raises(Exception):
-        from xfvcom.io.jcope_obc_generator import write_tsobc_nc
+    opened: list[Path] = []
 
-        write_tsobc_nc(
-            out,
-            time_mjd=g.mjd,
-            obc_nodes=g.obc_nodes,
-            obc_h=g.obc_h_fvcom,
-            siglev=g.siglev,
-            siglay=g.siglay,
-            fields={"temp": np.zeros((3, 3))},
-        )
+    class Failing(nc.Dataset):
+        def __init__(self, path, *a, **k):
+            opened.append(Path(path))
+            assert Path(path).exists() and Path(path) != out  # the unique temporary
+            super().__init__(path, *a, **k)
+
+        def createVariable(self, name, *a, **k):
+            if name in ("obc_temp", "elevation"):
+                raise RuntimeError("injected failure")
+            return super().createVariable(name, *a, **k)
+
+    monkeypatch.setattr(gm, "nc", types.SimpleNamespace(Dataset=Failing))
+    with pytest.raises(RuntimeError, match="injected"):
+        if which == "tsobc":
+            gm.write_tsobc_nc(
+                out,
+                time_mjd=g.mjd,
+                obc_nodes=g.obc_nodes,
+                obc_h=g.obc_h_fvcom,
+                siglev=g.siglev,
+                siglay=g.siglay,
+                fields=fields,
+            )
+        else:
+            gm.write_elevation_nc(
+                out, time_mjd=g.mjd, obc_nodes=g.obc_nodes, elevation=elev
+            )
+    assert len(opened) == 1 and not opened[0].exists()
     assert out.read_bytes() == b"precious"
-    assert not list(tmp_path.glob("*.tmp"))
+    assert sorted(p.name for p in outdir.iterdir()) == ["x.nc"]
 
 
 def test_invalid_depths_and_sigma_are_refused(archives):
@@ -329,3 +361,216 @@ def test_invalid_depths_and_sigma_are_refused(archives):
         )
     with pytest.raises(ValueError, match="finite"):
         JcopeObcGenerator(obc_h_fvcom=[10.0], **{**kw, "obc_lat": [np.nan]})
+
+
+# ---------------------------------------------------------------------------
+# review round 2 (gpt-6.1-sol)
+# ---------------------------------------------------------------------------
+
+
+def _mini_day(path, day, *, level_len=N_JCOPE_ACTIVE_LEVELS, level_coord_dim=None):
+    """A small valid day file (all values 1.0) with optional schema defects."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with nc.Dataset(path, "w") as ds:
+        ds.product = "full_domain"
+        ds.format_version = 1
+        ds.missing_fields = ""
+        ds.createDimension("time", 24)
+        ds.createDimension("level", level_len)
+        ds.createDimension("lat", JM)
+        ds.createDimension("lon", IM)
+        tv = ds.createVariable("time", "f8", ("time",))
+        tv.units, tv.calendar = "hours since 2000-01-01 00:00:00", "standard"
+        tv[:] = (day - datetime(2000, 1, 1)).total_seconds() / 3600 + np.arange(24)
+        if level_coord_dim is not None:
+            ds.createDimension(level_coord_dim, N_JCOPE_ACTIVE_LEVELS)
+            ds.createVariable("level", "i4", (level_coord_dim,))[:] = np.arange(
+                N_JCOPE_ACTIVE_LEVELS
+            )
+        else:
+            ds.createVariable("level", "i4", ("level",))[:] = np.arange(level_len)
+        ds.createVariable("lat", "f8", ("lat",))[:] = LAT_ORIGIN + np.arange(JM) * DX
+        ds.createVariable("lon", "f8", ("lon",))[:] = LON_ORIGIN + np.arange(IM) * DX
+        for name in ("TT", "ST", "UT", "VT", "EGT"):
+            dims = (
+                ("time", "lat", "lon")
+                if name == "EGT"
+                else ("time", "level", "lat", "lon")
+            )
+            v = ds.createVariable(name, "i2", dims, fill_value=np.int16(FILL))
+            v.scale_factor, v.add_offset = SCALE[name], 0.0
+            v.set_auto_maskandscale(False)
+            v[:] = np.full(v.shape, 100, dtype="i2")
+
+
+@pytest.fixture
+def mini(tmp_path):
+    root = tmp_path / "mini"
+    _mini_day(root / "2020" / "jcopetda_20200101.nc", datetime(2020, 1, 1))
+    return root, root / "2020" / "jcopetda_20200101.nc"
+
+
+def test_round2_dimension_lengths_and_coordinate_dims(tmp_path):
+    # #6: a one-level payload with a 46-element level coordinate on another dimension
+    root = tmp_path / "a"
+    _mini_day(
+        root / "2020" / "jcopetda_20200101.nc",
+        datetime(2020, 1, 1),
+        level_len=1,
+        level_coord_dim="lev46",
+    )
+    with pytest.raises(ValueError, match="dimension level must have length 46"):
+        FullDomainSource(root, "2020-01-01", "2020-01-01")
+    root = tmp_path / "b"
+    _mini_day(
+        root / "2020" / "jcopetda_20200101.nc",
+        datetime(2020, 1, 1),
+        level_coord_dim="lev46",
+    )
+    with pytest.raises(ValueError, match="not on dimension level"):
+        FullDomainSource(root, "2020-01-01", "2020-01-01")
+
+
+@pytest.mark.parametrize(
+    "attr, value, match",
+    [
+        ("scale_factor", 0.0, "scale_factor"),
+        ("scale_factor", -0.01, "scale_factor"),
+        ("scale_factor", 0.001, "scale_factor"),
+        ("missing_value", np.int16(1000), "unsupported decoding"),
+        ("_Unsigned", "true", "unsupported decoding"),
+        ("valid_max", np.int16(5), "unsupported decoding"),
+        ("add_offset", 1e-9, "add_offset"),
+    ],
+)
+def test_round2_packing_contract(mini, attr, value, match):
+    # #7
+    root, p = mini
+    _edit(p, lambda ds: ds["TT"].setncattr(attr, value))
+    with pytest.raises(ValueError, match=match):
+        FullDomainSource(root, "2020-01-01", "2020-01-01")
+
+
+@pytest.mark.parametrize("fv", [1.5, "1", np.int32(2)])
+def test_round2_format_version_is_not_truncated(mini, fv):
+    # #7
+    root, p = mini
+    _edit(p, lambda ds: setattr(ds, "format_version", fv))
+    with pytest.raises(ValueError, match="format_version"):
+        FullDomainSource(root, "2020-01-01", "2020-01-01")
+
+
+def test_round2_complex_and_boolean_indices_are_refused(mini):
+    # #15
+    root, _p = mini
+    src = FullDomainSource(root, "2020-01-01", "2020-01-01")
+    with pytest.raises(ValueError, match="real integers"):
+        src.read_profile("TT", np.array([0 + 3j]), np.array([0 + 2j]))
+    with pytest.raises(ValueError, match="real integers"):
+        src.read_profile("TT", np.array([True]), np.array([True]))
+    assert np.allclose(src.read_profile("TT", [3], [6]), 1.0)
+
+
+def _declare(root, day, items, blank=True):
+    """Declare (and blank) records `TT_YYYYMMDDhh` in the day file of `day` (YYYYMMDD)."""
+    p = root / day[:4] / f"jcopetda_{day}.nc"
+    with nc.Dataset(p, "r+") as ds:
+        ds.missing_fields = ",".join(items)
+        for it in items if blank else ():
+            name, stamp = it.split("_")
+            v = ds[name]
+            v.set_auto_maskandscale(False)
+            v[int(stamp[8:10])] = np.full(v.shape[1:], FILL, dtype="i2")
+
+
+@pytest.fixture
+def three_days(tmp_path):
+    basic = tmp_path / "basic.nc"
+    region = tmp_path / "region.nc"
+    _build_basic_nc(basic)
+    _build_region_nc(region, n_time=72)
+    root = tmp_path / "three"
+    _write_days(root, region, n_days=3)
+    return basic, region, root
+
+
+def test_round2_irrelevant_halo_gap_does_not_break_a_period(three_days):
+    # #8: Jan 2 is intact; Jan 1 declares its 00Z missing, which Jan 2 does not depend on
+    _basic, _region, root = three_days
+    _declare(root, "20200101", ["TT_2020010100"])
+    src = FullDomainSource(root, "2020-01-02", "2020-01-02", missing="interpolate")
+    assert len(src.paths) == 1  # no halo needed
+    got = src.read_profile("TT", [3], [6])
+    assert np.isfinite(got).all()
+    assert not any("interpolated" in x for x in src.provenance())
+
+
+def test_round2_halo_extends_until_a_valid_neighbour(three_days):
+    # #8: Jan 3 00Z missing and the whole of Jan 2 missing: the neighbour is Jan 1 23Z
+    _basic, _region, root = three_days
+    _declare(root, "20200103", ["TT_2020010300"])
+    _declare(root, "20200102", [f"TT_20200102{h:02d}" for h in range(24)])
+    src = FullDomainSource(root, "2020-01-03", "2020-01-03", missing="interpolate")
+    assert [p.name for p in src.paths] == [
+        "jcopetda_20200101.nc",
+        "jcopetda_20200102.nc",
+        "jcopetda_20200103.nc",
+    ]
+    got = src.read_profile("TT", [3], [6])
+    # the synthetic TT is linear in time (+0.01 per hour): the 25-hour span is restored
+    ref = FullDomainSource(root, "2020-01-01", "2020-01-01").read_profile(
+        "TT", [3], [6]
+    )
+    np.testing.assert_allclose(got[0], ref[23] + 0.25, atol=0.011)  # 25 h later
+    prov = src.provenance()
+    assert "TT linearly interpolated in time at 2020-01-03 00Z" in prov
+
+
+def test_round2_halo_gap_without_any_neighbour_is_an_error(three_days):
+    _basic, _region, root = three_days
+    _declare(root, "20200101", ["TT_2020010100"])
+    with pytest.raises(ValueError, match="no valid neighbour"):
+        FullDomainSource(root, "2020-01-01", "2020-01-01", missing="interpolate")
+
+
+def test_round2_a_nan_hour_in_a_later_day_is_still_found(three_days):
+    # #17: the all-NaN column check runs per day block; a single blank hour of day 3 is caught
+    _basic, _region, root = three_days
+    with nc.Dataset(root / "2020" / "jcopetda_20200103.nc", "r+") as ds:
+        v = ds["TT"]
+        v.set_auto_maskandscale(False)
+        v[7, :, 3, 6] = FILL
+    src = FullDomainSource(root, "2020-01-01", "2020-01-03")
+    with pytest.raises(ValueError, match="no data at 1 requested cell"):
+        src.read_profile("TT", [3, 3], [6, 7])
+
+
+def test_round2_provenance_lists_only_what_was_read_and_repaired(three_days, tmp_path):
+    # #18
+    basic, _region, root = three_days
+    _declare(root, "20200101", ["UT_2020010105"])
+    _edit(
+        root / "2020" / "jcopetda_20200101.nc",
+        lambda ds: (
+            setattr(ds, "provisional_fill", "VT_202001010300"),
+            setattr(ds, "provisional_method", "test method"),
+        ),
+    )
+    src = FullDomainSource(root, "2020-01-02", "2020-01-02", missing="interpolate")
+    assert src.provenance() == [src.name, "missing-record policy: interpolate"]
+    src.read_profile("TT", [3], [6])
+    prov = src.provenance()
+    assert "variables read: TT" in prov
+    assert not any("UT" in x or "provisional_fill" in x for x in prov)
+    # a period that holds the provisional day reports its fill and method
+    src2 = FullDomainSource(root, "2020-01-01", "2020-01-02", missing="interpolate")
+    assert not any("linearly" in x for x in src2.provenance())  # nothing repaired yet
+    assert any("provisional_method: test method" in x for x in src2.provenance())
+    src2.read_profile("UT", [3], [6])
+    assert "UT linearly interpolated in time at 2020-01-01 05Z" in src2.provenance()
+    # the TS file names T/S only, not the elevation read by the same generator
+    g = _gen(basic, FullDomainSource(root, "2020-01-02", "2020-01-02"))
+    g.build_elevation_array()
+    out = g.write_tsobc(tmp_path / "ts.nc")
+    with nc.Dataset(out) as ds:
+        assert "variables read: TT ST" in ds.history and "EGT" not in ds.history

@@ -37,3 +37,174 @@ def test_obc_file_is_parsed_strictly(tmp_path):
         f.write_text(body)
         with pytest.raises(ValueError):
             r.parse_obc_dat(f)
+
+
+# ---------------------------------------------------------------------------
+# review round 2 (gpt-6.1-sol)
+# ---------------------------------------------------------------------------
+import os  # noqa: E402
+import types  # noqa: E402
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import xarray as xr  # noqa: E402
+
+
+def _mjd(start, n):
+    t = pd.date_range(start, periods=n, freq="h")
+    return np.array((t - pd.Timestamp("1858-11-17")) / pd.Timedelta(days=1))
+
+
+def test_round2_time_axis_of_the_sources_is_checked():
+    # #2: the same file read for two years (duplicated times) is refused
+    same = _mjd("2020-12-31 22:00", 2)
+    with pytest.raises(SystemExit, match="outside the year 2021"):
+        r.check_time_axis([2020, 2021], {2020: same, 2021: same})
+    ok = {2020: _mjd("2020-12-31 22:00", 2), 2021: _mjd("2021-01-01", 3)}
+    r.check_time_axis([2020, 2021], ok)
+    # a gap at the year boundary needs --allow-year-gaps and non-consecutive years
+    gap = {2020: _mjd("2020-12-30", 2), 2021: _mjd("2021-01-01", 3)}
+    with pytest.raises(SystemExit, match="jumps"):
+        r.check_time_axis([2020, 2021], gap)
+    with pytest.raises(SystemExit, match="jumps"):
+        r.check_time_axis([2020, 2021], gap, allow_gaps=True)
+    r.check_time_axis(
+        [2020, 2022], {2020: _mjd("2020-06-01", 2), 2022: _mjd("2022-01-01", 2)}, True
+    )
+    # within a year: a duplicate or a gap is refused
+    dup = _mjd("2020-01-01", 3)
+    dup[2] = dup[1]
+    with pytest.raises(SystemExit, match="hourly"):
+        r.check_time_axis([2020], {2020: dup})
+
+
+def test_round2_region_pattern_must_name_the_year(monkeypatch, tmp_path):
+    # #2
+    argv = [
+        "run_jcope_obc.py",
+        "--years",
+        "2020-2021",
+        "--region-pattern",
+        str(tmp_path / "region.nc"),
+        "--fvcom-grid",
+        "g",
+        "--fvcom-dep",
+        "d",
+        "--fvcom-obc",
+        "o",
+        "--output-dir",
+        str(tmp_path),
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit, match=r"\{year\}"):
+        r.main()
+
+
+def _fp(tmp_path, **over):
+    src = tmp_path / "region.nc"
+    grid = tmp_path / "basic.nc"
+    for p in (src, grid):
+        if not p.exists():
+            p.write_bytes(b"x" * 10)
+    kw = dict(
+        region_nc=src,
+        basic_nc=grid,
+        obc_ids=[1, 2],
+        obc_lat=[35.0, 35.1],
+        obc_lon=[139.0, 139.1],
+        cell_j=[5, 6],
+        cell_i=[7, 8],
+        time_mjd=_mjd("2020-01-01", 3),
+    )
+    kw.update(over)
+    return r._profile_fingerprint(**kw)
+
+
+def test_round2_profile_cache_is_bound_to_its_inputs(tmp_path):
+    # #4
+    raw = {
+        "temp": np.ones((3, 46, 2), np.float32),
+        "salt": np.ones((3, 46, 2), np.float32),
+    }
+    cache = tmp_path / "cache"
+    r._save_profile_cache(cache, 2020, _fp(tmp_path), raw)
+    got = r._load_profile_cache(cache, 2020, _fp(tmp_path))
+    assert got is not None and np.array_equal(got["temp"], raw["temp"])
+    assert not [p for p in cache.iterdir() if p.suffix == ".tmp"]
+    for over in (
+        dict(obc_lat=[35.0, 35.2]),
+        dict(cell_i=[7, 9]),
+        dict(time_mjd=_mjd("2020-01-02", 3)),
+    ):
+        assert r._load_profile_cache(cache, 2020, _fp(tmp_path, **over)) is None
+    # same size, other modification time: stale
+    src = tmp_path / "region.nc"
+    st = src.stat()
+    os.utime(src, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+    assert r._load_profile_cache(cache, 2020, _fp(tmp_path)) is None
+    # another grid file
+    other = tmp_path / "other_basic.nc"
+    other.write_bytes(b"x" * 10)
+    assert r._load_profile_cache(cache, 2020, _fp(tmp_path, basic_nc=other)) is None
+    # a corrupt cache file means rebuild, not a crash
+    r._save_profile_cache(cache, 2021, _fp(tmp_path), raw)
+    p = r._profile_cache_path(cache, 2021)
+    p.write_bytes(p.read_bytes()[:100])
+    assert r._load_profile_cache(cache, 2021, _fp(tmp_path)) is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "OBC Node Number = 3\n1 101 1\n2 102 1\n",  # fewer records than declared
+        "OBC Node Number = 2\n1 bad 1\n2 102 1\n",  # malformed first record
+        "OBC Node Number = 2\nOBC Node Number = 2\n1 101 1\n2 102 1\n",  # two headers
+        "OBC Node Number = 2\n1 101 1\n2 102\n",  # short record
+        "1 101 1\n2 102 1\n",  # no header
+    ],
+)
+def test_round2_obc_file_count_and_records(tmp_path, body):
+    # #11
+    f = tmp_path / "o.dat"
+    f.write_text(body)
+    with pytest.raises(ValueError):
+        r.parse_obc_dat(f)
+
+
+def test_round2_depth_file_must_match_the_mesh(tmp_path):
+    # #12
+    xy = np.array([[100.0, 200.0], [110.0, 210.0], [120.0, 220.0]])
+    f = tmp_path / "d.dat"
+    f.write_text("Node Number = 3\n100.0 200.0 5\n110.0 210.0 6\n120.0 220.0 7\n")
+    assert r.parse_dep_dat(f, xy).tolist() == [5.0, 6.0, 7.0]
+    for body in (
+        "Node Number = 3\n110.0 210.0 6\n100.0 200.0 5\n120.0 220.0 7\n",  # reordered
+        "Node Number = 3\n100.0 200.0 5\n110.0 210.0 6\n",  # short block
+        "Node Number = 3\n100.0 200.0 5\n110.0 210.0 x\n120.0 220.0 7\n",  # malformed
+        "Node Number = 2\n100.0 200.0 5\n110.0 210.0 6\n",  # another mesh's file
+    ):
+        f.write_text(body)
+        with pytest.raises(ValueError):
+            r.parse_dep_dat(f, xy)
+
+
+def test_round2_compare_checks_alignment_before_values():
+    # #19
+    import compare_jcope_sources as c
+
+    lat = 17.0 + np.arange(4) / 36.0
+    lon = 117.0 + np.arange(5) / 36.0
+    times = pd.date_range("2020-01-01", periods=3, freq="h")
+    grid = types.SimpleNamespace(lat=lat, lon=lon)
+    src = types.SimpleNamespace(lat=lat, lon=lon, time_index=times)
+    reg = xr.Dataset(coords={"time": times, "level": np.arange(46)})
+    assert c.check_alignment(src, grid, reg).tolist() == [0, 1, 2]
+    with pytest.raises(SystemExit, match="lat/lon"):
+        c.check_alignment(
+            types.SimpleNamespace(lat=lat, lon=lon + 5.0, time_index=times), grid, reg
+        )
+    bad_t = pd.DatetimeIndex([times[0], times[0], times[2]])
+    with pytest.raises(SystemExit, match="duplicate"):
+        c.check_alignment(src, grid, xr.Dataset(coords={"time": bad_t}))
+    with pytest.raises(SystemExit, match="absent"):
+        c.check_alignment(src, grid, xr.Dataset(coords={"time": times[:2]}))
