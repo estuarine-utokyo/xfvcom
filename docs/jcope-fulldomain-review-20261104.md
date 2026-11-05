@@ -2467,3 +2467,106 @@ VERDICT: FAIL (0 blocker, 0 major, 5 minor, 1 nit)
 ### Triage
 
 All 6 findings accepted (5 minor, 1 nit; #3 and #5 round-19 regressions; #1 corrects the reviewer's own round-16 #3 request). xfvcom 59b3b7b (tests/test_round20_review.py; gfortran and ifx replicas of FVCOM's READ loops were used to check every recipe): #1 list_read reads the original line text: '!' inside a still-needed value fails the READ (20.0!note refused; FVCOM would keep the previous depth, a silent wrong value), text after all required values is ignored; this reverses the round-16 decision to accept '10.0!survey'; #2 separator state carries across lines; #3 the connectivity-to-coordinate BACKSPACE/READ J transition is simulated for gfortran and ifx rules and the file is rejected unless both land on the node-1 record; #4 failed/unset READs inside the mesh blocks count as rows (interior and trailing '! note' refused, blank lines accepted); #5 lazy repetition parsing; #6 unused imports removed. 149 grid/depth/OBC files read identically.
+
+## Round 21 (commit 2a256ea reviewed; fixes in 73fa9f9, jcopetda c39c07b) - last round
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `2a256ea` (fix commit `59b3b7b`) and jcopetda `96f429f`. No files were modified.
+
+| Round-20 finding | Status | Verification |
+|---|---|---|
+| #1 Attached `!` text | RESOLVED | Attached forms fail; whitespace-separated trailing comments work. Finding 1 identifies a separate separator defect. |
+| #2 Continuation commas | RESOLVED | Separator state preserves the distinction between a completed separator and a null item. |
+| #3 Mesh transition | PARTIAL | Reported split-record cases are fixed, but the simulation omits the `LM1` transition condition; finding 3. |
+| #4 Failed mesh READ counting | RESOLVED | Interior/trailing failed READs are refused; harmless blank continuations remain accepted. |
+| #5 Lazy repetitions | RESOLVED | Unused oversized counts are ignored; consumed oversized counts fail cleanly. |
+| #6 Unused imports | RESOLVED | Both imports were removed. |
+
+Validation: all **26 round-20 cases** passed using in-memory file adapters. All **18 discovered TB-FVCOM meshes** matched the pre-fix reader. One-day runner adaptations passed for uniform sigma, depth control, SADAPT and NPZ coordinates, including diskless serialization through both writers. The comparison script returned `0` for all five variables at all 13 production OBC nodes. Both provisional repair days produced finite forcing with provenance retained. Full annual builds and the complete suite were not rerun.
+
+No behavioral regression was substantiated in the exercised production or regional paths.
+
+1. **Minor — Unicode whitespace can silently change the depth used relative to FVCOM.**
+
+   Location: [fortran_numbers.py:62](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/fortran_numbers.py:62), also line 112. Pre-existing.
+
+   **Reproduction:** Use this two-row depth block, with `\u00a0` representing a nonbreaking space:
+
+   ```python
+   "400000.0 3900000.0 10.0\n"
+   "400001.0 3900000.0 20.0\u00a0!note\n"
+   ```
+
+   `parse_dep_dat()` returns `[10, 20]`. A compiled gfortran replica of FVCOM’s external depth READ loop returns `[10, 10]`: the second READ fails and retains the previous depth.
+
+   Python’s Unicode-aware `\s` treats the nonbreaking space as a separator. Fortran rejects its UTF-8 bytes inside the numeric token. Unrestricted `strip()` introduces the same discrepancy at token boundaries.
+
+   **Fix:** Use explicitly supported Fortran whitespace in tokenization and trimming. Preserve unsupported characters so numeric conversion rejects them. Avoid Unicode `splitlines()` when identifying physical Fortran records.
+
+2. **Minor — Repetitions spanning INTEGER and REAL items are incorrectly accepted.**
+
+   Location: [fvcom_input.py:422](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/fvcom_input.py:422). Pre-existing.
+
+   **Reproduction:**
+
+   ```python
+   list_read([(1, "3*1")], 0, (INT, REAL, REAL))
+   ```
+
+   Python returns `ok` with `(1, 1.0, 1.0)`. Compiled gfortran returns `IOSTAT=5010` after assigning only the integer item.
+
+   This reaches mesh reading: replacing node 1’s coordinate record in the standard four-node fixture with `2*1 3900000.0` makes `read_dat()` accept coordinates `(1, 3900000)`. FVCOM’s coordinate READ fails when the repeated integer reaches `X1`.
+
+   **Fix:** Track the type associated with each consumed non-null repetition and reject repetitions crossing incompatible READ-item types. Preserve lazy parsing and type-independent null repetitions.
+
+3. **Minor — The transition simulation omits `LM1 /= 1`.**
+
+   Location: [dat_reader.py:110](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:110). Incomplete round-20 fix.
+
+   **Reproduction:** A conventional three-node, one-element mesh is accepted with default `allow_unordered=False`.
+
+   FVCOM transitions only when `J == 1 .AND. LM1 /= 1`. After element 1, `LM1` remains 1, so the first node record cannot trigger the transition. The compiled loop replica reaches “connectivity rows exceed the stated number of Cells.”
+
+   `_coordinate_start()` checks `J` and performs the rewind simulation without checking `LM1`.
+
+   **Fix:** Include the preceding element ID in the simulation. Refuse this case on the strict FVCOM path, retaining an explicit permissive mode where synthetic meshes are needed.
+
+4. **Minor — Strict mesh reading omits FVCOM’s maximum referenced-node check.**
+
+   Location: [dat_reader.py:239](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:239). Pre-existing.
+
+   **Reproduction:** Declare five nodes in the four-node/two-element fixture and append a valid node-5 coordinate record, leaving connectivity unchanged.
+
+   `read_dat()` returns five nodes successfully. FVCOM checks that the maximum connectivity node ID equals `Node Number` and stops because those values are 4 and 5. The compiled replica reproduced that failure.
+
+   The reader checks references against the upper bound but never checks equality with the declared maximum.
+
+   **Fix:** In strict mode, enforce `nv.max() + 1 == node` after reading connectivity.
+
+5. **Minor — Provisional filling can certify an entirely unfilled hour as repaired.**
+
+   Location: [make_provisional_tree.py:140](/home/pj24001722/ku40000343/Github/jcopetda/tools/make_provisional_tree.py:140). Pre-existing; injected-fault case.
+
+   **Reproduction:** Inject all-fill payloads into both neighbors of a declared missing EGT hour.
+
+   An in-memory execution of `fill_copy()` succeeds because the neighbors’ fill masks agree. It leaves the target entirely `-32768`, writes `n_valid_EGT = 0`, records the hour in `provisional_fill`, and clears `missing_fields`. `main()` subsequently publishes that copy as successfully repaired.
+
+   Matching empty masks do not establish usable interpolation endpoints.
+
+   **Fix:** Require undeclared, nonempty valid endpoint records and validate their masks against a trusted mask before clearing the declaration. Abort when endpoints cannot supply the missing data.
+
+6. **Nit — Mesh-reader comments contradict the implemented rules.**
+
+   Location: [dat_reader.py:177](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:177).
+
+   The comments still say records are tokenized without their `!` comments and that SCAN_FILE searches 200 lines. The implementation preserves `!` during tokenization and allows line 201. The former became stale through the round-20 reversal.
+
+   **Fix:** Update these comments to describe the current rules and remove superseded explanations.
+
+## Verdict
+VERDICT: FAIL (0 blocker, 0 major, 5 minor, 1 nit)
+
+### Triage
+
+All 6 findings were fixed (no regression was substantiated). xfvcom 73fa9f9 (tests/test_round21_review.py, 45 tests): #1 only space, tab and comma separate values (U+00A0, \f, \v, ';' stay part of the value); physical_lines() splits at \n only, #2 non-null repetitions crossing INT/REAL items are errors, #3 the replica confirmed that a one-element mesh whose first node record follows element 1 stops FVCOM; strict read_dat refuses it (allow_unordered=True reads it), #4 strict mode checks max connectivity node == Node Number, #6 comments. jcopetda c39c07b: #5 interpolation endpoints must be usable. The review loop was STOPPED here by the owner's decision (2026-11-05): the remaining findings of the last rounds concerned reading FVCOM mesh/depth/OBC text files with exotic list-directed Fortran syntax, not the jcopetda-based boundary builder; no round 22 was run.
