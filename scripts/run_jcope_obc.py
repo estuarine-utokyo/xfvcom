@@ -72,6 +72,10 @@ _HOUR = 1.0 / 24.0  # days
 _STEP_TOL = 1e-6  # days (0.09 s)
 
 
+# jsasaki 2026-11-05: first day of the full-domain archive (ISO strings compare chronologically)
+ARCHIVE_FIRST_DAY = "2018-06-04"
+
+
 def parse_year_spec(spec: str) -> list[int]:
     """Accept a single year, a comma list, or a 'YYYY-YYYY' inclusive range."""
     if "-" in spec and "," not in spec:
@@ -574,7 +578,7 @@ def main() -> int:
         default=None,
         help="root of the full-domain archive (YYYY/jcopetda_YYYYMMDD.nc), e.g. "
         "$DATA_DIR/jcopetda_provisional; replaces --region-nc/--region-pattern. Each year of "
-        "--year/--years is read whole (Jan 1 - Dec 31); the profile cache is not used.",
+        "--year/--years is read whole (Jan 1 - Dec 31; 2018 from 2018-06-04, the first archive day); the profile cache is not used.",
     )
     parser.add_argument(
         "--missing",
@@ -725,7 +729,11 @@ def main() -> int:
         # jsasaki 2026-11-04: one FullDomainSource per calendar year
         region_paths: list = [
             FullDomainSource(
-                args.archive_root, f"{y}-01-01", f"{y}-12-31", missing=args.missing
+                args.archive_root,
+                # jsasaki 2026-11-05: the archive starts on 2018-06-04, so 2018 is a partial year
+                max(f"{y}-01-01", ARCHIVE_FIRST_DAY),
+                f"{y}-12-31",
+                missing=args.missing,
             )
             for y in years
         ]

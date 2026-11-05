@@ -56,7 +56,7 @@ Promote a file by copying it and pointing the run's namelist at it after you hav
 | option | meaning |
 |---|---|
 | `--archive-root DIR` | the full-domain archive (replaces the older `--region-nc/--region-pattern`) |
-| `--years 2020-2025`, `--year 2022` | calendar years, each read whole (Jan 1 - Dec 31). A list must be increasing and consecutive; `--allow-year-gaps` accepts a skipped year (the time axis then jumps) |
+| `--years 2020-2025`, `--year 2022` | calendar years, each read whole (Jan 1 - Dec 31; 2018 starts on 2018-06-04, the first day of the archive). A list must be increasing and consecutive; `--allow-year-gaps` accepts a skipped year (the time axis then jumps) |
 | `--missing error\|interpolate` | what to do with an hour the archive declares missing: stop (default), or interpolate linearly in time. Not needed for `jcopetda_provisional` |
 | `--fvcom-grid/--fvcom-dep/--fvcom-obc` | the FVCOM mesh files; `--utm-zone N` (default 54, Tokyo Bay) |
 | `--n-siglay N` | uniform sigma layers (default 30) |
