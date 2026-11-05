@@ -177,9 +177,11 @@ def test_round19_depth_records_spanning_lines(tmp_path):
 
 
 def test_round19_mesh_records_spanning_lines(tmp_path):
+    # jsasaki 2026-11-05: review round 20 #3: the split moved from node 1 to node 2 -- FVCOM's
+    # connectivity-to-coordinate transition cannot replay a split node-1 record (refused now)
     text = (
         "Node Number = 3\nCell Number = 1\n1 1\n2 3\n"
-        "1 400000.0\n3900000.0\n2 400001.0 3900000.0\n3 400000.0 3900001.0\n"
+        "1 400000.0 3900000.0\n2 400001.0\n3900000.0\n3 400000.0 3900001.0\n"
     )
     m = read_dat(_write(tmp_path, "m_grd.dat", text))
     np.testing.assert_array_equal(m["nv"][:, 0], [0, 1, 2])
@@ -190,7 +192,8 @@ def test_round19_mesh_records_spanning_lines(tmp_path):
 def test_round19_continued_record_with_comment_and_eof(tmp_path):
     # a '!' reached while values are still needed is read as a value and fails
     obc = _write(tmp_path, "o.dat", "OBC Node Number = 2\n1 3150 ! x\n1\n2 3142 1\n")
-    with pytest.raises(ValueError, match="malformed OBC record.*'!' comment"):
+    # jsasaki 2026-11-05: review round 20 #1: the message says '!' is not a comment there
+    with pytest.raises(ValueError, match="malformed OBC record.*'!' is not a comment"):
         R.parse_obc_dat(obc)
     # an incomplete last record
     obc = _write(tmp_path, "p.dat", "OBC Node Number = 2\n1 3150 1\n2 3142\n")

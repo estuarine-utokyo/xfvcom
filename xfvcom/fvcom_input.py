@@ -38,12 +38,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # jsasaki 2026-11-05: review round 19 #2 #4: unexpanded list items and the repeat-count limit
+# jsasaki 2026-11-05: review round 20 #2 #5: lazy items, textual repeat-count check, line state
 from .fortran_numbers import (
     _FORTRAN_REAL,
-    MAX_REPEAT,
     fortran_real,
+    line_state,
     list_fields,
     list_items,
+    repeat_count,
 )
 
 __all__ = [
@@ -358,11 +360,16 @@ class ListRead:
     message: str = ""
 
 
-def _convert(tok: str, typ: str) -> int | float:
+# jsasaki 2026-11-05: review round 20 #3: int_reals models Intel Fortran, which reads a real literal
+# into an INTEGER item by truncation ('400000.0' -> 400000; gfortran fails the READ)
+def _convert(tok: str, typ: str, int_reals: bool = False) -> int | float:
     if typ == INT:
-        if _INT_LITERAL.fullmatch(tok) is None:
+        if _INT_LITERAL.fullmatch(tok) is not None:
+            iv = int(tok)
+        elif int_reals and _FORTRAN_REAL.fullmatch(tok) is not None:
+            iv = int(fortran_real(tok))
+        else:
             raise ValueError(f"'{tok}' is not a valid integer")
-        iv = int(tok)
         if not FORTRAN_INT_MIN <= iv <= FORTRAN_INT_MAX:
             raise ValueError(f"'{tok}' is outside the 32-bit INTEGER range")
         return iv
@@ -370,20 +377,29 @@ def _convert(tok: str, typ: str) -> int | float:
 
 
 def list_read(
-    lines: Sequence[tuple[int, str]], pos: int, types: Sequence[str]
+    lines: Sequence[tuple[int, str]],
+    pos: int,
+    types: Sequence[str],
+    *,
+    int_reals: bool = False,
 ) -> ListRead:
     """Model one list-directed READ of ``types`` starting at ``lines[pos]``.
 
     ``lines`` are ALL physical lines as ``(line number, text)``, blank ones included.  As in the
     Fortran runtime (checked with gfortran 8.5 and ifx 2025.1, 2026-11-05): a READ that still needs
-    values continues onto the next line (blank lines included); once the list is satisfied the rest
-    of the line is ignored; a conversion error ends the READ (IOS > 0) and the next READ starts on
-    the following line; ``/`` (attached or separated) ends the READ, leaving the remaining items
-    unchanged; a null value leaves its item unchanged; end of file before the list is satisfied is
-    IOS < 0.  A ``!`` comment is not list-directed syntax: once the list is satisfied it is ignored
-    with the rest of the line (as these readers always did), but a ``!`` reached while values are
-    still needed is read as a value and fails, as in Fortran.  A repetition ``r*v`` above
-    :data:`~xfvcom.fortran_numbers.MAX_REPEAT` is a conversion error (gfortran refuses it).
+    values continues onto the next line (blank lines included; a comma that begins a continuation
+    line completes the separator left by the end of the previous line, review round 20 #2); once
+    the list is satisfied the rest of the line is ignored; a conversion error ends the READ (IOS >
+    0) and the next READ starts on the following line; ``/`` (attached or separated) ends the READ,
+    leaving the remaining items unchanged; a null value leaves its item unchanged; end of file
+    before the list is satisfied is IOS < 0.  A ``!`` is NOT a comment in list-directed input (review
+    round 20 #1): the line is tokenised as written, so ``20.0!note`` is one value that fails to
+    convert (gfortran IOSTAT 5010, ifx 59: FVCOM keeps the previous value and still counts the
+    row), while text after all required values -- ``20.0 !note`` -- is ignored with the rest of
+    the line.  A repetition ``r*v`` whose count exceeds
+    :data:`~xfvcom.fortran_numbers.MAX_REPEAT` is a conversion error (gfortran refuses it); counts
+    are converted only for the items the READ consumes (review round 20 #5).  ``int_reals=True``
+    reads a real literal into an INTEGER item by truncation, as Intel Fortran does.
     """
     vals: list[int | float | None] = []
     need = len(types)
@@ -392,47 +408,47 @@ def list_read(
     def done(status: str, k: int, msg: str = "") -> ListRead:
         return ListRead(status, pos, k, first, lines[k][0], tuple(vals), msg)
 
+    # jsasaki 2026-11-05: review round 20 #2: separator state carried from line to line
+    after_value = False
     for k in range(pos, len(lines)):
-        raw = lines[k][1]
-        body = record_body(raw)
-        has_comment = len(body) < len(raw)
-        pre, slash, _rest = body.partition("/")
-        for r, tok in list_items(pre):
-            if r > MAX_REPEAT:
-                return done(
-                    "error",
-                    k,
-                    f"repetition count {r} exceeds {MAX_REPEAT}, the largest the Fortran "
-                    "runtime (gfortran) accepts; it stops on this record",
-                )
+        # ---> jsasaki 2026-11-05: review round 20 #1 #5: the ORIGINAL text is tokenised ('!' kept);
+        # items are produced lazily and a repeat count is converted only when consumed
+        pre, slash, _rest = lines[k][1].partition("/")
+        for rtext, tok in list_items(pre, after_value):
+            try:
+                r = repeat_count(rtext)
+            except ValueError as exc:
+                return done("error", k, f"{exc}; it stops on this record")
             for _ in range(min(r, need - len(vals))):
                 if tok == "":
                     vals.append(None)
                     continue
                 try:
-                    vals.append(_convert(tok, types[len(vals)]))
+                    vals.append(_convert(tok, types[len(vals)], int_reals))
                 except ValueError as exc:
+                    note = (
+                        " -- '!' is not a comment in a list-directed READ: it is part of the "
+                        "value while values are still needed (separate the comment by a "
+                        "blank after the last value)"
+                        if "!" in tok
+                        else ""
+                    )
                     return done(
                         "error",
                         k,
-                        f"{exc} (item {len(vals) + 1} is {types[len(vals)]})",
+                        f"{exc} (item {len(vals) + 1} is {types[len(vals)]}){note}",
                     )
             if len(vals) == need:
                 if any(v is None for v in vals):
                     return done("unset", k, "a null value leaves an item unset")
                 return done("ok", k)
+        after_value = line_state(pre, after_value)
+        # <--- jsasaki 2026-11-05
         if slash:
             return done(
                 "unset",
                 k,
                 f"'/' ends the READ after {len(vals)} of the {need} values it needs",
-            )
-        if has_comment:
-            return done(
-                "error",
-                k,
-                f"the '!' comment is read as a value after only {len(vals)} of the {need} "
-                "values (a list-directed READ has no comments)",
             )
     end = len(lines) - 1
     return ListRead("eof", pos, end, first, lines[end][0] if lines else 0, tuple(vals))

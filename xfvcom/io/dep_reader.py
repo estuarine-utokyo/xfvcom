@@ -25,8 +25,7 @@ from numpy.typing import NDArray
 # jsasaki 2026-11-05: review round 14 #2: FVCOM reads depth records list-directed
 # jsasaki 2026-11-05: review round 17 #4: list-directed fields (commas separate like blanks)
 # jsasaki 2026-11-05: review round 18 #1-#7: list_fields reached through the shared scanner
-from ..fortran_numbers import fortran_real
-
+# jsasaki 2026-11-05: review round 20 #6: unused fortran_real import removed (conversion is in list_read)
 # jsasaki 2026-11-05: review round 19 #1 #3 #4 #5: READ-based header search and records
 from ..fvcom_input import REAL, locate_records, read_all, scan_count_headers
 

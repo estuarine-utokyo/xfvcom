@@ -67,9 +67,11 @@ def test_round14_mesh_rejects_non_literals(tmp_path, bad):
 
 
 def test_round14_mesh_ids_stay_integer_and_ordered(tmp_path):
-    # a real-literal id is not an id record: the next record is taken as row 1
+    # a real-literal id is not an id record
+    # jsasaki 2026-11-05: review round 20 #4: FVCOM counts the failed READ as node row 1 (it is no
+    # longer passed over to take the next record as row 1), so the record itself is refused
     f = _mesh(tmp_path, "1.0D0 4.0D+5 3.9D+6\n2 4.01D+5 3.9D+6\n3 4.0D+5 3.901D+6\n")
-    with pytest.raises(ValueError, match="node record 1 carries id 2"):
+    with pytest.raises(ValueError, match="node record 1 of 3 '1.0D0 .*cannot be read"):
         read_dat(f)
     f = _mesh(tmp_path, "2 4.0D+5 3.9D+6\n1 4.01D+5 3.9D+6\n3 4.0D+5 3.901D+6\n")
     with pytest.raises(ValueError, match="row position"):

@@ -7,6 +7,10 @@
 #2 read_dat accepts a count header on physical line 201 (SCAN_FILE tests NLINE > 200
    before reading) and refuses one on line 202,
 #3 read_dat and read_dep strip an attached '!' comment before tokenising a record.
+   jsasaki 2026-11-05: review round 20 #1 REVERSES #3: list-directed input has no comments, so an
+   attached '!' inside a value that is still needed ('10.0!survey') fails the READ (gfortran IOSTAT
+   5010, ifx 59; FVCOM keeps the previous depth and counts the row); a comment separated by a blank
+   after the last value is still ignored.  The #3 tests below now assert that.
 """
 
 from __future__ import annotations
@@ -102,20 +106,36 @@ def test_round16_header_on_line_202_is_refused(tmp_path):
 # #3 attached '!' comments
 # ---------------------------------------------------------------------------
 def test_round16_dep_attached_comment(tmp_path):
+    # jsasaki 2026-11-05: review round 20 #1: '10.0!survey' is one value that fails to convert
     f = _write(tmp_path, "m_dep.dat", _DEP.replace("10.0\n", "10.0!survey\n"))
+    with pytest.raises(ValueError, match="prematurely"):
+        read_dep(f)
+    f = _write(tmp_path, "m_dep.dat", _DEP.replace("10.0\n", "10.0 !survey\n"))
     d = read_dep(f)
     np.testing.assert_array_equal(d.h, [10.0, 20.0, 30.0])
 
 
 def test_round16_load_mesh_attached_comments(tmp_path):
+    # jsasaki 2026-11-05: review round 20 #1: attached comments inside needed values are refused
+    # (a broken FIRST element is passed over by FVCOM's header search, so no block is found)
+    for bad, msg in (
+        ("1 1 2 3!triangle\n" + _NODES, "prematurely"),
+        (_ELEM + _NODES.replace("3900001.0\n", "3900001.0!apex\n"), "cannot be read"),
+    ):
+        with pytest.raises(ValueError, match=msg):
+            read_dat(
+                _write(
+                    tmp_path, "b_grd.dat", "Node Number = 3\nCell Number = 1\n" + bad
+                )
+            )
     grd = _write(
         tmp_path,
         "m_grd.dat",
         "Node Number = 3\nCell Number = 1\n"
-        + "1 1 2 3!triangle\n"
-        + _NODES.replace("3900001.0\n", "3900001.0!apex\n"),
+        # jsasaki 2026-11-05: review round 20 #1: comments separated by a blank after the values
+        + "1 1 2 3 !triangle\n" + _NODES.replace("3900001.0\n", "3900001.0 !apex\n"),
     )
-    dep = _write(tmp_path, "m_dep.dat", _DEP.replace("10.0\n", "10.0!survey\n"))
+    dep = _write(tmp_path, "m_dep.dat", _DEP.replace("10.0\n", "10.0 !survey\n"))
     m = load_mesh(grd, dep)
     np.testing.assert_array_equal(m.h, [10.0, 20.0, 30.0])
     np.testing.assert_array_equal(m.nv[0], [0, 1, 2])
@@ -131,9 +151,8 @@ def test_round16_attached_comment_keeps_count_checks(tmp_path):
         tmp_path,
         "m_grd.dat",
         "Node Number = 3\nCell Number = 1\n"
-        + "1 1 2 3!c\n"
-        + _NODES
-        + "4 1.0 1.0!extra\n",
+        # jsasaki 2026-11-05: review round 20 #1: comments separated by a blank after the values
+        + "1 1 2 3 !c\n" + _NODES + "4 1.0 1.0 !extra\n",
     )
     with pytest.raises(
         ValueError, match="line 7: .*follows the 3 declared node records"
@@ -145,7 +164,9 @@ def test_round16_extra_element_with_attached_comment_is_refused(tmp_path):
     grd = _write(
         tmp_path,
         "m_grd.dat",
-        "Node Number = 3\nCell Number = 1\n" + "1 1 2 3\n2 1 3 2!extra\n" + _NODES,
+        # jsasaki 2026-11-05: review round 20 #1: the comment separated by a blank (an attached one
+        # fails the READ, and the record no longer reads as an element)
+        "Node Number = 3\nCell Number = 1\n" + "1 1 2 3\n2 1 3 2 !extra\n" + _NODES,
     )
     with pytest.raises(ValueError, match="line 4: .*declared connectivity records"):
         read_dat(grd)

@@ -186,7 +186,9 @@ def test_round15_extra_connectivity_record_is_refused(tmp_path):
 
 def test_round15_blank_and_comment_lines_may_follow(tmp_path):
     plain = read_dat(_mesh(tmp_path, _HEAD + _ELEM + _NODES))
-    f = _mesh(tmp_path, _HEAD + _ELEM + "! nodes\n\n" + _NODES + "\n! end\n   \n")
+    # jsasaki 2026-11-05: review round 20 #4: only blank lines may follow; FVCOM counts a comment-only
+    # line between or after the blocks as one more row (tests/test_round20_review.py)
+    f = _mesh(tmp_path, _HEAD + _ELEM + "\n" + _NODES + "\n   \n")
     _same(read_dat(f), plain)
 
 

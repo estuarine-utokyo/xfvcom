@@ -37,8 +37,7 @@ from numpy.typing import NDArray
 # jsasaki 2026-11-05: review round 14 #2: shared Fortran real-literal conversion
 # jsasaki 2026-11-05: review round 17 #4: list-directed fields (commas separate like blanks)
 # jsasaki 2026-11-05: review round 18 #1-#7: list_fields now reached through the shared scanner
-from xfvcom.fortran_numbers import fortran_real
-
+# jsasaki 2026-11-05: review round 20 #6: unused fortran_real import removed (conversion is in list_read)
 # jsasaki 2026-11-05: review round 19 #1 #3 #4 #5: READ-based header search and records
 from xfvcom.fvcom_input import (
     INT,
