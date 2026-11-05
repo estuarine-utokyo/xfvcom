@@ -16,11 +16,13 @@ from xfvcom.io.met_nc_generator import MetNetCDFGenerator
 # ------------------------------------------------------------------
 # Helper: create a tiny dummy grid.dat in memory
 # ------------------------------------------------------------------
+# jsasaki 2026-11-05: review round 21 #4: valid FVCOM connectivity 'J N1 N2 N3 1' (the old rows
+# '1 3 1 2 3' / '2 3 1 3 4' left node 4 unreferenced, which FVCOM's NODECOUNT check refuses)
 GRD_TXT = """\
 Node Number = 4
 Cell Number = 2
-1  3  1  2  3
-2  3  1  3  4
+1  1  2  3  1
+2  1  3  4  1
 1  0.0  0.0  -5
 2  1.0  0.0  -5
 3  1.0  1.0  -5

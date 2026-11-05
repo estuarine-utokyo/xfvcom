@@ -36,7 +36,12 @@ def test_out_of_range_node_ids_are_refused(tmp_path, elem):
 
 
 def test_valid_one_based_mesh_parses(tmp_path):
-    g = FvcomGrid.from_dat(_dat(tmp_path / "ok_grd.dat", "1 2 3"), utm_zone=54)
+    p = _dat(tmp_path / "ok_grd.dat", "1 2 3")
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh: strict refuses
+    # it, the permissive mode reads it
+    with pytest.raises(ValueError, match="the mesh has one element"):
+        FvcomGrid.from_dat(p, utm_zone=54)
+    g = FvcomGrid.from_dat(p, utm_zone=54, allow_unordered=True)
     assert g.nv[:, 0].tolist() == [0, 1, 2]
 
 

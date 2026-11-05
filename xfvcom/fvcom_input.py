@@ -23,8 +23,10 @@ Headers (``Node Number = 3210``, ``OBC Node Number = 13``):
   refused.
 
 Records (list-directed ``READ(unit,*)``, review round 19): modelled as READs, not lines
-(:func:`list_read`).  Blanks and commas separate values; ``r*value`` repeats a value (up to
-gfortran's limit, consumed lazily); a null value or an early ``/`` leaves an item unset; a READ
+(:func:`list_read`) over the physical lines of :func:`physical_lines` (split at ``\\n`` only).
+Spaces, tabs and commas separate values (no other whitespace: review round 21 #1); ``r*value``
+repeats a value (up to gfortran's limit, consumed lazily, never across items of different types);
+a null value or an early ``/`` leaves an item unset; a READ
 continues onto further lines until its list is satisfied and ignores the rest of that line.  The
 data block starts where FVCOM's header search first READs successfully, and its NHEADER rewind is
 checked (:func:`locate_records`).
@@ -39,8 +41,10 @@ from pathlib import Path
 
 # jsasaki 2026-11-05: review round 19 #2 #4: unexpanded list items and the repeat-count limit
 # jsasaki 2026-11-05: review round 20 #2 #5: lazy items, textual repeat-count check, line state
+# jsasaki 2026-11-05: review round 21 #1: the portable list-directed blanks
 from .fortran_numbers import (
     _FORTRAN_REAL,
+    LIST_BLANKS,
     fortran_real,
     line_state,
     list_fields,
@@ -67,6 +71,9 @@ __all__ = [
     "record_body",
     "is_comment_only",
     "record_fields",
+    # jsasaki 2026-11-05: review round 21 #1: physical records split as Fortran splits them
+    "physical_lines",
+    "is_blank",
 ]
 
 #: FVCOM's default 32-bit INTEGER range (the same values as :mod:`xfvcom.grid.gtsz`).
@@ -317,6 +324,32 @@ def scan_count_headers(
 # ---------------------------------------------------------------------------
 # list-directed records
 # ---------------------------------------------------------------------------
+# ---> jsasaki 2026-11-05: review round 21 #1: physical records and blank lines without Python's
+# Unicode-aware line splitting and whitespace
+def physical_lines(path: Path) -> list[tuple[int, str]]:
+    """The file's physical lines (records) as ``(line number, text)``, split as a Fortran
+    formatted sequential READ splits them: at ``\\n`` only.  One ``\\r`` just before the
+    ``\\n`` (a CRLF line ending, read correctly by gfortran 8.5 and ifx 2025.1) is removed; any
+    other character -- a lone ``\\r``, a form feed, U+2028, U+0085 -- stays inside its line
+    (``str.splitlines`` and Python's universal newlines would break the line there)."""
+    with path.open(newline="") as fp:
+        text = fp.read()
+    if not text:
+        return []
+    parts = text.split("\n")
+    if text.endswith("\n"):
+        parts.pop()
+    return [(n, ln[:-1] if ln.endswith("\r") else ln) for n, ln in enumerate(parts, 1)]
+
+
+def is_blank(raw: str) -> bool:
+    """True for a line holding nothing but list-directed blanks (spaces and tabs)."""
+    return not raw.strip(LIST_BLANKS)
+
+
+# <--- jsasaki 2026-11-05
+
+
 def record_body(raw: str) -> str:
     """The record part of a line: everything before the first ``!`` comment marker."""
     return raw.split("!", 1)[0]
@@ -324,7 +357,8 @@ def record_body(raw: str) -> str:
 
 def is_comment_only(raw: str) -> bool:
     """True for a line with nothing but blanks before ``!`` (or a blank line)."""
-    return not record_body(raw).strip()
+    # jsasaki 2026-11-05: review round 21 #1: list-directed blanks only
+    return is_blank(record_body(raw))
 
 
 def record_fields(raw: str) -> list[str]:
@@ -398,8 +432,12 @@ def list_read(
     row), while text after all required values -- ``20.0 !note`` -- is ignored with the rest of
     the line.  A repetition ``r*v`` whose count exceeds
     :data:`~xfvcom.fortran_numbers.MAX_REPEAT` is a conversion error (gfortran refuses it); counts
-    are converted only for the items the READ consumes (review round 20 #5).  ``int_reals=True``
-    reads a real literal into an INTEGER item by truncation, as Intel Fortran does.
+    are converted only for the items the READ consumes (review round 20 #5).  A non-null
+    repetition that crosses from an item of one type to an item of the other (``3*1`` for an
+    INTEGER and two REALs) is a conversion error, as in gfortran (review round 21 #2).  Values are
+    separated by spaces, tabs and commas only (review round 21 #1): any other character is part of
+    its token.  ``int_reals=True`` models Intel Fortran: a real literal is read into an INTEGER
+    item by truncation and a repetition may cross item types.
     """
     vals: list[int | float | None] = []
     need = len(types)
@@ -419,10 +457,25 @@ def list_read(
                 r = repeat_count(rtext)
             except ValueError as exc:
                 return done("error", k, f"{exc}; it stops on this record")
+            # jsasaki 2026-11-05: review round 21 #2: the type of the item a repetition starts at
+            rtype = types[len(vals)] if len(vals) < need else ""
             for _ in range(min(r, need - len(vals))):
                 if tok == "":
                     vals.append(None)
                     continue
+                # ---> jsasaki 2026-11-05: review round 21 #2: gfortran refuses a repeated value that
+                # crosses to an item of another type (INTEGER -> REAL or REAL -> INTEGER: IOSTAT
+                # 5010; ifx converts it); null repetitions stay type independent
+                if not int_reals and types[len(vals)] != rtype:
+                    return done(
+                        "error",
+                        k,
+                        f"the repetition '{rtext}*{tok}' starts at a {rtype} item and continues "
+                        f"into item {len(vals) + 1}, which is {types[len(vals)]}; gfortran refuses "
+                        "a repeated value across items of different types (IOSTAT 5010) -- "
+                        "write the values out",
+                    )
+                # <--- jsasaki 2026-11-05
                 try:
                     vals.append(_convert(tok, types[len(vals)], int_reals))
                 except ValueError as exc:
@@ -502,13 +555,14 @@ def locate_records(
         failed.append(r)
         pos = r.end + 1
     start, nheader = r.start, len(failed)
-    stray = [n for n, raw in lines[nheader:start] if raw.strip()]
+    # jsasaki 2026-11-05: review round 21 #1: a blank line holds list-directed blanks only
+    stray = [n for n, raw in lines[nheader:start] if not is_blank(raw)]
     if stray:
         why = []
         for f in failed:
             if f.end > f.start:
                 kinds = ", ".join(
-                    f"{'blank line' if not raw.strip() else 'line'} {n}"
+                    f"{'blank line' if is_blank(raw) else 'line'} {n}"
                     for n, raw in lines[f.start : f.end]
                 )
                 why.append(

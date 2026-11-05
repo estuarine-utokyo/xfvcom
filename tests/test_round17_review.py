@@ -21,6 +21,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
+# jsasaki 2026-11-05: review round 21 #3: one-element meshes are refused by the strict reader
+from tests.one_element import read_one_element
 from xfvcom.fortran_numbers import list_fields
 from xfvcom.grid.dat_reader import read_dat
 from xfvcom.grid.grid_obj import FvcomGrid
@@ -152,13 +154,17 @@ def test_round17_inexact_header_keys_are_refused(tmp_path, old, new):
 )
 def test_round17_exact_header_keys_are_accepted(tmp_path, line):
     f = _write(tmp_path, "m_grd.dat", _MESH.replace("Node Number = 3", line, 1))
-    assert read_dat(f)["x"].shape == (3,)
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    assert read_one_element(f)["x"].shape == (3,)
 
 
 def test_round17_unrecognised_key_is_not_a_header(tmp_path):
     # FVCOM skips a line whose key is not 'Node Number'; the real header that follows is used
     f = _write(tmp_path, "m_grd.dat", "node number = 99\n" + _MESH)
-    assert read_dat(f)["x"].shape == (3,)
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    assert read_one_element(f)["x"].shape == (3,)
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +180,9 @@ def test_round17_header_of_400_characters_is_accepted(tmp_path):
     line = _header_of_length(400)
     assert len(line) == 400
     f = _write(tmp_path, "m_grd.dat", _MESH.replace("Node Number = 3", line, 1))
-    assert read_dat(f)["x"].shape == (3,)
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    assert read_one_element(f)["x"].shape == (3,)
 
 
 def test_round17_header_of_401_characters_is_refused(tmp_path):
@@ -203,7 +211,9 @@ def test_round17_long_value_split_at_400_is_refused(tmp_path):
 
 def test_round17_long_non_header_line_is_ignored(tmp_path):
     f = _write(tmp_path, "m_grd.dat", "! " + "x" * 500 + "\n" + _MESH)
-    assert read_dat(f)["x"].shape == (3,)
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    assert read_one_element(f)["x"].shape == (3,)
 
 
 # ---------------------------------------------------------------------------
@@ -222,9 +232,11 @@ def _comma(text: str) -> str:
 
 
 def test_round17_dat_commas(tmp_path):
-    ref = read_dat(_write(tmp_path, "a_grd.dat", _MESH))
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    ref = read_one_element(_write(tmp_path, "a_grd.dat", _MESH))
     text = "Node Number = 3\nCell Number = 1\n" + _comma(_ELEM + _NODES)
-    got = read_dat(_write(tmp_path, "b_grd.dat", text))
+    got = read_one_element(_write(tmp_path, "b_grd.dat", text))
     for k in ("x", "y", "nv"):
         np.testing.assert_array_equal(got[k], ref[k])
 

@@ -17,6 +17,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+# jsasaki 2026-11-05: review round 21 #3: one-element meshes are refused by the strict reader
+from tests.one_element import read_one_element
 from xfvcom.grid import gtsz_builder
 from xfvcom.grid.dat_reader import read_dat
 from xfvcom.grid.gtsz import GtszSpec
@@ -162,7 +164,9 @@ def _grd(tmp_path, elem, node):
     ],
 )
 def test_round12_read_dat_minimal_and_trailing_columns(tmp_path, elem, node):
-    g = read_dat(_grd(tmp_path, elem, node))
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    g = read_one_element(_grd(tmp_path, elem, node))
     np.testing.assert_array_equal(g["nv"][:, 0], [0, 1, 2])
     np.testing.assert_array_equal(g["x"], [400000.0, 401000.0, 400000.0])
     np.testing.assert_array_equal(g["y"], [3900000.0, 3900000.0, 3901000.0])

@@ -12,12 +12,15 @@ from numpy.typing import NDArray
 # jsasaki 2026-11-05: review round 18 #1 #2 #5 #6: shared FVCOM header scanner
 # jsasaki 2026-11-05: review round 19 #1 #3 #4 #5: READ-based header search and records
 # jsasaki 2026-11-05: review round 20 #3 #4: whole-block READ counting and the transition model
+# jsasaki 2026-11-05: review round 21 #1: Fortran's record splitting (physical_lines) and blank lines
 from ..fvcom_input import (
     INT,
     REAL,
     ListRead,
+    is_blank,
     list_read,
     locate_records,
+    physical_lines,
     read_all,
     scan_count_headers,
 )
@@ -83,20 +86,37 @@ def _bad_read(
     )
 
 
+# ---> jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (checked with
+# gfortran 8.5 and ifx 2025.1 replicas of READ_COLDSTART_GRID on a three-node, one-element mesh)
+_ONE_ELEMENT = (
+    "{path}: the mesh has one element, whose id is 1: FVCOM's READ_COLDSTART_GRID leaves the "
+    "connectivity block only at a record with J = 1 that follows an element whose id is not 1 "
+    "(J == 1 .AND. LM1 /= 1), so it reads the node-1 record at line {line} as one more "
+    "connectivity row and stops ('Number of rows of data in the grid file CONNECTIVITY data "
+    "exceeds the stated number of Cells'); FVCOM cannot read this mesh -- "
+    "read_dat(..., allow_unordered=True) reads it without FVCOM's checks"
+)
+# <--- jsasaki 2026-11-05
+
+
+# jsasaki 2026-11-05: review round 21 #3: lm1 = the last element's id (FVCOM's LM1)
 def _coordinate_start(
-    path: Path, lines: list[tuple[int, str]], idx: int, nele: int
+    path: Path, lines: list[tuple[int, str]], idx: int, nele: int, lm1: int
 ) -> int:
     """Index of the line where FVCOM's READ_COLDSTART_COORDS starts, or ValueError.
 
     After the last element FVCOM READs ``J,N1,N2,N3`` once more (the first node record); with
-    J = 1 it BACKSPACEs one record, READs ``J`` (no IOSTAT: a failure stops FVCOM) and BACKSPACEs
-    J records (mod_input.F ~4657).  That lands on the node-1 record only for a node-1 record
+    J = 1 and LM1 (the last element's id) /= 1 it BACKSPACEs one record, READs ``J`` (no
+    IOSTAT: a failure stops FVCOM) and BACKSPACEs J records (mod_input.F ~4657).  That lands on the node-1 record only for a node-1 record
     holding J, X and Y on one line followed directly by node 2's line.  The sequence is modelled
     with gfortran's conversion (a real fails an INTEGER item) and with Intel Fortran's (a real is
     truncated into it, so the READ takes N3 from the next line); the file is refused unless both
-    land on the node-1 record (or on blank lines just before it).
+    land on the node-1 record (or on blank lines just before it).  With LM1 = 1 (a one-element
+    mesh) FVCOM never transitions (review round 21 #3): ``idx`` is returned unchanged and
+    :func:`read_dat` refuses the mesh once its other checks have run.
     """
-    first = next((k for k in range(idx, len(lines)) if lines[k][1].strip()), None)
+    # jsasaki 2026-11-05: review round 21 #1: a blank line holds list-directed blanks only
+    first = next((k for k in range(idx, len(lines)) if not is_blank(lines[k][1])), None)
     if first is None:
         return idx  # no node records: the node block reports it
     elem_types = (INT, INT, INT, INT)
@@ -117,6 +137,10 @@ def _coordinate_start(
                 f"{nele} declared connectivity records, but the node block must start with "
                 "node 1 (more records than the Cell Number header declares?)"
             )
+        # jsasaki 2026-11-05: review round 21 #3: FVCOM transitions only when J == 1 .AND. LM1 /= 1;
+        # with LM1 = 1 it never does (read_dat refuses such a mesh after reading it, _ONE_ELEMENT)
+        if lm1 == 1:
+            return idx
         rj = list_read(lines, nxt.end, (INT,), int_reals=int_reals)
         why = ""
         if rj.status in ("error", "eof"):
@@ -129,7 +153,8 @@ def _coordinate_start(
             assert isinstance(jj, int)
             land = rj.end + 1 - jj if jj > 0 else rj.end + 1
             land = max(land, 0)
-            if land > first or any(raw.strip() for _n, raw in lines[land:first]):
+            # jsasaki 2026-11-05: review round 21 #1: blank = list-directed blanks only
+            if land > first or any(not is_blank(raw) for _n, raw in lines[land:first]):
                 why = (
                     f"it reads J = {jj} at line {lines[nxt.end][0]} and BACKSPACEs to line "
                     f"{lines[land][0] if land < len(lines) else 'EOF'} instead of the node-1 "
@@ -159,6 +184,11 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     is the mesh FVCOM uses; a file that breaks this raises :class:`ValueError`.
     ``allow_unordered=True`` instead places each record by its own id (unique,
     1..n), which reconstructs a reordered file but NOT what FVCOM reads.
+
+    The strict mode also refuses what FVCOM's READ_COLDSTART_GRID stops on after the
+    connectivity block: a one-element mesh (its transition test ``J == 1 .AND. LM1 /= 1`` never
+    fires) and a largest referenced node id that differs from ``Node Number``.
+    ``allow_unordered=True`` skips these checks too (review round 21 #3 #4).
     """
     path = Path(path)
     if not path.is_file():
@@ -167,18 +197,20 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     # -------------------------------------------------- read non-blank lines
     # jsasaki 2026-11-05: review round 15 #3: keep physical line numbers for the error messages
     # jsasaki 2026-11-05: review round 19 #4 #5: all physical lines, blanks included (READs span them)
-    with path.open() as fp:
-        lines = [(n, ln.rstrip("\n")) for n, ln in enumerate(fp, 1)]
+    # jsasaki 2026-11-05: review round 21 #1: split at '\n' only (one CRLF '\r' removed), not with
+    # Python's universal newlines
+    lines = physical_lines(path)
 
     # ---------------------------------------- locate counts (node / nele)
-    # ---> jsasaki 2026-11-05: review round 15 #5: FVCOM's SCAN_FILE looks each header up on its own
-    # (rewinding), so 'Cell Number' may precede 'Node Number'.  The connectivity block starts at the
-    # first record that reads as four integers (READ_COLDSTART_GRID); both headers must come before it
-    # and within the 200 lines SCAN_FILE scans.
-    # jsasaki 2026-11-05: review round 16 #3: tokenise the record without its '!' comment
-    # jsasaki 2026-11-05: review round 17 #4: commas separate fields like blanks
-    # jsasaki 2026-11-05: review round 19 #1 #4 #5: the block starts where FVCOM's header search first
-    # READs J,N1,N2,N3 successfully (possibly over several lines), its NHEADER rewind checked
+    # ---> jsasaki 2026-11-05: review round 21 #6: the current rules (rounds 15-21).  FVCOM's
+    # SCAN_FILE looks each header up on its own (rewinding), so 'Cell Number' may precede
+    # 'Node Number'; both must come before the connectivity block and at or before physical line
+    # 201 (SCAN_FILE tests NLINE > 200 before reading, so line 201 is the last it reads).  The
+    # block starts where FVCOM's header search first READs J,N1,N2,N3 successfully (possibly over
+    # several lines), its NHEADER rewind checked.  Records are tokenised from their ORIGINAL text:
+    # '!' is kept (list-directed input has no comments, so '1!x' is one token that fails),
+    # commas separate values like spaces and tabs, and no other whitespace does.
+    # <--- jsasaki 2026-11-05
     elem_types = (INT, INT, INT, INT)
     start = locate_records(path, lines, elem_types, block="connectivity block")
     # jsasaki 2026-11-05: review round 18 #1 #2 #5 #6: one shared FVCOM-aware header scanner
@@ -243,8 +275,23 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
     # (READ_COLDSTART_GRID stops: rows exceed the stated number of cells).
     # jsasaki 2026-11-05: review round 20 #3: FVCOM then BACKSPACEs, READs J and BACKSPACEs J records
     # (mod_input.F ~4657); the coordinate block starts where that sequence leaves the file
+    node_line = 0
     if not allow_unordered:
-        idx = _coordinate_start(path, lines, idx, nele)
+        # jsasaki 2026-11-05: review round 21 #3: LM1 = the last element's id (= nele in order)
+        idx = _coordinate_start(path, lines, idx, nele, nele)
+        node_line = next((n for n, raw in lines[idx:] if not is_blank(raw)), 0)
+        # ---> jsasaki 2026-11-05: review round 21 #4: FVCOM's NODECOUNT check (READ_COLDSTART_GRID):
+        # the largest node id the connectivity references must equal the declared Node Number
+        nodecount = int(nv.max()) + 1
+        if nodecount != node:
+            raise ValueError(
+                f"{path}: the largest node id referenced by the connectivity is {nodecount}, but "
+                f"'Node Number = {node}'; FVCOM's READ_COLDSTART_GRID stops on it ('The number "
+                "of nodes in the grid file CONNECTIVITY does not equal the stated number') -- "
+                "every declared node must be used by an element "
+                "(read_dat(..., allow_unordered=True) skips this check)"
+            )
+        # <--- jsasaki 2026-11-05
     # <--- jsasaki 2026-11-05
 
     # -------------------------------------------------------- node block (after elem)
@@ -296,5 +343,9 @@ def read_dat(path: str | Path, *, allow_unordered: bool = False) -> _GridData:
             f"{node} declared node records"
         )
     # <--- jsasaki 2026-11-05
+    # jsasaki 2026-11-05: review round 21 #3: refused after the other checks so that their messages
+    # (which name the record at fault) come first
+    if not allow_unordered and nele == 1:
+        raise ValueError(_ONE_ELEMENT.format(path=path, line=node_line))
 
     return _GridData(x=x, y=y, nv=nv, zone=None, northern=True)

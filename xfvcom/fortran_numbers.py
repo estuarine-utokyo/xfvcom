@@ -24,6 +24,8 @@ __all__ = [
     "line_state",
     "repeat_count",
     "MAX_REPEAT",
+    # jsasaki 2026-11-05: review round 21 #1: the portable list-directed blanks
+    "LIST_BLANKS",
 ]
 
 #: A real literal as Fortran's list-directed READ accepts it (checked against
@@ -58,8 +60,16 @@ def fortran_real(tok: str) -> float:
     return x
 
 
+# ---> jsasaki 2026-11-05: review round 21 #1: only the blanks list-directed input accepts (space
+# and tab: gfortran 8.5 and ifx 2025.1) separate values, never Python's Unicode-aware whitespace
+#: The characters that separate list-directed values like a blank on every compiler checked
+#: (gfortran 8.5, ifx 2025.1): space and tab.  Anything else -- U+00A0 (bytes C2 A0), a form feed,
+#: a vertical tab, a carriage return inside a line (gfortran: blank, ifx: error), ';' (gfortran:
+#: separator, ifx: error) -- stays inside the token, so its conversion fails as Fortran's does.
+LIST_BLANKS = " \t"
 #: A list-directed value separator: a comma with optional blanks around it, or blanks alone.
-_LIST_SEPARATOR = re.compile(r"\s*,\s*|\s+")
+_LIST_SEPARATOR = re.compile(r"[ \t]*,[ \t]*|[ \t]+")
+# <--- jsasaki 2026-11-05
 # ---> jsasaki 2026-11-05: review round 18 #7: list-directed repetition 'r*value' / 'r*'
 #: A repeated value: a positive repeat count, '*', and the value (empty = r null values).
 _REPEAT = re.compile(r"(?P<r>[0-9]+)\*(?P<val>.*)")
@@ -109,7 +119,8 @@ def list_items(body: str, after_value: bool = False) -> Iterator[tuple[str, str]
     completes that separator instead of starting a null value (``1 3150`` + ``,1`` reads 1, 3150,
     1; ``1,3150,`` + ``,1`` leaves the third item null -- gfortran 8.5 and ifx 2025.1).
     """
-    s = body.strip()
+    # jsasaki 2026-11-05: review round 21 #1: trim list-directed blanks only (not Unicode whitespace)
+    s = body.strip(LIST_BLANKS)
     if not s:
         return
     fields = _LIST_SEPARATOR.split(s)
@@ -129,7 +140,8 @@ def line_state(body: str, after_value: bool) -> bool:
     """The separator state (see :func:`list_items`) after a READ has passed line ``body``: a
     blank line leaves it unchanged, a line ending in a comma clears it, any other sets it.
     """
-    s = body.strip()
+    # jsasaki 2026-11-05: review round 21 #1: trim list-directed blanks only (not Unicode whitespace)
+    s = body.strip(LIST_BLANKS)
     if not s:
         return after_value
     return not s.endswith(",")

@@ -26,6 +26,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+# jsasaki 2026-11-05: review round 21 #3: one-element meshes are refused by the strict reader
+from tests.one_element import read_one_element
 from xfvcom.fortran_numbers import MAX_LIST_FIELDS, list_fields
 from xfvcom.grid.dat_reader import read_dat
 from xfvcom.io.dep_reader import read_dep
@@ -77,7 +79,9 @@ _LONG = "Node Number = 3 ! " + "x" * 400
 
 
 def test_round18_long_comment_after_count_is_accepted(tmp_path):
-    assert read_dat(_mesh(tmp_path, _LONG))["x"].shape == (3,)
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    assert read_one_element(_mesh(tmp_path, _LONG))["x"].shape == (3,)
     dep = _write(tmp_path, "d.dat", _DEP.replace("Node Number = 3", _LONG, 1))
     np.testing.assert_array_equal(read_dep(dep).h, [10.0, 20.0, 30.0])
     np.testing.assert_array_equal(R.parse_dep_dat(dep, _XY), [10.0, 20.0, 30.0])
@@ -109,7 +113,11 @@ def test_round18_multibyte_header_counts_bytes(tmp_path):
 
 
 def test_round18_short_multibyte_comment_is_fine(tmp_path):
-    assert read_dat(_mesh(tmp_path, "Node Number = 3 ! 節点数"))["x"].shape == (3,)
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    assert read_one_element(_mesh(tmp_path, "Node Number = 3 ! 節点数"))["x"].shape == (
+        3,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -204,12 +212,14 @@ def test_round18_unconvertible_numeric_header_is_refused(tmp_path):
 
 def test_round18_convertible_and_untraversed_lines_pass(tmp_path):
     # a valid float, a string value and a line after both headers (never traversed)
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
     text = "mesh_scale = 1.0e3\ntitle = Tokyo Bay\nNode Number = 3\nCell Number = 1\n"
-    assert read_dat(_write(tmp_path, "a_grd.dat", text + _ELEM + _NODES))[
+    assert read_one_element(_write(tmp_path, "a_grd.dat", text + _ELEM + _NODES))[
         "x"
     ].shape == (3,)
     text = "Node Number = 3\nCell Number = 1\nunused = 1e3\n"
-    assert read_dat(_write(tmp_path, "b_grd.dat", text + _ELEM + _NODES))[
+    assert read_one_element(_write(tmp_path, "b_grd.dat", text + _ELEM + _NODES))[
         "x"
     ].shape == (3,)
 
@@ -248,7 +258,9 @@ def test_round18_repetition_in_records(tmp_path):
     )
     np.testing.assert_array_equal(R.parse_dep_dat(dep, _XY), [10.0, 20.0, 30.0])
     np.testing.assert_array_equal(read_dep(dep).h, [10.0, 20.0, 30.0])
-    m = read_dat(
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    m = read_one_element(
         _write(tmp_path, "m_grd.dat", _MESH.replace("1 1 2 3", "1 1 2 1*3", 1))
     )
     np.testing.assert_array_equal(m["nv"][:, 0], [0, 1, 2])

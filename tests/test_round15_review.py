@@ -22,6 +22,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+# jsasaki 2026-11-05: review round 21 #3: one-element meshes are refused by the strict reader
+from tests.one_element import read_one_element
 from xfvcom.grid.dat_reader import read_dat
 from xfvcom.grid.grid_obj import FvcomGrid
 
@@ -144,8 +146,10 @@ def test_round15_fractional_counts_refused_by_from_dat(tmp_path):
     ],
 )
 def test_round15_valid_count_headers(tmp_path, head):
-    plain = read_dat(_mesh(tmp_path, _HEAD + _ELEM + _NODES))
-    _same(read_dat(_mesh(tmp_path, head + _ELEM + _NODES)), plain)
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    plain = read_one_element(_mesh(tmp_path, _HEAD + _ELEM + _NODES))
+    _same(read_one_element(_mesh(tmp_path, head + _ELEM + _NODES)), plain)
 
 
 def test_round15_duplicate_count_header_is_refused(tmp_path):
@@ -185,11 +189,13 @@ def test_round15_extra_connectivity_record_is_refused(tmp_path):
 
 
 def test_round15_blank_and_comment_lines_may_follow(tmp_path):
-    plain = read_dat(_mesh(tmp_path, _HEAD + _ELEM + _NODES))
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    plain = read_one_element(_mesh(tmp_path, _HEAD + _ELEM + _NODES))
     # jsasaki 2026-11-05: review round 20 #4: only blank lines may follow; FVCOM counts a comment-only
     # line between or after the blocks as one more row (tests/test_round20_review.py)
     f = _mesh(tmp_path, _HEAD + _ELEM + "\n" + _NODES + "\n   \n")
-    _same(read_dat(f), plain)
+    _same(read_one_element(f), plain)
 
 
 # ---------------------------------------------------------------------------
@@ -239,13 +245,15 @@ def test_round15_obc_trailing_comment_and_columns(tmp_path):
 # #5 header order
 # ---------------------------------------------------------------------------
 def test_round15_cell_header_first(tmp_path):
-    plain = read_dat(_mesh(tmp_path, _HEAD + _ELEM + _NODES))
-    swapped = read_dat(
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    plain = read_one_element(_mesh(tmp_path, _HEAD + _ELEM + _NODES))
+    swapped = read_one_element(
         _mesh(tmp_path, "Cell Number = 1\nNode Number = 3\n" + _ELEM + _NODES)
     )
     _same(swapped, plain)
     # other header lines around them are still skipped
-    other = read_dat(
+    other = read_one_element(
         _mesh(
             tmp_path,
             "! mesh\nCell Number = 1\nTitle = test\nNode Number = 3\n" + _ELEM + _NODES,

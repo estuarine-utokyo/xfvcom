@@ -39,12 +39,14 @@ from numpy.typing import NDArray
 # jsasaki 2026-11-05: review round 18 #1-#7: list_fields now reached through the shared scanner
 # jsasaki 2026-11-05: review round 20 #6: unused fortran_real import removed (conversion is in list_read)
 # jsasaki 2026-11-05: review round 19 #1 #3 #4 #5: READ-based header search and records
+# jsasaki 2026-11-05: review round 21 #1: physical_lines splits records at '\n' only
 from xfvcom.fvcom_input import (
     INT,
     REAL,
     ListRead,
     is_comment_only,
     locate_records,
+    physical_lines,
     read_all,
     scan_count_headers,
 )
@@ -119,7 +121,8 @@ def _declared_block(
     gfortran IOSTAT 5010, ifx 59) or leaves an item unset (a null value, an early ``/``) is refused,
     as is a count that differs from the header's.
     """
-    lines = list(enumerate(path.read_text().splitlines(), 1))
+    # jsasaki 2026-11-05: review round 21 #1: not str.splitlines (it also splits at U+2028, \f, ...)
+    lines = physical_lines(path)
     skipped: list[ListRead] = []
     start = locate_records(path, lines, types, block="record block", failed_out=skipped)
     counts = scan_count_headers(path, lines, {key: "n"}, start, block="record block")

@@ -25,6 +25,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+# jsasaki 2026-11-05: review round 21 #3: one-element meshes are refused by the strict reader
+from tests.one_element import read_one_element
 from xfvcom.fortran_numbers import MAX_REPEAT, list_fields
 from xfvcom.fvcom_input import INT, list_read
 from xfvcom.grid.dat_reader import read_dat
@@ -74,7 +76,9 @@ def test_round19_free_text_title_before_count_header(tmp_path, title):
     assert R.parse_dep_dat(dep).tolist() == [10.0]
     obc = _write(tmp_path, "o.dat", f"{title}\nOBC Node Number = 1\n1 3150 1\n")
     assert R.parse_obc_dat(obc).tolist() == [3150]
-    m = read_dat(_write(tmp_path, "m_grd.dat", f"{title}\n" + _MESH))
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    m = read_one_element(_write(tmp_path, "m_grd.dat", f"{title}\n" + _MESH))
     np.testing.assert_array_equal(m["x"], _XY[:, 0])
 
 
@@ -180,7 +184,9 @@ def test_round19_mesh_records_spanning_lines(tmp_path):
     # jsasaki 2026-11-05: review round 20 #3: the split moved from node 1 to node 2 -- FVCOM's
     # connectivity-to-coordinate transition cannot replay a split node-1 record (refused now)
     text = (
-        "Node Number = 3\nCell Number = 1\n1 1\n2 3\n"
+        # jsasaki 2026-11-05: review round 21 #3: two elements (FVCOM cannot read a one-element
+        # mesh); the second one, which duplicates the first, ends the connectivity block
+        "Node Number = 3\nCell Number = 2\n1 1\n2 3\n2 1 2 3\n"
         "1 400000.0 3900000.0\n2 400001.0\n3900000.0\n3 400000.0 3900001.0\n"
     )
     m = read_dat(_write(tmp_path, "m_grd.dat", text))
@@ -234,7 +240,9 @@ def test_round19_harmless_blank_lines_are_accepted(tmp_path):
     mesh = _write(
         tmp_path,
         "m_grd.dat",
-        "Node Number = 3\nCell Number = 1\n\n" + _ELEM + "\n" + _NODES,
+        # jsasaki 2026-11-05: review round 21 #3: two elements (FVCOM cannot read a one-element
+        # mesh); the second one duplicates the first
+        "Node Number = 3\nCell Number = 2\n\n" + _ELEM + "\n2 1 2 3\n\n" + _NODES,
     )
     np.testing.assert_array_equal(read_dat(mesh)["x"], _XY[:, 0])
 

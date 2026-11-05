@@ -18,6 +18,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+# jsasaki 2026-11-05: review round 21 #3: one-element meshes are refused by the strict reader
+from tests.one_element import read_one_element
 from xfvcom.fortran_numbers import fortran_real
 from xfvcom.grid.dat_reader import read_dat
 from xfvcom.io import sigma_dat
@@ -45,7 +47,9 @@ def test_round14_fortran_real_is_shared():
 
 def test_round14_mesh_d_exponents(tmp_path):
     f = _mesh(tmp_path, "1 4.0D+5 3.9D+6\n2 4.01D+5 3.9D+6\n3 4.0D+5 3.901D+6\n")
-    d = read_dat(f)
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    d = read_one_element(f)
     np.testing.assert_array_equal(d["x"], [4.0e5, 4.01e5, 4.0e5])
     np.testing.assert_array_equal(d["y"], [3.9e6, 3.9e6, 3.901e6])
     assert d["nv"][:, 0].tolist() == [0, 1, 2]
@@ -53,7 +57,9 @@ def test_round14_mesh_d_exponents(tmp_path):
 
 def test_round14_mesh_implicit_exponents(tmp_path):
     f = _mesh(tmp_path, "1 4.0+5 3.9q6\n2 4.01e5 3.9+6\n3 .4+6 3.901d6\n")
-    d = read_dat(f)
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    d = read_one_element(f)
     np.testing.assert_array_equal(d["x"], [4.0e5, 4.01e5, 4.0e5])
     np.testing.assert_array_equal(d["y"], [3.9e6, 3.9e6, 3.901e6])
 
@@ -113,8 +119,10 @@ _NODES = "1 0.0 0.0\n2 1.0 0.0\n3 0.0 1.0\n"
 
 
 def test_round14_indented_headers(tmp_path):
-    plain = read_dat(_mesh(tmp_path, _NODES))
-    ind = read_dat(
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    plain = read_one_element(_mesh(tmp_path, _NODES))
+    ind = read_one_element(
         _mesh(tmp_path, _NODES, head="  Node Number = 3\n  Cell Number = 1\n")
     )
     for k in ("x", "y", "nv"):

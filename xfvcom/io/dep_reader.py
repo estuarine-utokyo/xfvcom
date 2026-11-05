@@ -27,7 +27,14 @@ from numpy.typing import NDArray
 # jsasaki 2026-11-05: review round 18 #1-#7: list_fields reached through the shared scanner
 # jsasaki 2026-11-05: review round 20 #6: unused fortran_real import removed (conversion is in list_read)
 # jsasaki 2026-11-05: review round 19 #1 #3 #4 #5: READ-based header search and records
-from ..fvcom_input import REAL, locate_records, read_all, scan_count_headers
+# jsasaki 2026-11-05: review round 21 #1: physical_lines splits records at '\n' only
+from ..fvcom_input import (
+    REAL,
+    locate_records,
+    physical_lines,
+    read_all,
+    scan_count_headers,
+)
 
 __all__ = ["DepData", "read_dep", "write_dep"]
 
@@ -58,8 +65,8 @@ def read_dep(path: str | Path) -> DepData:
     # title is a failed READ, i.e. a header line), with its NHEADER rewind checked; records are
     # list-directed READs that may continue onto further lines or end with '/'.  READs that fail
     # (or leave an item unset) are passed over, as this reader always did.
-    with path.open() as fp:
-        lines = [(n, ln.rstrip("\n")) for n, ln in enumerate(fp, 1)]
+    # jsasaki 2026-11-05: review round 21 #1: split at '\n' only, not with universal newlines
+    lines = physical_lines(path)
     types = (REAL, REAL, REAL)
     start = locate_records(path, lines, types, block="depth records")
     counts = scan_count_headers(

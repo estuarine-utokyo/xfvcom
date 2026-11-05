@@ -20,6 +20,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+# jsasaki 2026-11-05: review round 21 #3: one-element meshes are refused by the strict reader
+from tests.one_element import read_one_element
 from xfvcom.grid.dat_reader import read_dat
 from xfvcom.grid.gtsz_builder import load_mesh
 from xfvcom.io.dep_reader import read_dep
@@ -92,7 +94,9 @@ def _padded_mesh(tmp_path: Path, n_pad: int) -> Path:
 
 
 def test_round16_header_on_line_201_is_accepted(tmp_path):
-    g = read_dat(_padded_mesh(tmp_path, 199))  # Node Number on line 201
+    # jsasaki 2026-11-05: review round 21 #3: FVCOM cannot read a one-element mesh (strict refuses it
+    # after its other checks); tests/one_element.py
+    g = read_one_element(_padded_mesh(tmp_path, 199))  # Node Number on line 201
     assert g["x"].shape == (3,)
     np.testing.assert_array_equal(g["nv"][:, 0], [0, 1, 2])
 
@@ -131,14 +135,18 @@ def test_round16_load_mesh_attached_comments(tmp_path):
     grd = _write(
         tmp_path,
         "m_grd.dat",
-        "Node Number = 3\nCell Number = 1\n"
+        # jsasaki 2026-11-05: review round 21 #3: two elements (FVCOM cannot read a one-element mesh)
+        "Node Number = 3\nCell Number = 2\n"
         # jsasaki 2026-11-05: review round 20 #1: comments separated by a blank after the values
-        + "1 1 2 3 !triangle\n" + _NODES.replace("3900001.0\n", "3900001.0 !apex\n"),
+        + "1 1 2 3 !triangle\n2 1 2 3\n"
+        + _NODES.replace("3900001.0\n", "3900001.0 !apex\n"),
     )
     dep = _write(tmp_path, "m_dep.dat", _DEP.replace("10.0\n", "10.0 !survey\n"))
     m = load_mesh(grd, dep)
     np.testing.assert_array_equal(m.h, [10.0, 20.0, 30.0])
     np.testing.assert_array_equal(m.nv[0], [0, 1, 2])
+    # jsasaki 2026-11-05: review round 21 #3: the second element of the two-element mesh
+    np.testing.assert_array_equal(m.nv[1], [0, 1, 2])
     np.testing.assert_array_equal(m.y, [3900000.0, 3900000.0, 3900001.0])
 
 
