@@ -2355,3 +2355,115 @@ VERDICT: FAIL (0 blocker, 0 major, 5 minor, 0 nit)
 ### Triage
 
 The reviewer CONCEDED the round-18 #3 rebuttal (FVCOM's reads at mod_input.F:4785/5088 count a row whenever IOS >= 0). All 5 new findings accepted (minor; #1 and #2 round-18 regressions; #3-#5 list-directed Fortran read semantics). xfvcom fea58bc (tests/test_round19_review.py): the OBC, depth and mesh readers count list-directed READs instead of physical lines (xfvcom/fvcom_input.py: list_read, read_all, locate_records; checked with gfortran 8.5 and ifx): #1 the data block starts at FVCOM's first successful typed READ (free-text title lines, even with '=', read again), #2 repetition counts beyond the Fortran runtime limit are errors, never silently capped, #3 '/' ends a read, #4 records may continue onto later lines, #5 a blank line that throws off FVCOM's header skip is rejected and named. 149 grid/depth/OBC files read identically (0 differ).
+
+## Round 20 (commit 511a36e reviewed; fixes in 59b3b7b)
+
+### Final answer (verbatim)
+
+Reviewed xfvcom `511a36e` (fixes in `fea58bc`) and jcopetda `96f429f`. No files were modified.
+
+| Round-19 finding | Status | Verification |
+|---|---|---|
+| #1 Free-text titles | RESOLVED | Titles with and without `=` are accepted by the affected readers. |
+| #2 Oversized repetitions | RESOLVED | Consumed counts above `MAX_REPEAT` are rejected; expansion is no longer silently capped. Finding 5 concerns unused trailing items. |
+| #3 Slash terminators | RESOLVED | Attached/separated terminators work; premature termination is rejected. |
+| #4 Continued records | PARTIAL | Reported examples pass, but continuation separators and the mesh transition remain incorrect; findings 2–3. |
+| #5 Header-rewind misalignment | RESOLVED | Leading blanks that misalign FVCOM’s rewind are rejected, including the production-OBC reproduction. |
+
+Validation: all **18 round-19 cases** passed through an in-memory harness. Comparison with the pre-fix readers found no array or exception-type differences across **83 TB-FVCOM files**. Production-day builds were finite for uniform sigma, both depth-control rules, SADAPT, and the production NPZ coordinate. The comparison script returned `0` for all five variables at all 13 OBC nodes. Both repaired-day samples retained provisional provenance, and both writers passed diskless serialization checks. Full annual builds and the complete suite were not rerun.
+
+1. **Minor — Attached comments can make the generated forcing use a different depth from FVCOM.**
+
+   Location: [fvcom_input.py:397](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/fvcom_input.py:397). Pre-existing.
+
+   Reproduction:
+
+   ```text
+   Node Number = 2
+   400000.0 3900000.0 10.0
+   400001.0 3900000.0 20.0!note
+   ```
+
+   `parse_dep_dat()` returns `[10, 20]`. A compiled gfortran reproduction of FVCOM’s depth loop returns `[10, 10]`: the second READ returns `IOSTAT=5010`, leaving `HDEP` unchanged. FVCOM still counts that READ as a row.
+
+   Removing `!note` before token conversion incorrectly turns the invalid token `20.0!note` into a valid number. A whitespace-separated `20.0 !note` succeeds because the required numeric fields are already complete. This corrects the earlier review’s assumption about attached comments.
+
+   **Fix:** Tokenize the original record text. Preserve `!` inside an unfinished numeric token; ignore remaining text only after all required values have been read.
+
+2. **Minor — A leading comma on a continuation line is incorrectly treated as a null value.**
+
+   Location: [fvcom_input.py:400](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/fvcom_input.py:400).
+
+   Reproduction:
+
+   ```text
+   OBC Node Number = 1
+   1 3150
+   ,1
+   ```
+
+   Gfortran reads `(1, 3150, 1)` successfully. `parse_obc_dat()` rejects it with “a null value leaves an item unset.”
+
+   Each physical line is tokenized independently. The tokenizer therefore loses whether a comma on the next line completes the preceding separator or represents an additional separator. For comparison, `1,3150,` followed by `,1` really does leave the third item unset.
+
+   **Fix:** Carry separator state across physical lines within each READ. Test both examples to preserve the distinction.
+
+3. **Minor — Newly accepted split first-node records do not reproduce FVCOM’s connectivity-to-coordinate rewind.**
+
+   Location: [dat_reader.py:153](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:153). **Round-19 regression.**
+
+   Reproduction: take a conventional two-element/four-node mesh and split its first coordinate record:
+
+   ```text
+   1
+   400000.0 3900000.0
+   ```
+
+   Leave the other coordinate records on individual lines. `read_dat()` now accepts the mesh.
+
+   FVCOM’s connectivity READ consumes the second physical line before failing on its real-valued coordinate. At the transition, [mod_input.F:4657](/home/pj24001722/ku40000343/Github/FVCOM/src/mod_input.F:4657) backspaces one physical record and executes `READ(GRIDUNIT,*) J`. It consequently attempts to read `400000.0` as an integer. The compiled reproduction returned `IOSTAT=5010` there; the actual READ has no `IOSTAT` recovery.
+
+   Python’s lookahead leaves its cursor unchanged and then reads the coordinate block directly, bypassing this behavior.
+
+   **Fix:** Model the transition’s BACKSPACE/READ sequence and validate the resulting coordinate-block position. Reject continuations that FVCOM cannot replay correctly.
+
+4. **Minor — Mesh readers still discard failed READs that FVCOM counts as rows.**
+
+   Locations: [dat_reader.py:179](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:179), [dat_reader.py:203](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/grid/dat_reader.py:203). Pre-existing.
+
+   Reproduction: insert `! note` between coordinate records in an otherwise valid two-element/four-node mesh, or append it after the last coordinate record.
+
+   `read_dat()` accepts both files and returns four nodes. A compiled reproduction of FVCOM’s loops counts five coordinate rows and reaches the “exceeds the stated number of nodes” condition. Interior failures are skipped by Python; trailing standalone comments are explicitly exempted from its surplus-record check.
+
+   **Fix:** Apply FVCOM’s READ counting inside mesh blocks. Reject failed/unset coordinate READs and standalone trailing comments, while preserving harmless blank-line continuation.
+
+5. **Minor — Repetition parsing is eager even for fields the READ never consumes.**
+
+   Location: [fortran_numbers.py:85](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/fortran_numbers.py:85). **Round-19 regression.**
+
+   Reproduction:
+
+   ```python
+   record = "1 3150 1 " + "9" * 5000 + "*1"
+   ```
+
+   Gfortran successfully reads the first three integers and ignores the remaining field. `list_read()` and `parse_obc_dat()` instead raise Python’s integer-conversion-limit error for the 5,000-digit repetition count.
+
+   `list_items()` constructs the complete list and calls `int(rs)` before `list_read()` can stop after its required values.
+
+   **Fix:** Yield items lazily and parse repetition counts only when consumed. Compare oversized consumed counts textually against `MAX_REPEAT` before integer conversion.
+
+6. **Nit — The refactor left two unused imports.**
+
+   Locations: [run_jcope_obc.py:40](/home/pj24001722/ku40000343/Github/xfvcom/scripts/run_jcope_obc.py:40), [dep_reader.py:28](/home/pj24001722/ku40000343/Github/xfvcom/xfvcom/io/dep_reader.py:28). **Round-19 regression.**
+
+   Both still import `fortran_real` after conversion moved into `list_read()`. Ruff reports `F401` for both.
+
+   **Fix:** Remove the unused imports.
+
+## Verdict
+VERDICT: FAIL (0 blocker, 0 major, 5 minor, 1 nit)
+
+### Triage
+
+All 6 findings accepted (5 minor, 1 nit; #3 and #5 round-19 regressions; #1 corrects the reviewer's own round-16 #3 request). xfvcom 59b3b7b (tests/test_round20_review.py; gfortran and ifx replicas of FVCOM's READ loops were used to check every recipe): #1 list_read reads the original line text: '!' inside a still-needed value fails the READ (20.0!note refused; FVCOM would keep the previous depth, a silent wrong value), text after all required values is ignored; this reverses the round-16 decision to accept '10.0!survey'; #2 separator state carries across lines; #3 the connectivity-to-coordinate BACKSPACE/READ J transition is simulated for gfortran and ifx rules and the file is rejected unless both land on the node-1 record; #4 failed/unset READs inside the mesh blocks count as rows (interior and trailing '! note' refused, blank lines accepted); #5 lazy repetition parsing; #6 unused imports removed. 149 grid/depth/OBC files read identically.
