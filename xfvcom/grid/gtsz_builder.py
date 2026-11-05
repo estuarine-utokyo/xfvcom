@@ -269,7 +269,8 @@ def suggest_zlev(
     # in that case the unrounded levels are kept (the writer still raises its
     # 400-character error if their exact spelling does not fit)
     rounded = [round(v, 6) for v in levels]
-    r = np.asarray(rounded, dtype=np.float64)
+    # jsasaki 2026-11-05: CI mypy (newer numpy stubs) needs an explicit annotation
+    r: Any = np.asarray(rounded, dtype=np.float64)
     if (r < 0.0).all() and (np.diff(r) < 0.0).all():
         levels = rounded
     # <--- jsasaki 2026-11-05

@@ -842,7 +842,8 @@ class FvcomPlotter(PlotHelperMixin):
         vmax = vmax or kwargs.pop("vmax", values.max())
         levels = levels or kwargs.get("levels", 20)  # Number of contour levels
         if isinstance(levels, int):
-            levels = np.linspace(vmin, vmax, levels)
+            # jsasaki 2026-11-05: CI mypy (newer numpy stubs) needs an explicit annotation
+            levels = np.linspace(vmin, vmax, levels)  # type: ignore[assignment]
         elif isinstance(levels, (list, np.ndarray)):
             levels = np.array(levels)
         if method == "contourf":

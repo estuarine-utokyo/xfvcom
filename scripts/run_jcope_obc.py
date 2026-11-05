@@ -29,6 +29,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -252,7 +253,8 @@ def check_time_axis(
             raise SystemExit(
                 f"the source for {y} has a time axis of dtype {raw.dtype}; real numbers are required"
             )
-        t = np.ma.filled(raw.astype(np.float64), np.nan)
+        # jsasaki 2026-11-05: CI mypy (newer numpy stubs) needs an explicit annotation
+        t: Any = np.ma.filled(raw.astype(np.float64), np.nan)
         if t.ndim != 1 or t.size == 0 or not np.isfinite(t).all():
             raise SystemExit(
                 f"the source for {y} must have a non-empty, finite 1-D time axis"

@@ -57,7 +57,8 @@ def prepare_contourf_args(
     vmin = float(np.nanmin(data)) if vmin is None else vmin
     vmax = float(np.nanmax(data)) if vmax is None else vmax
     if isinstance(levels, int):
-        levels = np.linspace(vmin, vmax, levels + 1)
+        # jsasaki 2026-11-05: CI mypy (newer numpy stubs) needs an explicit annotation
+        levels = np.linspace(vmin, vmax, levels + 1)  # type: ignore[assignment]
     kwargs = dict(levels=levels, cmap=cmap, norm=Normalize(vmin, vmax))
     return kwargs
 

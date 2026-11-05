@@ -16,6 +16,7 @@ Schema v3 reference:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import netCDF4 as nc
 import numpy as np
@@ -372,7 +373,8 @@ def test_generator_air_regression_clip(tmp_path: Path, tiny_nml: Path) -> None:
         },
     )
     arr = gen._evaluate_temp_source("RA", gen._temp_sources["RA"])
-    expected = np.clip(np.arange(24, dtype=np.float64) - 10, 0.0, 10.0)
+    # jsasaki 2026-11-05: CI mypy (newer numpy stubs) needs an explicit annotation
+    expected: Any = np.clip(np.arange(24, dtype=np.float64) - 10, 0.0, 10.0)
     np.testing.assert_allclose(arr, expected, rtol=1e-4)
 
 
@@ -792,14 +794,16 @@ def test_validate_harmonic_modes_invalid(bad) -> None:
 # --- 7b. interpolation helpers -------------------------------------
 def test_spline_periodic_exact_at_month_centres() -> None:
     centres = (np.arange(12, dtype=np.float64) + 0.5) / 12.0
-    y = np.asarray(KANDA, dtype=np.float64)
+    # jsasaki 2026-11-05: CI mypy (newer numpy stubs) needs an explicit annotation
+    y: Any = np.asarray(KANDA, dtype=np.float64)
     out = RiverNetCDFGenerator._spline_periodic(centres, y, centres)
     np.testing.assert_allclose(out, y, atol=1e-9)
 
 
 def test_harmonic_periodic_preserves_annual_mean() -> None:
     centres = (np.arange(12, dtype=np.float64) + 0.5) / 12.0
-    y = np.asarray(KANDA, dtype=np.float64)
+    # jsasaki 2026-11-05: CI mypy (newer numpy stubs) needs an explicit annotation
+    y: Any = np.asarray(KANDA, dtype=np.float64)
     out = RiverNetCDFGenerator._harmonic_periodic(centres, y, centres, 2)
     assert abs(float(out.mean()) - float(y.mean())) < 1e-9  # a0 == sample mean
     assert np.max(np.abs(out - y)) < 1.0  # within ~0.6 degC for Kanda (K=2)

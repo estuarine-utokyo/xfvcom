@@ -937,7 +937,8 @@ class FvcomGrid:
 
                 # ---> jsasaki 2026-11-05: review round 5 #1: shoelace on coordinates relative to the
                 # first vertex, so the area does not lose precision (or change) with the mesh origin
-                pts = np.asarray(polygon, dtype=float)
+                # jsasaki 2026-11-05: CI mypy (newer numpy stubs) needs an explicit annotation
+                pts: Any = np.asarray(polygon, dtype=float)
                 px = pts[:, 0] - pts[0, 0]
                 py = pts[:, 1] - pts[0, 1]
                 area = float(np.sum(px * np.roll(py, -1) - np.roll(px, -1) * py))
@@ -993,7 +994,8 @@ class FvcomGrid:
             for node_idx in np.atleast_1d(node_indices_0):
                 polygon = self.get_node_control_volume(int(node_idx), index_base=0)
                 if to_geo and not xy_is_lonlat and len(polygon) > 0:
-                    pts = np.asarray(polygon, dtype=float)
+                    # jsasaki 2026-11-05: CI mypy (newer numpy stubs) needs an explicit annotation
+                    pts: Any = np.asarray(polygon, dtype=float)
                     assert self.zone is not None  # checked above
                     plon, plat = utm_to_lonlat(
                         pts[:, 0], pts[:, 1], zone=self.zone, northern=self.northern

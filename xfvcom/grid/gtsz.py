@@ -43,6 +43,7 @@ single-precision round-off (~1e-5).
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -191,7 +192,8 @@ class GtszSpec:
         # mod_input.F:5166-5173 ZLEV contract (checked at parse time in FVCOM,
         # i.e. BEFORE the K1/K2/NZ setup checks below): negative, strictly descending.
         if self.zlev:
-            z = np.asarray(self.zlev, dtype=float)
+            # jsasaki 2026-11-05: CI mypy (newer numpy stubs) needs an explicit annotation
+            z: Any = np.asarray(self.zlev, dtype=float)
             # jsasaki 2026-11-05: review round 10 #4: NaN/inf pass the comparisons below silently
             if not np.isfinite(z).all():
                 raise ValueError("GtszSpec: all GTSZ ZLEV must be finite")
@@ -346,7 +348,8 @@ def build_column_base(
     have_z = spec.have_zband
     k1, k2 = spec.k1, spec.k2
     assert k2 is not None  # always set in __post_init__
-    zlev = np.asarray(spec.zlev, dtype=np.float64)
+    # jsasaki 2026-11-05: CI mypy (newer numpy stubs) needs an explicit annotation
+    zlev: Any = np.asarray(spec.zlev, dtype=np.float64)
     for k in range(1, kb + 1):  # Fortran K
         sak = sa[k - 1]
         if (not have_z) or k <= k1 or k >= k2:
@@ -390,7 +393,8 @@ def build_column_sadapt(
     """
     kb = spec.kb
     k1 = spec.k1
-    zlev = np.asarray(spec.zlev, dtype=np.float64)
+    # jsasaki 2026-11-05: CI mypy (newer numpy stubs) needs an explicit annotation
+    zlev: Any = np.asarray(spec.zlev, dtype=np.float64)
     sband = sband_reshape(kb, k1, spec.base, p1=spec.p1, l1=spec.l1, l2=spec.l2)
     z: NDArray[np.float64] = np.empty(kb, dtype=np.float64)
     D = H + eta0

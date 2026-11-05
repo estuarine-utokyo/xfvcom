@@ -26,7 +26,7 @@ point ``.compute()``-style slicing reads only what is asked for.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import numpy as np
 import xarray as xr
@@ -261,6 +261,9 @@ class JcopeGrid:
             box_mask = self.mask[j_lo:j_hi, i_lo:i_hi]
             found = bool(box_mask.any())
             if found:
+                # jsasaki 2026-11-05: CI mypy (newer numpy stubs) needs an explicit annotation
+                jj: Any
+                ii: Any
                 jj, ii = np.meshgrid(
                     np.arange(j_lo, j_hi, dtype=np.float64),
                     np.arange(i_lo, i_hi, dtype=np.float64),

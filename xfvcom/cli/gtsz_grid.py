@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -157,7 +158,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- z-levels ---
     if args.zlev:
-        zlev = np.asarray(
+        # jsasaki 2026-11-05: CI mypy (newer numpy stubs) needs an explicit annotation
+        zlev: Any = np.asarray(
             [float(t) for t in args.zlev.replace(",", " ").split()], float
         )
     elif args.zlev_auto:
