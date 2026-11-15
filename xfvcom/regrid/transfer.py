@@ -52,6 +52,24 @@ MIN_AREA_M2 = 1e-12  # smallest triangle area (an edge bound alone does not boun
 MIN_SIGMA_THICKNESS = 1e-6  # thinnest sigma layer (fraction of the column)
 DEPTH_RANGE_M = (1e-3, 1e5)  # positive-down depth
 ELEVATION_LIMIT_M = 1e3  # |zeta|
+BOUNDARY_TOLERANCE = 2e-12  # exact weight below which a point is outside
+FRACTION_TOLERANCE = 1e-12  # certified error of a vertical interpolation fraction
+_UNIT_ROUNDOFF = np.finfo(np.float64).eps / 2
+
+
+def _outside(values, low, high):
+    """True if any value lies outside [low, high], compared without narrowing.
+
+    The bounds are typed with ``np.result_type(values.dtype, float64)``: a
+    narrow input (float16) is promoted instead of the bound being narrowed
+    (which overflows), and a wider one (longdouble) keeps its own range, so no
+    cast happens before the range is known.
+    """
+    values = np.asarray(values)
+    if not values.size:
+        return False
+    bounds = np.array([low, high], dtype=np.result_type(values.dtype, np.float64))
+    return bool(((values < bounds[0]) | (values > bounds[1])).any())
 
 
 def _physical_mesh(label, mesh):
@@ -79,9 +97,8 @@ def _physical_mesh(label, mesh):
         raise ValueError(
             f"{label}: a triangle smaller than {MIN_AREA_M2:g} m2 is outside the physical range"
         )
-    # compared in the input dtype, before any narrowing cast can overflow
     h = np.asarray(mesh.depths)
-    if bool(((h < DEPTH_RANGE_M[0]) | (h > DEPTH_RANGE_M[1])).any()):
+    if _outside(h, *DEPTH_RANGE_M):
         raise ValueError(
             f"{label}: depths outside the physical range {DEPTH_RANGE_M} m"
         )
@@ -163,12 +180,8 @@ def _areas(mesh):
     return area
 
 
-def _certify_weights(vertices, point, weights):
-    """Certify floating weights against exact input-float Cramer determinants.
-
-    This is a guard, not a fallback: geometry with >1e-12 absolute weight error
-    is refused. The evaluator independently uses rational elimination instead.
-    """
+def _exact_weights(vertices, point):
+    """Exact barycentric weights of the input floats (Cramer determinants)."""
     a, b, c, q = [[Fraction(float(x)) for x in p] for p in (*vertices, point)]
     u, v, d = ([p[k] - a[k] for k in (0, 1)] for p in (b, c, q))
     determinant = u[0] * v[1] - u[1] * v[0]
@@ -178,7 +191,15 @@ def _certify_weights(vertices, point, weights):
         )
     w1 = (d[0] * v[1] - d[1] * v[0]) / determinant
     w2 = (u[0] * d[1] - u[1] * d[0]) / determinant
-    exact = (1 - w1 - w2, w1, w2)
+    return (1 - w1 - w2, w1, w2)
+
+
+def _certify_weights(exact, weights):
+    """Certify floating weights against the exact ones of ``_exact_weights``.
+
+    This is a guard, not a fallback: geometry with >1e-12 absolute weight error
+    is refused. The evaluator independently uses rational elimination instead.
+    """
     if not np.isfinite(weights).all() or any(
         abs(Fraction(float(w)) - r) > Fraction(1, 10**12)
         for w, r in zip(weights, exact)
@@ -199,25 +220,32 @@ def _locate(mesh, points):
     for i, q in enumerate(points):
         candidates = np.flatnonzero(((q >= lo) & (q <= hi)).all(axis=1))
         for e in candidates:
+            # Containment is decided on the EXACT weights, so a thin candidate
+            # whose bounding box merely covers the point (and whose floating
+            # extrapolation weights are meaningless) is passed over rather
+            # than aborting the search. Only an accepted container's floating
+            # weights must certify.
+            exact = _exact_weights(p[e], q)
+            if min(exact) < -BOUNDARY_TOLERANCE:
+                continue
             d = q - p[e, 0]
             with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
                 b = _cross(d, v[e]) / determinant[e]
                 c = _cross(u[e], d) / determinant[e]
                 w = np.array([1 - b - c, b, c])
-            _certify_weights(p[e], q, w)
-            if (w >= -2e-12).all():
-                clipped = np.maximum(w, 0)
-                clipped /= clipped.sum()
-                try:
-                    _certify_weights(p[e], q, clipped)
-                except ValueError:
-                    # a neighbour within the boundary tolerance whose weights,
-                    # once clipped, are not those of the point: the point lies
-                    # in another candidate; keep searching
-                    continue
-                ids[i] = e
-                weights[i] = clipped
-                break
+            _certify_weights(exact, w)
+            clipped = np.maximum(w, 0)
+            clipped /= clipped.sum()
+            try:
+                _certify_weights(exact, clipped)
+            except ValueError:
+                # a neighbour within the boundary tolerance whose weights,
+                # once clipped, are not those of the point: the point lies
+                # in another candidate; keep searching
+                continue
+            ids[i] = e
+            weights[i] = clipped
+            break
     return ids, weights
 
 
@@ -557,18 +585,29 @@ def _columns(op, location, sigma, base_zeta, target_zeta):
     # the range is tested in the input dtype, before a narrowing cast can overflow
     for label, z in (("base_zeta", raw_bz), ("target_zeta", raw_tz)):
         # direct comparisons: abs() of the most negative integer is itself
-        if z.size and bool(((z < -ELEVATION_LIMIT_M) | (z > ELEVATION_LIMIT_M)).any()):
+        if _outside(z, -ELEVATION_LIMIT_M, ELEVATION_LIMIT_M):
             raise ValueError(
                 f"{label}: outside the physical range |zeta| <= {ELEVATION_LIMIT_M:g} m"
             )
     bz, tz = raw_bz.astype(np.float64), raw_tz.astype(np.float64)
+    u = _UNIT_ROUNDOFF
+    # absolute error bounds of the column inputs: exact for nodes; an element
+    # column is the node mean, whose rounding (two additions and a division)
+    # is below 4u times the mean magnitude
+    errors = [np.zeros(len(x)) for x in (bh, bz, th, tz)]
     if location == "element":
-        bh, bz = bh[op.base.triangles].mean(axis=1), bz[op.base.triangles].mean(axis=1)
-        th, tz = th[op.target.triangles].mean(axis=1), tz[op.target.triangles].mean(
-            axis=1
-        )
+        columns = []
+        for x, tri in (
+            (bh, op.base.triangles),
+            (bz, op.base.triangles),
+            (th, op.target.triangles),
+            (tz, op.target.triangles),
+        ):
+            columns.append((x[tri].mean(axis=1), 4 * u * np.abs(x[tri]).mean(axis=1)))
+        (bh, ebh), (bz, ebz), (th, eth), (tz, etz) = columns
         area = _areas(op.target)
     else:
+        ebh, ebz, eth, etz = errors
         area, third = np.zeros(len(th)), _areas(op.target) / 3
         for k in range(3):
             np.add.at(area, op.target.triangles[:, k], third)
@@ -577,29 +616,100 @@ def _columns(op, location, sigma, base_zeta, target_zeta):
     _finite("column depths", base_depth, target_depth)
     if (base_depth <= 0).any() or (target_depth <= 0).any():
         raise ValueError("Depth plus elevation must be positive in every column")
+    # Layer centres are kept RELATIVE TO THEIR OWN SURFACE (sigma times the
+    # water column). Absolute z (surface plus that) is never formed: rounding
+    # it first loses the differences that matter in a thin column (round 11).
     centres = (sigma[:-1] + sigma[1:]) / 2
     with np.errstate(over="ignore", invalid="ignore"):
-        base_centres = bz[:, None] + centres * (bh + bz)[:, None]
-        target_centres = tz[:, None] + centres * (th + tz)[:, None]
-        volumes = area[:, None] * (th + tz)[:, None] * -np.diff(sigma)
+        base_centres = centres * base_depth[:, None]
+        target_centres = centres * target_depth[:, None]
+        volumes = area[:, None] * target_depth[:, None] * -np.diff(sigma)
     _finite("column geometry", base_centres, target_centres, volumes)
-    # Distinct sigma layers must stay distinct in physical z, or interpolation
-    # would silently merge them (in the evaluator too).
+    # Distinct sigma layers must stay distinct, or interpolation would
+    # silently merge them (in the evaluator too).
     for label, c in (("base", base_centres), ("target", target_centres)):
         if not (np.diff(c, axis=1) < 0).all():
             raise ValueError(
                 f"{label} layer centres are not strictly decreasing in physical z"
             )
-    return base_centres, target_centres, bh, bz, volumes
+    # absolute error bounds of the relative centres (2u per rounding: slack for
+    # the second-order terms); the centres themselves are rounded once
+    centre_error = 2 * u * np.abs(centres)
+    base_error = ebh + ebz + 2 * u * base_depth
+    target_error = eth + etz + 2 * u * target_depth
+    base_centre_error = (
+        np.abs(centres) * base_error[:, None]
+        + base_depth[:, None] * centre_error
+        + 2 * u * np.abs(base_centres)
+    )
+    target_centre_error = (
+        np.abs(centres) * target_error[:, None]
+        + target_depth[:, None] * centre_error
+        + 2 * u * np.abs(target_centres)
+    )
+    return _Columns(
+        base_centres,
+        base_centre_error,
+        target_centres,
+        target_centre_error,
+        bz,
+        ebz,
+        tz,
+        etz,
+        base_depth,
+        volumes,
+    )
 
 
-def _interpolate(z, values, targets):
-    """Return constant-end interpolation and its unbounded linear alternative."""
+@dataclass(frozen=True)
+class _Columns:
+    """Columns of one location: centres relative to their own surface."""
+
+    base_centres: np.ndarray  # (base columns, layers), sigma * (h + zeta)
+    base_centre_error: np.ndarray
+    target_centres: np.ndarray  # (target columns, layers)
+    target_centre_error: np.ndarray
+    base_zeta: np.ndarray
+    base_zeta_error: np.ndarray
+    target_zeta: np.ndarray
+    target_zeta_error: np.ndarray
+    base_depth: np.ndarray  # h + zeta of the base columns
+    volumes: np.ndarray  # (target columns, layers)
+
+    def relative(self, i, j):
+        """Target i's layer centres relative to donor j's surface, with error bounds.
+
+        The difference of the two surfaces is formed first (one rounding of
+        two exact inputs), then target i's own relative centres are added.
+        """
+        u = _UNIT_ROUNDOFF
+        with np.errstate(over="ignore", invalid="ignore"):
+            offset = self.target_zeta[i] - self.base_zeta[j]
+            z = offset + self.target_centres[i]
+        error = (
+            self.target_zeta_error[i]
+            + self.base_zeta_error[j]
+            + 2 * u * abs(offset)
+            + self.target_centre_error[i]
+            + 2 * u * np.abs(z)
+        )
+        return z, error
+
+
+def _interpolate(z, values, targets, z_error=None, target_error=None):
+    """Return constant-end interpolation and its unbounded linear alternative.
+
+    With error bounds of the donor centres ``z`` and of the ``targets``, every
+    fraction used inside the donor column is certified to FRACTION_TOLERANCE;
+    geometry that cannot resolve it is refused rather than interpolated.
+    """
     order = np.searchsorted(-z, -targets, side="right") - 1
     j = np.clip(order, 0, len(z) - 2)
     with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
         t = (targets - z[j]) / (z[j + 1] - z[j])
     _finite("interpolation fractions", t)
+    if z_error is not None:
+        _certify_fractions(z, z_error, targets, target_error, j, t)
     shape = (len(t),) + (1,) * (values.ndim - 1)
     a, b = values[j], values[j + 1]
     fraction = np.broadcast_to(np.clip(t, 0, 1).reshape(shape), a.shape)
@@ -628,6 +738,40 @@ def _interpolate(z, values, targets):
         ) * (bb - aa)
     _finite("vertical interpolation/extrapolation", clipped, linear)
     return clipped, linear
+
+
+def _certify_fractions(z, z_error, targets, target_error, j, t):
+    """Refuse a fraction inside the donor column whose error may exceed 1e-12.
+
+    t = N / D with N = z[j] - target and D = z[j] - z[j+1] > 0; first-order
+    bound (eN + |t| eD) / (D - eD) plus the rounding of the quotient. Fractions
+    at or beyond the end centres are not used (the end value is), so they are
+    not certified; a target on the wrong side of a centre by its own error
+    gives the same value on either side, interpolation being continuous.
+    """
+    u = _UNIT_ROUNDOFF
+    inside = (targets < z[0]) & (targets > z[-1])
+    if not inside.any():
+        return
+    k = j[inside]
+    numerator = z[k] - targets[inside]
+    denominator = z[k] - z[k + 1]
+    e_numerator = z_error[k] + target_error[inside] + 2 * u * np.abs(numerator)
+    e_denominator = z_error[k] + z_error[k + 1] + 2 * u * denominator
+    fraction = np.abs(t[inside])
+    margin = denominator - e_denominator
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        bound = np.where(
+            margin > 0,
+            (e_numerator + fraction * e_denominator) / margin + 2 * u * fraction,
+            np.inf,
+        )
+    if not (bound <= FRACTION_TOLERANCE).all():
+        raise ValueError(
+            "Vertical interpolation fraction cannot be established to "
+            f"{FRACTION_TOLERANCE:g} (layer centres too close for the column "
+            "geometry): numerically unresolved columns are refused"
+        )
 
 
 def _statistic(events, denominator, delta):
@@ -704,7 +848,8 @@ def apply_3d(op, field, sigma, base_zeta, target_zeta, *, location="node"):
     """
     matrix, copies = _operator(op, location)
     field = _field(field, matrix.shape[1], layered=True)
-    zb, zt, bh, bz, volume = _columns(op, location, sigma, base_zeta, target_zeta)
+    columns = _columns(op, location, sigma, base_zeta, target_zeta)
+    zb, volume, depth = columns.base_centres, columns.volumes, columns.base_depth
     if field.shape[1] != zb.shape[1]:
         raise ValueError("field layer count differs from sigma interfaces")
     shape = (matrix.shape[0],) + field.shape[1:]
@@ -717,14 +862,22 @@ def apply_3d(op, field, sigma, base_zeta, target_zeta, *, location="node"):
             continue
         for k in range(matrix.indptr[i], matrix.indptr[i + 1]):
             j, w = matrix.indices[k], matrix.data[k]
-            values, linear = _interpolate(zb[j], field[j].astype(float), zt[i])
+            # every coordinate is relative to donor j's own surface
+            zt, zt_error = columns.relative(i, j)
+            values, linear = _interpolate(
+                zb[j],
+                field[j].astype(float),
+                zt,
+                columns.base_centre_error[j],
+                zt_error,
+            )
             with np.errstate(over="ignore", invalid="ignore"):
                 result[i] += w * values
-            extended = (zt[i] > bz[j]) | (zt[i] < -bh[j])
-            beyond_centres = (zt[i] > zb[j, 0]) | (zt[i] < zb[j, -1])
+            extended = (zt > 0) | (zt < -depth[j])
+            beyond_centres = (zt > zb[j, 0]) | (zt < zb[j, -1])
             distances = {
-                "extension": np.maximum(zt[i] - bz[j], -bh[j] - zt[i]),
-                "clamping": np.maximum(zt[i] - zb[j, 0], zb[j, -1] - zt[i]),
+                "extension": np.maximum(zt, -depth[j] - zt),
+                "clamping": np.maximum(zt - zb[j, 0], zb[j, -1] - zt),
             }
             for key, mask in (
                 ("extension", extended),

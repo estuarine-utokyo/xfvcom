@@ -12,6 +12,26 @@ def _finite(label, *values):
         raise ValueError(f"{label}: non-finite derived value or statistic")
 
 
+def _product(xs, ys):
+    """Exact product of two expansions, as an expansion (error-free products)."""
+    out = []
+    for a in xs:
+        for b in ys:
+            p = a * b
+            out += [p, math.fma(a, b, -p)]
+    return out
+
+
+def _difference(xs, ys):
+    """Correctly rounded value of sum(xs) - sum(ys) (exact sign, exact zero)."""
+    return math.fsum(xs + [-y for y in ys])
+
+
+def _sign(xs, ys):
+    difference = _difference(xs, ys)
+    return (difference > 0) - (difference < 0)
+
+
 def independent_evaluate(
     base,
     target,
@@ -30,7 +50,11 @@ def independent_evaluate(
 
     Own triangle search, graph walk, element area average and vertical loops.
     All searched barycentrics and incident areas use exact Fraction arithmetic
-    on the input floats; only field combinations use floating point. Rational
+    on the input floats. Vertical coordinates are exact expansions relative to
+    each donor's own surface (error-free products and fsum, unlike
+    production's certified float64 frame); each interpolation fraction is a
+    quotient of two correctly rounded exact differences. Only field
+    combinations use plain floating point. Rational
     elimination deliberately differs from production's compensated determinants.
     Evaluates ALL rows, including copies, with no cached geometry from Transfer.
     Use build_transfer/apply_* first to validate raw application inputs.
@@ -135,29 +159,50 @@ def independent_evaluate(
     for old, new in enumerate(mapping):
         if new >= 0:
             inverse[int(new)] = old
+    # Vertical columns as EXPANSIONS: lists of floats whose exact sum is the
+    # quantity. A node column is its own depth and elevation; an element column
+    # is the node mean, kept exact by scaling every element column (base and
+    # target alike) by 3, which leaves interpolation fractions unchanged.
     if location == "node":
         points = target.xy
-        old_h = [float(h) for h in base.depths]
-        new_h = [float(h) for h in target.depths]
-        if layered:
-            old_surface = [float(z) for z in base_zeta]
-            new_surface = [float(z) for z in target_zeta]
+        old_cells = [[v] for v in range(len(base.xy))]
+        new_cells = [[v] for v in range(len(target.xy))]
     else:
         points = [
             sum((target.xy[v] for v in tri), np.zeros(2)) / 3
             for tri in target.triangles
         ]
-        old_h = [sum(float(base.depths[v]) for v in tri) / 3 for tri in base.triangles]
-        new_h = [
-            sum(float(target.depths[v]) for v in tri) / 3 for tri in target.triangles
-        ]
-        if layered:
-            old_surface = [
-                sum(float(base_zeta[v]) for v in tri) / 3 for tri in base.triangles
-            ]
-            new_surface = [
-                sum(float(target_zeta[v]) for v in tri) / 3 for tri in target.triangles
-            ]
+        old_cells = [[int(v) for v in tri] for tri in base.triangles]
+        new_cells = [[int(v) for v in tri] for tri in target.triangles]
+    if layered:
+        old_depth = [[float(base.depths[v]) for v in c] for c in old_cells]
+        old_surface = [[float(base_zeta[v]) for v in c] for c in old_cells]
+        new_depth = [[float(target.depths[v]) for v in c] for c in new_cells]
+        new_surface = [[float(target_zeta[v]) for v in c] for c in new_cells]
+        # sigma-layer centres, exactly: halving a float is exact
+        middles = [[sigma[k] / 2, sigma[k + 1] / 2] for k in range(len(sigma) - 1)]
+        donor_cache = {}
+        target_cache = {}
+
+        def target_centres(i):
+            # target surface plus centre k relative to it (cached per target)
+            if i not in target_cache:
+                column = new_depth[i] + new_surface[i]
+                target_cache.clear()
+                target_cache[i] = [
+                    new_surface[i] + _product(m, column) for m in middles
+                ]
+            return target_cache[i]
+
+        def donor_centres(d):
+            # centre k relative to donor d's own surface: middle * (h + zeta)
+            if d not in donor_cache:
+                column = old_depth[d] + old_surface[d]
+                centres = [_product(m, column) for m in middles]
+                gaps = [_difference(a, b) for a, b in zip(centres, centres[1:])]
+                donor_cache[d] = centres, gaps
+            return donor_cache[d]
+
     incident = [[] for _ in base.xy]
     reference_area = []
     for e, tri in enumerate(base.triangles):
@@ -202,38 +247,53 @@ def independent_evaluate(
                 value += weight * field[d]
                 scale[i] += np.abs(field[d])
                 continue
-            donor_centres = [
-                old_surface[d]
-                + (sigma[k] + sigma[k + 1]) / 2 * (old_h[d] + old_surface[d])
-                for k in range(len(sigma) - 1)
-            ]
-            for k in range(len(sigma) - 1):
-                z = new_surface[i] + (sigma[k] + sigma[k + 1]) / 2 * (
-                    new_h[i] + new_surface[i]
-                )
-                if z >= donor_centres[0]:
-                    interpolated = field[d, 0]
-                    scale[i, k] += np.abs(field[d, 0])
-                elif z <= donor_centres[-1]:
-                    interpolated = field[d, -1]
-                    scale[i, k] += np.abs(field[d, -1])
+            centres, gaps = donor_centres(d)
+            below_surface = [-z for z in old_surface[d]]
+            layers = len(sigma) - 1
+            bracket = np.zeros(layers, dtype=int)
+            fraction = np.zeros(layers)
+            above = np.zeros(layers, dtype=bool)
+            below = np.zeros(layers, dtype=bool)
+            # Target centres decrease with k, exactly, and so do the donor's:
+            # the state goes above -> inside -> below once, and the bracket
+            # index only moves down (a merge walk).
+            state, j = "above", 0
+            for k in range(layers):
+                # target centre k relative to donor d's surface:
+                # (target surface - donor surface) + middle * target column
+                z = target_centres(i)[k] + below_surface
+                if state == "above" and _sign(z, centres[0]) < 0:
+                    state = "inside"
+                if state == "inside" and _sign(z, centres[-1]) <= 0:
+                    state = "below"
+                if state == "above":
+                    above[k] = True
+                elif state == "below":
+                    below[k] = True
                 else:
-                    for j in range(len(donor_centres) - 1):
-                        if donor_centres[j] >= z >= donor_centres[j + 1]:
-                            fraction = (donor_centres[j] - z) / (
-                                donor_centres[j] - donor_centres[j + 1]
-                            )
-                            interpolated = (1 - fraction) * field[d, j].astype(
-                                np.longdouble
-                            ) + fraction * field[d, j + 1].astype(np.longdouble)
-                            interpolated = np.clip(
-                                interpolated,
-                                np.minimum(field[d, j], field[d, j + 1]),
-                                np.maximum(field[d, j], field[d, j + 1]),
-                            )
-                            scale[i, k] += np.abs(field[d, j]) + np.abs(field[d, j + 1])
-                            break
-                value[k] += weight * interpolated
+                    while _sign(z, centres[j + 1]) < 0:
+                        j += 1
+                    # a correctly rounded exact difference over another
+                    bracket[k], fraction[k] = j, _difference(centres[j], z) / gaps[j]
+            f = fraction.reshape((layers,) + (1,) * (field.ndim - 2))
+            lower_value, upper_value = field[d, bracket], field[d, bracket + 1]
+            interpolated = (1 - f) * field[d, bracket].astype(
+                np.longdouble
+            ) + f * field[d, bracket + 1].astype(np.longdouble)
+            interpolated = np.clip(
+                interpolated,
+                np.minimum(lower_value, upper_value),
+                np.maximum(lower_value, upper_value),
+            )
+            interpolated[above] = field[d, 0]
+            interpolated[below] = field[d, -1]
+            inside = ~(above | below)
+            scale[i, inside] += np.abs(lower_value[inside]) + np.abs(
+                upper_value[inside]
+            )
+            scale[i, above] += np.abs(field[d, 0])
+            scale[i, below] += np.abs(field[d, -1])
+            value += weight * interpolated
         with np.errstate(over="ignore", invalid="ignore"):
             output[i] = value
     _finite("independent evaluation", output)

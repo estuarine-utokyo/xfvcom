@@ -21,6 +21,11 @@ limit in metres and deterministic lowest-ID ties; they never jump across land.
 limits separately. `apply_2d` applies horizontal stencils. `apply_3d` first
 remaps each donor in physical z using a common decreasing sigma interface vector
 from 0 to -1 and each mesh's depth and elevation, then combines donor values.
+Vertical positions are taken relative to each donor's own surface (the surface
+difference plus sigma times the water column), never as rounded absolute z, so
+nearly dry columns keep their exact geometry; every interpolation fraction used
+inside a donor column is certified to `1e-12` from error bounds and otherwise
+refused.
 It continues endpoint layer values beyond the donor layer centres. Statistics
 separate clamping within the donor water column from extension beyond its
 surface/bottom. They report donor-weighted target volumes, fractions, distance
@@ -33,12 +38,16 @@ The physical input range is enforced: float64 projected coordinates with
 depths from `1e-3` to `1e5` m, elevations with magnitude at most `1e3` m, and
 sigma layer thickness at least `1e-6` of the column. Fields are finite
 float32/float64 with magnitude at most `1e100`, spatial axis first. Geometry
-whose areas or weights cannot be certified to `1e-12` is refused.
+whose areas or weights cannot be certified to `1e-12` is refused. Containment
+in a triangle is decided on exact weights, so a thin candidate that only covers
+a point by its bounding box is passed over; only an accepted container's
+floating weights must certify.
 
 `transfer_reference.independent_evaluate` independently searches triangles,
 walks water connections, forms area shares and remaps vertical profiles. It
-uses exact rational elimination for geometry and shares only input validation
-with `transfer`. `check` compares every output value against this evaluator,
+uses exact rational elimination for geometry, exact expansions (error-free
+products and `fsum`) for the vertical coordinates, and shares only input
+validation with `transfer`. `check` compares every output value against this evaluator,
 using a per-value round-off allowance; it can also check a supplied result.
 
 The implementation modules use relative imports and can be loaded individually

@@ -2,6 +2,7 @@
 
 import io
 import sys
+import warnings
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -488,11 +489,15 @@ def test_nearly_degenerate_exact_areas(offset):
 
 
 def test_uncertifiable_triangle_refused():
-    # Subtracting the local origin rounds differently on the two long edges.
-    # The exact weights of (0,0) are [1,.5,-.5]; floating arithmetic loses .5.
-    b = mesh([[-1.0, -1.0], [1e16 + 2, 1e16 + 4], [1e16, 1e16 + 2]], [[0, 1, 2]], 4.0)
+    # Subtracting the local origin rounds the long edges, and the triangle is
+    # thin, so the floating weights of a point INSIDE it (exact weights
+    # [.5, .4516.., .0484..]) are wrong: a true container is refused, never
+    # passed over. (An exterior point is passed over: round 11 #2.)
+    b = mesh([[-1.0, -1.0], [1e16 + 2, 1e16 + 4], [1e16, 1e16 + 64]], [[0, 1, 2]], 4.0)
+    q = np.array([5e15, 5e15 + 16])
+    assert min(rt._exact_weights(b.xy[[0, 1, 2]], q)) > 0
     with pytest.raises(ValueError, match="weights cannot be established to 1e-12"):
-        rt._locate(b, np.array([[0.0, 0.0]]))
+        rt._locate(b, q[None])
 
 
 def test_rational_evaluator_uses_no_production_geometry(monkeypatch):
@@ -966,15 +971,15 @@ MUTATIONS = [
     ),
     (
         "vertical-donor-depth",
-        "_interpolate(zb[j], field[j].astype(float), zt[i])",
-        "_interpolate(zb[j], field[j].astype(float), zb[j])",
+        "zt, zt_error = columns.relative(i, j)",
+        "zt, zt_error = columns.relative(i, j)\n            zt = zb[j].copy()",
         "test_g2_vertical_physical_z_and_saturation",
         True,
     ),
     (
         "vertical-zeta",
-        "base_centres = bz[:, None] + centres * (bh + bz)[:, None]",
-        "base_centres = centres * bh[:, None]",
+        "offset = self.target_zeta[i] - self.base_zeta[j]",
+        "offset = self.target_zeta[i]",
         "test_g2_vertical_physical_z_and_saturation",
         True,
     ),
@@ -1057,8 +1062,8 @@ MUTATIONS = [
     ),
     (
         "upper-extension",
-        "extended = (zt[i] > bz[j]) | (zt[i] < -bh[j])",
-        "extended = (zt[i] < -bh[j])",
+        "extended = (zt > 0) | (zt < -depth[j])",
+        "extended = (zt < -depth[j])",
         "test_upper_extension_and_donor_weight_accounting",
         False,
     ),
@@ -1071,8 +1076,8 @@ MUTATIONS = [
     ),
     (
         "independent-vertical",
-        "field[d, j].astype(\n                                np.longdouble\n                            )",
-        "(field[d, j].astype(\n                                np.longdouble\n                            ) + .01)",
+        "field[d, bracket].astype(\n                np.longdouble\n            )",
+        "(field[d, bracket].astype(\n                np.longdouble\n            ) + .01)",
         "test_independent_every_row_layer_and_perturbations",
         True,
     ),
@@ -1102,6 +1107,34 @@ MUTATIONS = [
         "triangle[nm[v]], bary[nm[v]] = e, np.eye(3)[k]",
         "pass",
         "test_coincident_frozen_donor_uses_its_own_bank",
+        False,
+    ),
+    (
+        "thin-column-relative-frame",
+        "base_centres = centres * base_depth[:, None]",
+        "base_centres = (bz[:, None] + centres * base_depth[:, None]) - bz[:, None]",
+        "test_r11_thin_column_interpolates_in_donor_relative_frame",
+        False,
+    ),
+    (
+        "fraction-certificate",
+        "if not (bound <= FRACTION_TOLERANCE).all():",
+        "if False:",
+        "test_r11_unresolved_fraction_refused",
+        False,
+    ),
+    (
+        "exact-containment",
+        "if min(exact) < -BOUNDARY_TOLERANCE:\n                continue",
+        "pass",
+        "test_r11_thin_candidate_does_not_abort_search",
+        False,
+    ),
+    (
+        "independent-donor-surface",
+        "below_surface = [-z for z in old_surface[d]]",
+        "below_surface = []",
+        "test_r11_thin_column_interpolates_in_donor_relative_frame",
         False,
     ),
     (
@@ -1525,3 +1558,80 @@ def test_r10_wide_float_depths_and_sigma_refused_under_strict_errors():
                 rt.apply_3d(
                     op, np.ones((4, len(sigma) - 1)), sigma, np.zeros(4), np.zeros(5)
                 )
+
+
+def _thin_column_case():
+    b = mesh([[0, 0], [1, 0], [0, 1]], [[0, 1, 2]], 1.0)
+    t = mesh(np.vstack((b.xy, [0.25, 0.25])), [[0, 1, 3], [1, 2, 3], [2, 0, 3]], 1.0)
+    return rt.build_transfer(b, t, np.arange(3))
+
+
+def test_r11_thin_column_interpolates_in_donor_relative_frame():
+    """Nearly dry columns: the fraction is exactly 0.3, not 1/3 (round 11 #1).
+
+    Relative to -1 the donor centres are 3.75u and 1.25u and the target's upper
+    centre 3u, so the fraction is (3.75 - 3) / (3.75 - 1.25) = 0.3; rounding
+    the absolute centres first gave 1/3 in production and evaluator alike.
+    """
+    op = _thin_column_case()
+    sigma = np.array([0.0, -0.5, -1.0])
+    field = np.tile([0.0, 1.0], (3, 1))
+    u = 2.0**-53
+    bz = np.full(3, -1 + 5 * u)
+    tz = np.r_[bz, -1 + 4 * u]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", rt.ExtensionWarning)
+        actual, _ = rt.apply_3d(op, field, sigma, bz, tz)
+        reference = rt.independent_evaluate(
+            op.base,
+            op.target,
+            op.node_map,
+            op.elem_map,
+            field,
+            sigma=sigma,
+            base_zeta=bz,
+            target_zeta=tz,
+        )
+    assert actual[-1, 0] == pytest.approx(0.3, abs=1e-15)
+    assert reference[-1, 0] == pytest.approx(0.3, abs=1e-15)
+    assert actual[-1, 1] == 1.0
+    rt.check(op, field, sigma=sigma, base_zeta=bz, target_zeta=tz, actual=actual)
+
+
+def test_r11_unresolved_fraction_refused():
+    """A fraction the float64 frame cannot resolve to 1e-12 is refused.
+
+    The target surface stands 500 m above a 1 m donor column, so its centre in
+    that column is a difference of ~800 m terms resolved against 1/30 m layers.
+    """
+    op = _thin_column_case()
+    target = rm.Mesh(op.target.xy, op.target.triangles, np.r_[np.ones(3), 930.0])
+    op = rt.build_transfer(op.base, target, np.arange(3))
+    sigma = np.linspace(0.0, -1.0, 31)
+    with pytest.raises(ValueError, match="cannot be established"):
+        rt.apply_3d(op, np.ones((3, 30)), sigma, np.zeros(3), np.r_[np.zeros(3), 500.0])
+
+
+def test_r11_thin_candidate_does_not_abort_search():
+    """A thin triangle's bounding box covering another triangle's points (round 11 #2)."""
+    p = np.array([[0.0, 0.0], [100000018.0, 100000036.0], [100000005.0, 100000023.0]])
+    m = mesh(
+        np.vstack((p / 65536, [[100, 300], [110, 300], [100, 310]])),
+        [[0, 1, 2], [3, 4, 5]],
+        4.0,
+    )
+    rm.validate_topology(m)
+    op = rt.build_transfer(m, m, np.arange(6))
+    assert (op.node_copy == np.arange(6)).all()
+    rt.check(op, np.arange(6.0))
+
+
+def test_r11_float16_depths_strict_errors():
+    """The depth range check promotes float16 instead of narrowing its bound."""
+    b = mesh([[0, 0], [1, 0], [0, 1]], [[0, 1, 2]], 4.0)
+    b16 = rm.Mesh(b.xy, b.triangles, np.full(3, 4.0, dtype=np.float16))
+    with np.errstate(over="raise", invalid="raise"):
+        rt.build_transfer(b16, b16, np.arange(3))
+        with pytest.raises(ValueError, match="physical range"):
+            deep = rm.Mesh(b.xy, b.triangles, np.full(3, 1e-4, dtype=np.float16))
+            rt.build_transfer(deep, deep, np.arange(3))

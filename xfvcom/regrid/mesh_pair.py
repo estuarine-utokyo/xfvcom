@@ -354,7 +354,12 @@ def r_factors(depths, edges):
     if (e < 0).any() or (e >= len(h)).any():
         raise ValueError("edges: node index outside the depth vector")
     pair = h[e]
-    return np.abs(pair[:, 0] - pair[:, 1]) / (pair[:, 0] + pair[:, 1])
+    # Scaled by the larger depth of each edge: both terms are then <= 1, so no
+    # finite depth can overflow the sum (round 11: 1e308 + 9e307 gave 0).
+    # Scaling by a power of two keeps every quotient exactly as unscaled.
+    _, exponent = np.frexp(pair.max(axis=1))
+    scaled = np.ldexp(pair, -exponent[:, None])
+    return np.abs(scaled[:, 0] - scaled[:, 1]) / (scaled[:, 0] + scaled[:, 1])
 
 
 def to_one_based(indices):

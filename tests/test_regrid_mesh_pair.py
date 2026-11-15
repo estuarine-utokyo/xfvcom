@@ -562,3 +562,11 @@ def test_r10_map_helpers_refuse_malformed_maps(call):
 
     with pytest.raises(ValueError):
         call(mp, _square())
+
+
+def test_r11_r_factors_no_sum_overflow():
+    """Finite depths whose sum overflows still give |a-b|/(a+b) (round 11 #4)."""
+    with np.errstate(over="raise", invalid="raise", under="raise"):
+        r = rm.r_factors(np.array([1e308, 9e307]), np.array([[0, 1]]))
+    assert r[0] == pytest.approx(1 / 19, rel=1e-15)
+    assert rm.r_factors(np.array([3.0, 6.0]), np.array([[0, 1]]))[0] == 1 / 3
