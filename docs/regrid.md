@@ -54,3 +54,11 @@ The implementation modules use relative imports and can be loaded individually
 from source bytes under a private package without executing `xfvcom/__init__.py`.
 Application manifests, publication receipts, bundle paths and provenance belong
 to the consuming application.
+
+`inputs` carries grid-dependent FVCOM inputs to the refined mesh by node
+renumbering only: `reindex_river_namelist` rewrites `RIVER_GRID_LOCATION` of
+every `&NML_RIVER` block (plain integers only, comments kept) and
+`reindex_obc_netcdf` writes a copy of an open-boundary file with `obc_nodes`
+renumbered and every other variable, attribute and dimension compared equal
+after writing. A source node removed by the map is refused; the destination is
+never overwritten.
