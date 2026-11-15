@@ -313,16 +313,28 @@ def _beyond_ties(d, first, min_edge, margin):
     return d - d0 > bound
 
 
-def _nearest(adjacency, inside, start, limit, min_edge, margin):
-    """Reverse Dijkstra from ``start``: every inside node within the tie band.
+def _nearest(graph, starts, max_distance, margin=0.0):
+    """Reverse Dijkstra from ``starts`` [(distance, hops, node)]: the tie band.
 
-    The search also continues through inside nodes, so a candidate reached
-    behind another is still enumerated when the tie band covers it.
+    Before any inside node is found the search stops only beyond
+    ``max_distance`` plus the rounding a path of that length can carry; once
+    one is found it continues -- past the limit if need be (round 14) --
+    until no longer path can enter the first one's tie band, also through
+    inside nodes. Whether the chosen donor is within ``max_distance`` is the
+    caller's decision, made after the choice is certified.
     """
-    queue, seen, found = [(0.0, 0, int(start))], set(), []
+    adjacency, inside, min_edge = graph
+    queue = [(float(d), int(h), int(v)) for d, h, v in starts]
+    heapq.heapify(queue)
+    seen, found = set(), []
     while queue:
         d, hops, a = heapq.heappop(queue)
-        if d > limit or (found and _beyond_ties(d, found[0], min_edge, margin)):
+        if found:
+            if _beyond_ties(d, found[0], min_edge, margin):
+                break
+        elif (
+            d - max_distance > 4 * _UNIT_ROUNDOFF * (d / min_edge + 2) * d + 2 * margin
+        ):
             break
         if a in seen:
             continue
@@ -335,12 +347,8 @@ def _nearest(adjacency, inside, start, limit, min_edge, margin):
     return found
 
 
-def _paths(mesh, inside, max_distance=math.inf):
-    """Nearest inside node of every node along refined edges (ties: lowest ID).
-
-    Also returns, per outside node, every candidate (distance, donor, hops)
-    within the tie band, from which the element anchors are chosen.
-    """
+def _graph(mesh, inside):
+    """Refined-edge adjacency with float lengths, the inside mask, the shortest edge."""
     adjacency = [[] for _ in mesh.xy]
     min_edge = math.inf
     for a, b in _mesh_module().mesh_edges(mesh.triangles):
@@ -351,17 +359,23 @@ def _paths(mesh, inside, max_distance=math.inf):
         min_edge = min(min_edge, length)
         adjacency[a].append((b, length))
         adjacency[b].append((a, length))
-    inside = np.asarray(inside, dtype=bool)
+    return adjacency, np.asarray(inside, dtype=bool), min_edge
+
+
+def _paths(mesh, inside, max_distance=math.inf):
+    """Nearest inside node of every node along refined edges (ties: lowest ID).
+
+    Also returns the search graph, from which the element anchors are searched
+    directly from their centroids.
+    """
+    graph = _graph(mesh, inside)
+    inside = graph[1]
     distance = np.where(inside, 0.0, np.inf)
     donor = np.where(inside, np.arange(len(mesh.xy)), -1)
-    candidates = {}
-    # an anchor adds the rounding of its centroid: 2u of the largest coordinate
-    margin = 2 * _UNIT_ROUNDOFF * float(np.abs(np.asarray(mesh.xy)).max(initial=0.0))
-    limit = max_distance * (1 + 1e-9) + 1e-12
     for i in np.flatnonzero(~inside):
-        candidates[int(i)] = _nearest(adjacency, inside, i, limit, min_edge, margin)
-        donor[i], distance[i], _ = _choose(candidates[int(i)], f"node {i}")
-    return donor, distance, candidates
+        found = _nearest(graph, [(0.0, 0, i)], max_distance)
+        donor[i], distance[i], _ = _choose(found, f"node {i}")
+    return donor, distance, graph
 
 
 def _matrix(rows, nbase):
@@ -440,8 +454,8 @@ def _horizontal_geometry(base, target, node_map, max_distance):
     for v in np.flatnonzero(nm >= 0):
         e, k = first_incident[int(v)]
         triangle[nm[v]], bary[nm[v]] = e, np.eye(3)[k]
-    donor, distance, candidates = _paths(target, triangle >= 0, max_distance)
-    return nc, triangle, bary, donor, distance, candidates
+    donor, distance, graph = _paths(target, triangle >= 0, max_distance)
+    return nc, triangle, bary, donor, distance, graph
 
 
 def _nodes(base, target, geometry, max_distance):
@@ -497,7 +511,7 @@ def _nodes(base, target, geometry, max_distance):
 
 
 def _elements(base, target, em, geometry, max_distance):
-    _, triangle, bary, donor, distance, candidates = geometry
+    _, triangle, bary, donor, distance, graph = geometry
     ec = np.full(len(target.triangles), -1, dtype=int)
     ec[em[em >= 0]] = np.flatnonzero(em >= 0)
     # Area share at a base vertex = incident triangle area / all incident areas.
@@ -516,19 +530,23 @@ def _elements(base, target, em, geometry, max_distance):
     ad = np.zeros(len(centroids))
     anchored = np.flatnonzero((ct < 0) & (ec < 0))
     for i in anchored:
-        # every candidate of every vertex (an inside vertex is its own),
-        # reached from the centroid by one more edge
-        choices = []
-        for v in target.triangles[i]:
-            to_vertex = math.hypot(
-                float(centroids[i, 0]) - float(target.xy[v, 0]),
-                float(centroids[i, 1]) - float(target.xy[v, 1]),
-            )
-            for d, source, h in candidates.get(int(v), [(0.0, int(v), 0)]):
-                choices.append((to_vertex + d, int(source), h + 1))
-        # the centroid is rounded to float64: its position errs by about
-        # 2u of its largest coordinate
+        # searched directly from the centroid through its three vertices
+        # (round 14: vertex-level pruning missed the centroid's wider band);
+        # the centroid is rounded to float64: its position errs by about 2u
+        # of its largest coordinate
         offset = 2 * _UNIT_ROUNDOFF * float(np.abs(centroids[i]).max())
+        starts = [
+            (
+                math.hypot(
+                    float(centroids[i, 0]) - float(target.xy[v, 0]),
+                    float(centroids[i, 1]) - float(target.xy[v, 1]),
+                ),
+                1,
+                int(v),
+            )
+            for v in target.triangles[i]
+        ]
+        choices = _nearest(graph, starts, max_distance, offset)
         anchors[i], ad[i], _ = _choose(choices, f"element {i}", offset)
         if not np.isfinite(ad[i]) or ad[i] > max_distance:
             raise ValueError(

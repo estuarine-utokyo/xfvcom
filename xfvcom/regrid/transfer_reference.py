@@ -74,6 +74,7 @@ def independent_evaluate(
         sigma = [float(x) for x in sigma]  # float64 working type throughout
     polygons = np.asarray(base.xy, dtype=float)[base.triangles]
     lower, upper = polygons.min(axis=1), polygons.max(axis=1)
+    size = (upper - lower).max(axis=1)
     rational = []
     for vertices in polygons:
         a, b, c = [[Fraction(float(x)) for x in p] for p in vertices]
@@ -84,10 +85,13 @@ def independent_evaluate(
     def find(point):
         # Bounding boxes only accelerate the search. Solve the translated 2x2
         # system by exact rational elimination, without production determinants.
-        # A point may be exact (Fractions: an element centroid); the boxes,
-        # widened by a relative 1e-12, only preselect.
+        # A point may be exact (Fractions: an element centroid). The boxes only
+        # preselect: a point the clipping rule accepts has every weight above
+        # about -1e-12, so it lies within 1e-12 of the triangle's size outside
+        # it; padding by 1e-11 of the box size, plus one spacing of the rounded
+        # query, keeps every such triangle (round 14).
         x, y = (float(c) for c in point)
-        pad = 1e-12 * (abs(x) + abs(y) + 1.0)
+        pad = 1e-11 * size + np.spacing(max(abs(x), abs(y)))
         possible = np.flatnonzero(
             (lower[:, 0] <= x + pad)
             & (upper[:, 0] >= x - pad)
@@ -156,13 +160,16 @@ def independent_evaluate(
         queue = [(d, hop, int(v)) for d, v, hop in starts]
         heapq.heapify(queue)
         visited, found = set(), []
-        limit = max_distance * (1 + 1e-9) + 1e-12
         while queue:
             distance, hop, v = heapq.heappop(queue)
             if v in visited:
                 continue
             visited.add(v)
-            if distance > limit:
+            # Until an anchor is found, stop only beyond the limit plus the
+            # rounding such a path can carry; once one is found, complete its
+            # tie band even past the limit (round 14), then apply the limit.
+            reach = 4 * unit * (distance / shortest_edge + 2) * distance
+            if not found and distance - max_distance > reach + 2 * point_error:
                 break
             if found:
                 # a path this long has at most distance / shortest-edge hops:
@@ -179,6 +186,8 @@ def independent_evaluate(
         if not found:
             raise ValueError("Independent evaluator: no anchor within max_distance")
         best = min(found)
+        if best[0] > max_distance:
+            raise ValueError("Independent evaluator: no anchor within max_distance")
         close = [
             c
             for c in found

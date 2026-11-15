@@ -313,7 +313,11 @@ def test_outside_path_anchor_limit_and_ties():
         np.linalg.norm(centroid - [1, 0])
     )
     assert op.element_matrix[2, 0] == 1 and op.element_matrix[2, 1] == 0
-    for limit in (0.1, 0.2):  # .1 rejects node; .2 accepts node but rejects centroid
+    # .1 rejects node; .2 accepts node but rejects centroid; one float step
+    # below the anchor's distance the anchor is found (within rounding reach)
+    # and refused by the limit itself
+    just_below = float(np.nextafter(op.element_report["anchor_distances_m"][2], 0))
+    for limit in (0.1, 0.2, just_below):
         with pytest.raises(ValueError, match="max_distance"):
             rt.build_transfer(*pair, max_distance=limit)
     # Exact edge-path tie: equidistant endpoints; centroid tie as well.
@@ -1005,8 +1009,8 @@ MUTATIONS = [
     ),
     (
         "across-land",
-        "donor, distance, candidates = _paths(target, triangle >= 0, max_distance)",
-        "donor, distance, candidates = _paths(target, triangle >= 0, max_distance)\n    donor[triangle < 0] = [int(np.argmin(np.linalg.norm(target.xy - p, axis=1) + np.where(triangle >= 0, 0., np.inf))) for p in target.xy[triangle < 0]]",
+        "donor, distance, graph = _paths(target, triangle >= 0, max_distance)",
+        "donor, distance, graph = _paths(target, triangle >= 0, max_distance)\n    donor[triangle < 0] = [int(np.argmin(np.linalg.norm(target.xy - p, axis=1) + np.where(triangle >= 0, 0., np.inf))) for p in target.xy[triangle < 0]]",
         "test_outside_path_anchor_limit_and_ties",
         False,
     ),
@@ -1040,8 +1044,8 @@ MUTATIONS = [
     ),
     (
         "new-inside-donor",
-        "donor, distance, candidates = _paths(target, triangle >= 0, max_distance)",
-        "donor, distance, candidates = _paths(target, nc >= 0, max_distance)",
+        "donor, distance, graph = _paths(target, triangle >= 0, max_distance)",
+        "donor, distance, graph = _paths(target, nc >= 0, max_distance)",
         "test_outside_donor_can_be_new_inside_node",
         False,
     ),
@@ -1904,7 +1908,51 @@ def test_r13_search_cutoff_covers_the_tie_band():
         [(0, longer / (1 + 1.07e-9))],
     ]
     inside = np.array([False, False, False, True, True])
-    found = rt._nearest(adjacency, inside, 0, math.inf, 1e-6, 0.0)
+    found = rt._nearest((adjacency, inside, 1e-6), [(0.0, 0, 0)], math.inf)
     assert {v for _, v, _ in found} == {3, 4}
     # with the hops actually taken, the two are ordered: the shorter wins
     assert rt._choose(found, "node 0")[0] == 4
+
+
+def test_r14_reference_boxes_keep_accepted_boundary_points():
+    """A point 5e-11 m outside a 200 m triangle: both implementations interpolate."""
+    b = mesh([[0, 0], [200, 0], [0, 200]], [[0, 1, 2]], 4.0)
+    t = mesh(np.vstack((b.xy, [-5e-11, 0.25])), [[0, 1, 2], [0, 2, 3]], 4.0)
+    rm.validate_topology(t)
+    op = rt.build_transfer(b, t, np.arange(3))
+    field = np.array([0.0, 0.0, 1.0])
+    assert rt.apply_2d(op, field)[-1] == pytest.approx(0.00125, rel=1e-9, abs=0)
+    rt.check(op, field)
+
+
+def test_r14_tie_band_completed_past_the_distance_limit():
+    """The tie band is enumerated beyond max_distance before the limit is applied."""
+    longer = 3.0
+    short = longer / (1 + 1.07e-9)
+    adjacency = [
+        [(1, 1.0), (4, short)],
+        [(0, 1.0), (2, 1.0)],
+        [(1, 1.0), (3, 1.0)],
+        [(2, 1.0)],
+        [(0, short)],
+    ]
+    inside = np.array([False, False, False, True, True])
+    found = rt._nearest((adjacency, inside, 1e-6), [(0.0, 0, 0)], short)
+    assert {v for _, v, _ in found} == {3, 4}
+
+
+def test_r14_anchor_searched_from_the_centroid():
+    """A centroid's two donors within its (wider) tie band are both seen: refused."""
+    a = 2e-6
+    b2 = a + 2e-13
+    xy = np.array(
+        [[-a, 0], [-a, -b2], [0, -b2], [0, -2 * b2], [0, 0], [300, 0], [0, 1.0]]
+    )
+    base = mesh(xy[:4], [[0, 1, 2], [1, 3, 2]], 4.0)
+    target = mesh(
+        xy, [[0, 1, 2], [1, 3, 2], [0, 2, 4], [0, 4, 6], [2, 5, 4], [4, 5, 6]], 4.0
+    )
+    rm.validate_topology(base)
+    rm.validate_topology(target)
+    with pytest.raises(ValueError, match="ambiguous"):
+        rt.build_transfer(base, target, np.arange(4))
