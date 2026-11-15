@@ -1009,14 +1009,14 @@ MUTATIONS = [
     ),
     (
         "across-land",
-        "donor, distance, graph = _paths(target, triangle >= 0, max_distance)",
-        "donor, distance, graph = _paths(target, triangle >= 0, max_distance)\n    donor[triangle < 0] = [int(np.argmin(np.linalg.norm(target.xy - p, axis=1) + np.where(triangle >= 0, 0., np.inf))) for p in target.xy[triangle < 0]]",
+        "donor, distance, graph = _paths(target, triangle >= 0, max_distance, geometry[3])",
+        "donor, distance, graph = _paths(target, triangle >= 0, max_distance, geometry[3])\n    donor[triangle < 0] = [int(np.argmin(np.linalg.norm(target.xy - p, axis=1) + np.where(triangle >= 0, 0., np.inf))) for p in target.xy[triangle < 0]]",
         "test_outside_path_anchor_limit_and_ties",
         False,
     ),
     (
         "anchor-tie",
-        'anchors[i], ad[i], _ = _choose(choices, f"element {i}", offset)',
+        'anchors[i], ad[i], _ = _choose(choices, f"element {i}", offset, graph[2])',
         "anchors[i], ad[i] = max((c for c in choices if c[0] == min(choices)[0]), key=lambda c: c[1])[1], min(choices)[0]",
         "test_outside_path_anchor_limit_and_ties",
         False,
@@ -1030,8 +1030,8 @@ MUTATIONS = [
     ),
     (
         "anchor-across-land",
-        'anchors[i], ad[i], _ = _choose(choices, f"element {i}", offset)',
-        'anchors[i], ad[i], _ = _choose(choices, f"element {i}", offset)\n        anchors[i] = int(np.argmin(np.linalg.norm(target.xy - centroids[i], axis=1) + np.where(triangle >= 0, 0., np.inf)))',
+        'anchors[i], ad[i], _ = _choose(choices, f"element {i}", offset, graph[2])',
+        'anchors[i], ad[i], _ = _choose(choices, f"element {i}", offset, graph[2])\n        anchors[i] = int(np.argmin(np.linalg.norm(target.xy - centroids[i], axis=1) + np.where(triangle >= 0, 0., np.inf)))',
         "test_anchor_reaches_inside_via_outside_vertices",
         False,
     ),
@@ -1044,8 +1044,8 @@ MUTATIONS = [
     ),
     (
         "new-inside-donor",
-        "donor, distance, graph = _paths(target, triangle >= 0, max_distance)",
-        "donor, distance, graph = _paths(target, nc >= 0, max_distance)",
+        "donor, distance, graph = _paths(target, triangle >= 0, max_distance, geometry[3])",
+        "donor, distance, graph = _paths(target, nc >= 0, max_distance, geometry[3])",
         "test_outside_donor_can_be_new_inside_node",
         False,
     ),
@@ -1976,3 +1976,52 @@ def test_r15_element_operator_ignores_ambiguous_node_donor():
         base, target, nm, em, np.array([7.0]), location="element"
     )
     np.testing.assert_array_equal(matrix @ np.array([7.0]), expected)
+
+
+def test_r16_discarded_many_edge_route_is_not_trusted():
+    """A shorter many-edge route to donor a, discarded by the search, must not let b win.
+
+    Exact lengths: the 1000-edge chain to a is 2.86e-14 m shorter than the
+    direct edge to b. Choosing b (value 20) is wrong; a (10) or an explicit
+    ambiguity refusal is right (round 16).
+    """
+    n = 1000
+    x = np.linspace(0.0, 30.0, n + 1)
+    chain = np.column_stack((x, 0.2 * x)) + 64.0
+    length = math.hypot(*(chain[-1] - chain[0]))
+    u = (chain[-1] - chain[0]) / length
+    normal = np.array([-u[1], u[0]])
+    radius = math.sqrt(2 * length * 1e-5 - 1e-10 + 2 * length * 2e-14)
+    xy = np.vstack(
+        (
+            chain,
+            np.array([15.015, 3.003]) + 64.0 + normal * 1.5e-6,
+            chain[-1] - u * 1e-5 - normal * radius,
+            chain[-1] + u * 0.001,
+        )
+    )
+    a, d, b, c = n, n + 1, n + 2, n + 3
+    triangles = np.array(
+        [[i, i + 1, d] for i in range(n)]
+        + [[i, b, i + 1] for i in range(n)]
+        + [[a, b, c]]
+    )
+    target = rm.Mesh(xy, triangles, np.full(len(xy), 4.0))
+    base = rm.Mesh(xy[[a, b, c]], np.array([[0, 1, 2]]), np.full(3, 4.0))
+    node_map = np.array([a, b, c])
+    rm.validate_topology(base)
+    rm.validate_topology(target)
+    try:
+        op = rt.build_transfer(base, target, node_map)
+    except ValueError as exc:
+        assert "ambiguous" in str(exc)
+        return
+    assert rt.apply_2d(op, np.array([10.0, 20.0, 30.0]))[0] == 10.0
+
+
+def test_r16_graph_built_once(monkeypatch):
+    calls = []
+    original = rt._graph
+    monkeypatch.setattr(rt, "_graph", lambda *a: calls.append(1) or original(*a))
+    rt.build_transfer(*synthetic_pair())
+    assert len(calls) == 1

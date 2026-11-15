@@ -192,7 +192,10 @@ def independent_evaluate(
             c
             for c in found
             if abs(c[0] - best[0])
-            <= 4 * unit * (c[2] + best[2] + 2) * max(c[0], best[0]) + 2 * point_error
+            # every route that could be shortest: at most length / shortest edge
+            # edges each (round 16), not the hop count of the route kept
+            <= 4 * unit * ((c[0] + best[0]) / shortest_edge + 2) * max(c[0], best[0])
+            + 2 * point_error
         ]
         if any(c[0] != best[0] for c in close if c[1] != best[1]):
             raise ValueError("Independent evaluator: ambiguous anchor (rounding band)")

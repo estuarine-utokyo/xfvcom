@@ -265,20 +265,29 @@ def _locate(mesh, points, exact_points=None):
     return ids, weights
 
 
-def _tied(a, b, offset_error):
+def _tied(a, b, offset_error, min_edge=None):
     """Whether two computed path lengths (d, node, hops) cannot be ordered.
 
     Each edge length (a rounded coordinate difference and hypot) and each
     addition along a path rounds by at most about 2u of the path length, so a
-    path of h edges is within 4u (h + 1) d of its exact length; ``offset_error``
-    adds the rounding of a query point that is itself rounded (a centroid).
+    path of h edges is within 4u (h + 1) d of its exact length. The bound must
+    hold for EVERY route that could be the shortest to that node, not only the
+    one the search kept (round 16: a discarded many-edge route was truly
+    shorter), so h is bounded by d / min_edge, the most edges a path of length
+    d can have. ``offset_error`` adds the rounding of a query point that is
+    itself rounded (a centroid). Without ``min_edge`` (unit tests only) the
+    kept routes' hop counts are used.
     """
     u = _UNIT_ROUNDOFF
-    bound = 4 * u * (a[2] + b[2] + 2) * max(a[0], b[0]) + 2 * offset_error
+    if min_edge is None:
+        hops = a[2] + b[2]
+    else:
+        hops = (a[0] + b[0]) / min_edge
+    bound = 4 * u * (hops + 2) * max(a[0], b[0]) + 2 * offset_error
     return abs(a[0] - b[0]) <= bound
 
 
-def _choose(found, label, offset_error=0.0):
+def _choose(found, label, offset_error=0.0, min_edge=None):
     """The donor among (distance, node, hops) candidates, or refuse an ambiguous one.
 
     Candidates whose lengths differ by less than their rounding bound are
@@ -290,7 +299,7 @@ def _choose(found, label, offset_error=0.0):
     if not found:
         return -1, math.inf, 0
     best = min(found)
-    close = [c for c in found if _tied(c, best, offset_error)]
+    close = [c for c in found if _tied(c, best, offset_error, min_edge)]
     if any(d != best[0] for d, v, _ in close if v != best[1]):
         raise ValueError(
             f"{label}: donors {sorted({int(v) for _, v, _ in close})} have water-path "
@@ -362,19 +371,20 @@ def _graph(mesh, inside):
     return adjacency, np.asarray(inside, dtype=bool), min_edge
 
 
-def _paths(mesh, inside, max_distance=math.inf):
+def _paths(mesh, inside, max_distance=math.inf, graph=None):
     """Nearest inside node of every node along refined edges (ties: lowest ID).
 
-    Also returns the search graph, from which the element anchors are searched
-    directly from their centroids.
+    ``graph`` (from ``_graph``) is reused when it was built for the same
+    inside mask; it is returned for the element anchors.
     """
-    graph = _graph(mesh, inside)
-    inside = graph[1]
+    inside = np.asarray(inside, dtype=bool)
+    if graph is None or not np.array_equal(graph[1], inside):
+        graph = _graph(mesh, inside)
     distance = np.where(inside, 0.0, np.inf)
     donor = np.where(inside, np.arange(len(mesh.xy)), -1)
     for i in np.flatnonzero(~inside):
         found = _nearest(graph, [(0.0, 0, i)], max_distance)
-        donor[i], distance[i], _ = _choose(found, f"node {i}")
+        donor[i], distance[i], _ = _choose(found, f"node {i}", 0.0, graph[2])
     return donor, distance, graph
 
 
@@ -462,7 +472,7 @@ def _horizontal_geometry(base, target, node_map, max_distance):
 
 def _nodes(base, target, geometry, max_distance):
     nc, triangle, bary, _ = geometry
-    donor, distance, graph = _paths(target, triangle >= 0, max_distance)
+    donor, distance, graph = _paths(target, triangle >= 0, max_distance, geometry[3])
     outside = np.flatnonzero(triangle < 0)
     if (distance[outside] > max_distance).any():
         raise ValueError(
@@ -550,7 +560,7 @@ def _elements(base, target, em, geometry, max_distance):
             for v in target.triangles[i]
         ]
         choices = _nearest(graph, starts, max_distance, offset)
-        anchors[i], ad[i], _ = _choose(choices, f"element {i}", offset)
+        anchors[i], ad[i], _ = _choose(choices, f"element {i}", offset, graph[2])
         if not np.isfinite(ad[i]) or ad[i] > max_distance:
             raise ValueError(
                 "Outside centroid anchor exceeds max_distance or is disconnected"
