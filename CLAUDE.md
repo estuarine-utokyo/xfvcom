@@ -151,6 +151,7 @@ GWO CSV → GWOReader → GapFiller → MetNetCDFGenerator → met.nc
 | `xfvcom/plot/` | `FvcomPlotter`, `FvcomPlotConfig` | Visualization engine and styling |
 | `xfvcom/coastmask/` | (deprecation shim) | Re-exports `CoastMask`, `CoastmaskConfig` from the standalone `xcoast` package — see https://github.com/estuarine-utokyo/xcoast |
 | `xfvcom/dye_timeseries.py` | `DyeCase`, `Selection`, `aggregate()` | Multi-member ensemble aggregation |
+| `xfvcom/regrid/` | `Mesh`, `Transfer`, `check` | Mesh correspondence, bounded field transfer and independent verification; see `docs/regrid.md` |
 | `xfvcom/grid/` | `FvcomGrid` | Area calculations (median-dual, triangle sum) |
 | `xfvcom/cli/` | CLI entry points | Command-line tools (`xfvcom-*`) |
 
