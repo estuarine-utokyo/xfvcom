@@ -122,8 +122,10 @@ def independent_evaluate(
                 return int(e), [float(w) for w in clipped]
         return -1, None
 
-    # This is intentionally not the production multi-source shortest-path walk.
-    # Every outside query starts a fresh search from its own vertex/vertices.
+    # Like production, every outside query starts its own reverse search (its
+    # node, or a centroid's three vertices). Separately coded; the shared
+    # ASSUMPTIONS are the edge-path metric, the rounding tie band and the
+    # search cutoff derived from the shortest edge.
     membership = [find(p) for p in target.xy]
     vertex_triangle = {}
     for e, tri in enumerate(base.triangles):
@@ -148,22 +150,29 @@ def independent_evaluate(
     # plus twice the rounding of a rounded query point. Bit-equal ties go to
     # the lowest ID; other ties are refused, as in production.
     unit = 2.0**-53
+    shortest_edge = min(min(n.values()) for n in neighbours if n)
 
     def anchor(starts, point_error=0.0):
         queue = [(d, hop, int(v)) for d, v, hop in starts]
         heapq.heapify(queue)
-        visited, found, bound = set(), [], max_distance * (1 + 1e-9) + 1e-12
+        visited, found = set(), []
+        limit = max_distance * (1 + 1e-9) + 1e-12
         while queue:
             distance, hop, v = heapq.heappop(queue)
             if v in visited:
                 continue
             visited.add(v)
-            if distance > bound:
+            if distance > limit:
                 break
+            if found:
+                # a path this long has at most distance / shortest-edge hops:
+                # beyond this nothing can enter the tie band of the first
+                d0, _, h0 = found[0]
+                band = 4 * unit * (h0 + distance / shortest_edge + 2) * distance
+                if distance - d0 > band + 2 * point_error:
+                    break
             if membership[v][0] >= 0:
                 found.append((distance, v, hop))
-                bound = min(bound, found[0][0] * (1 + 1e-9) + 1e-12)
-                continue
             for neighbour, length in neighbours[v].items():
                 if neighbour not in visited:
                     heapq.heappush(queue, (distance + length, hop + 1, neighbour))

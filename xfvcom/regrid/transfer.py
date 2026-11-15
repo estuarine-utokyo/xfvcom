@@ -235,13 +235,19 @@ def _locate(mesh, points, exact_points=None):
     """
     p = np.asarray(mesh.xy, dtype=float)[mesh.triangles]
     lo, hi = p.min(axis=1), p.max(axis=1)
-    slack = 4 * np.finfo(np.float64).eps * (np.abs(p).max(axis=1) + 1.0)
+    # A point accepted by the clipping rule lies within 1e-12 (in weights) of
+    # its triangle, i.e. within 1e-12 of the triangle's extent outside it:
+    # boxes padded by 1e-11 of the extent are a superset of every accepted
+    # point (round 13); the query's own rounding is added per point below.
+    slack = 1e-11 * (hi - lo).max(axis=1)[:, None]
     ids = np.full(len(points), -1, dtype=int)
     weights = np.zeros((len(points), 3))
     tolerance = Fraction(1, 10**12)
     for i, q in enumerate(points):
         exact_q = exact_points[i] if exact_points is not None else q
-        candidates = np.flatnonzero(((q >= lo - slack) & (q <= hi + slack)).all(axis=1))
+        # a rounded query (a centroid) is within one spacing of the exact one
+        pad = slack + np.spacing(np.abs(q))
+        candidates = np.flatnonzero(((q >= lo - pad) & (q <= hi + pad)).all(axis=1))
         for e in candidates:
             # A point is in a candidate when clipping its exact weights onto
             # the triangle moves them by at most 1e-12 (a boundary point is
@@ -294,21 +300,35 @@ def _choose(found, label, offset_error=0.0):
     return min(v for d, v, _ in close if d == best[0]), best[0], best[2]
 
 
-def _nearest(adjacency, inside, start, limit):
-    """Reverse Dijkstra from ``start`` to the inside nodes near the shortest path."""
-    queue, seen, found, bound = [(0.0, 0, int(start))], set(), [], limit
+def _beyond_ties(d, first, min_edge, margin):
+    """Whether every path of length >= d is outside the tie band of ``first``.
+
+    A path of length d has at most d / min_edge edges, so its rounding bound
+    is at most 4u (h0 + d / min_edge + 2) d; ``margin`` adds the rounding of a
+    rounded query point (an element centroid) for the anchors built on these
+    candidates (round 13: a fixed relative cutoff could drop a tied path).
+    """
+    d0, _, h0 = first
+    bound = 4 * _UNIT_ROUNDOFF * (h0 + d / min_edge + 2) * d + 2 * margin
+    return d - d0 > bound
+
+
+def _nearest(adjacency, inside, start, limit, min_edge, margin):
+    """Reverse Dijkstra from ``start``: every inside node within the tie band.
+
+    The search also continues through inside nodes, so a candidate reached
+    behind another is still enumerated when the tie band covers it.
+    """
+    queue, seen, found = [(0.0, 0, int(start))], set(), []
     while queue:
         d, hops, a = heapq.heappop(queue)
-        if d > bound:
+        if d > limit or (found and _beyond_ties(d, found[0], min_edge, margin)):
             break
         if a in seen:
             continue
         seen.add(a)
         if inside[a]:
             found.append((d, a, hops))
-            # far beyond any rounding bound (relative 1e-9)
-            bound = min(bound, found[0][0] * (1 + 1e-9) + 1e-12)
-            continue  # anything beyond an inside node is an edge farther
         for b, length in adjacency[a]:
             if b not in seen:
                 heapq.heappush(queue, (d + length, hops + 1, b))
@@ -316,24 +336,32 @@ def _nearest(adjacency, inside, start, limit):
 
 
 def _paths(mesh, inside, max_distance=math.inf):
-    """Nearest inside node of every node along refined edges (ties: lowest ID)."""
+    """Nearest inside node of every node along refined edges (ties: lowest ID).
+
+    Also returns, per outside node, every candidate (distance, donor, hops)
+    within the tie band, from which the element anchors are chosen.
+    """
     adjacency = [[] for _ in mesh.xy]
+    min_edge = math.inf
     for a, b in _mesh_module().mesh_edges(mesh.triangles):
         length = math.hypot(
             float(mesh.xy[a, 0]) - float(mesh.xy[b, 0]),
             float(mesh.xy[a, 1]) - float(mesh.xy[b, 1]),
         )
+        min_edge = min(min_edge, length)
         adjacency[a].append((b, length))
         adjacency[b].append((a, length))
     inside = np.asarray(inside, dtype=bool)
     distance = np.where(inside, 0.0, np.inf)
     donor = np.where(inside, np.arange(len(mesh.xy)), -1)
-    hops = np.zeros(len(mesh.xy), dtype=int)
+    candidates = {}
+    # an anchor adds the rounding of its centroid: 2u of the largest coordinate
+    margin = 2 * _UNIT_ROUNDOFF * float(np.abs(np.asarray(mesh.xy)).max(initial=0.0))
     limit = max_distance * (1 + 1e-9) + 1e-12
     for i in np.flatnonzero(~inside):
-        found = _nearest(adjacency, inside, i, limit)
-        donor[i], distance[i], hops[i] = _choose(found, f"node {i}")
-    return donor, distance, hops
+        candidates[int(i)] = _nearest(adjacency, inside, i, limit, min_edge, margin)
+        donor[i], distance[i], _ = _choose(candidates[int(i)], f"node {i}")
+    return donor, distance, candidates
 
 
 def _matrix(rows, nbase):
@@ -412,8 +440,8 @@ def _horizontal_geometry(base, target, node_map, max_distance):
     for v in np.flatnonzero(nm >= 0):
         e, k = first_incident[int(v)]
         triangle[nm[v]], bary[nm[v]] = e, np.eye(3)[k]
-    donor, distance, hops = _paths(target, triangle >= 0, max_distance)
-    return nc, triangle, bary, donor, distance, hops
+    donor, distance, candidates = _paths(target, triangle >= 0, max_distance)
+    return nc, triangle, bary, donor, distance, candidates
 
 
 def _nodes(base, target, geometry, max_distance):
@@ -469,7 +497,7 @@ def _nodes(base, target, geometry, max_distance):
 
 
 def _elements(base, target, em, geometry, max_distance):
-    _, triangle, bary, donor, distance, hops = geometry
+    _, triangle, bary, donor, distance, candidates = geometry
     ec = np.full(len(target.triangles), -1, dtype=int)
     ec[em[em >= 0]] = np.flatnonzero(em >= 0)
     # Area share at a base vertex = incident triangle area / all incident areas.
@@ -479,24 +507,25 @@ def _elements(base, target, em, geometry, max_distance):
         for v in vertices:
             incident[v].append(e)
     vertex_area = np.array([area[es].sum() for es in incident])
-    centroids = target.xy[target.triangles].mean(axis=1)
-    ct, cb = _locate(base, centroids, _exact_centroids(target))
+    exact_centroids = _exact_centroids(target)
+    # correctly rounded exact centroids (a float mean can be far off when its
+    # sum cancels, round 13)
+    centroids = np.array([[float(c) for c in q] for q in exact_centroids])
+    ct, cb = _locate(base, centroids, exact_centroids)
     anchors = np.full(len(centroids), -1, dtype=int)
     ad = np.zeros(len(centroids))
     anchored = np.flatnonzero((ct < 0) & (ec < 0))
     for i in anchored:
-        choices = [
-            (
-                math.hypot(
-                    float(centroids[i, 0]) - float(target.xy[v, 0]),
-                    float(centroids[i, 1]) - float(target.xy[v, 1]),
-                )
-                + distance[v],
-                int(donor[v]),
-                int(hops[v]) + 1,
+        # every candidate of every vertex (an inside vertex is its own),
+        # reached from the centroid by one more edge
+        choices = []
+        for v in target.triangles[i]:
+            to_vertex = math.hypot(
+                float(centroids[i, 0]) - float(target.xy[v, 0]),
+                float(centroids[i, 1]) - float(target.xy[v, 1]),
             )
-            for v in target.triangles[i]
-        ]
+            for d, source, h in candidates.get(int(v), [(0.0, int(v), 0)]):
+                choices.append((to_vertex + d, int(source), h + 1))
         # the centroid is rounded to float64: its position errs by about
         # 2u of its largest coordinate
         offset = 2 * _UNIT_ROUNDOFF * float(np.abs(centroids[i]).max())
@@ -658,29 +687,39 @@ def _columns(op, location, sigma, base_zeta, target_zeta):
     bz, tz = raw_bz.astype(np.float64), raw_tz.astype(np.float64)
     nodal = (bh, bz, th, tz)
     u = _UNIT_ROUNDOFF
-    # absolute error bounds of the column inputs: exact for nodes; an element
-    # column is the node mean, whose rounding (two additions and a division)
-    # is below 4u times the mean magnitude
-    errors = [np.zeros(len(x)) for x in (bh, bz, th, tz)]
+    # Every NODAL water column must be positive, also when the columns used
+    # are element means: a mean can hide a dry or inverted node (round 13).
+    with np.errstate(over="ignore", invalid="ignore"):
+        nodal_depths = (bh + bz, th + tz)
+    _finite("column depths", *nodal_depths)
+    if any((d <= 0).any() for d in nodal_depths):
+        raise ValueError("Depth plus elevation must be positive in every column")
     if location == "element":
-        columns = []
-        for x, tri in (
-            (bh, op.base.triangles),
-            (bz, op.base.triangles),
-            (th, op.target.triangles),
-            (tz, op.target.triangles),
-        ):
-            columns.append((x[tri].mean(axis=1), 4 * u * np.abs(x[tri]).mean(axis=1)))
-        (bh, ebh), (bz, ebz), (th, eth), (tz, etz) = columns
+        # Element columns are node means of the elevation and of the water
+        # column, each an exactly rounded sum over three (no cancellation
+        # between separately rounded means, round 13): relative error <= 2u.
+        def mean(values, tri):
+            return np.array([math.fsum(values[v] for v in t) / 3 for t in tri])
+
+        def column(h, z, tri):
+            return np.array(
+                [math.fsum([*(h[v] for v in t), *(z[v] for v in t)]) / 3 for t in tri]
+            )
+
+        tb, tt = op.base.triangles, op.target.triangles
+        bz_e, tz_e = mean(bz, tb), mean(tz, tt)
+        base_depth, target_depth = column(bh, bz, tb), column(th, tz, tt)
+        bz, tz = bz_e, tz_e
+        ebz, etz = 2 * u * np.abs(bz), 2 * u * np.abs(tz)
+        base_error, target_error = 2 * u * base_depth, 2 * u * target_depth
         area = _areas(op.target)
     else:
-        ebh, ebz, eth, etz = errors
+        ebz, etz = np.zeros(len(bz)), np.zeros(len(tz))
+        base_depth, target_depth = nodal_depths
+        base_error, target_error = 2 * u * base_depth, 2 * u * target_depth
         area, third = np.zeros(len(th)), _areas(op.target) / 3
         for k in range(3):
             np.add.at(area, op.target.triangles[:, k], third)
-    with np.errstate(over="ignore", invalid="ignore"):
-        base_depth, target_depth = bh + bz, th + tz
-    _finite("column depths", base_depth, target_depth)
     if (base_depth <= 0).any() or (target_depth <= 0).any():
         raise ValueError("Depth plus elevation must be positive in every column")
     # Layer centres are kept RELATIVE TO THEIR OWN SURFACE (sigma times the
@@ -702,8 +741,6 @@ def _columns(op, location, sigma, base_zeta, target_zeta):
     # absolute error bounds of the relative centres (2u per rounding: slack for
     # the second-order terms); the centres themselves are rounded once
     centre_error = 2 * u * np.abs(centres)
-    base_error = ebh + ebz + 2 * u * base_depth
-    target_error = eth + etz + 2 * u * target_depth
     base_centre_error = (
         np.abs(centres) * base_error[:, None]
         + base_depth[:, None] * centre_error
@@ -828,6 +865,22 @@ def _uncertain(z, z_error, targets, target_error, j, t):
     near_end = (np.abs(targets - z[0]) <= target_error + z_error[0]) | (
         np.abs(targets - z[-1]) <= target_error + z_error[-1]
     )
+    # A target within its error of an INTERNAL centre may lie in the other
+    # bracket; that is harmless only if the error is negligible against the
+    # narrower of the two brackets around that centre (round 13).
+    spacing = z[:-1] - z[1:]
+    for c in (j, j + 1):
+        error = target_error + z_error[c]
+        internal = (c > 0) & (c < len(z) - 1)
+        narrow = np.minimum(
+            spacing[np.clip(c - 1, 0, len(spacing) - 1)],
+            spacing[np.clip(c, 0, len(spacing) - 1)],
+        )
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            risky = (narrow <= 2 * error) | (
+                2 * error / (narrow - 2 * error) > FRACTION_TOLERANCE
+            )
+        near_end |= internal & (np.abs(targets - z[c]) <= error) & risky
     numerator = z[j] - targets
     denominator = z[j] - z[j + 1]
     e_numerator = z_error[j] + target_error + 2 * u * np.abs(numerator)

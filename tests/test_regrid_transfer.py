@@ -1005,8 +1005,8 @@ MUTATIONS = [
     ),
     (
         "across-land",
-        "donor, distance, hops = _paths(target, triangle >= 0, max_distance)",
-        "donor, distance, hops = _paths(target, triangle >= 0, max_distance)\n    donor[triangle < 0] = [int(np.argmin(np.linalg.norm(target.xy - p, axis=1) + np.where(triangle >= 0, 0., np.inf))) for p in target.xy[triangle < 0]]",
+        "donor, distance, candidates = _paths(target, triangle >= 0, max_distance)",
+        "donor, distance, candidates = _paths(target, triangle >= 0, max_distance)\n    donor[triangle < 0] = [int(np.argmin(np.linalg.norm(target.xy - p, axis=1) + np.where(triangle >= 0, 0., np.inf))) for p in target.xy[triangle < 0]]",
         "test_outside_path_anchor_limit_and_ties",
         False,
     ),
@@ -1040,8 +1040,8 @@ MUTATIONS = [
     ),
     (
         "new-inside-donor",
-        "donor, distance, hops = _paths(target, triangle >= 0, max_distance)",
-        "donor, distance, hops = _paths(target, nc >= 0, max_distance)",
+        "donor, distance, candidates = _paths(target, triangle >= 0, max_distance)",
+        "donor, distance, candidates = _paths(target, nc >= 0, max_distance)",
         "test_outside_donor_can_be_new_inside_node",
         False,
     ),
@@ -1803,3 +1803,108 @@ def test_r12_shallow_identical_element_columns_accepted():
         op, field, sigma, np.full(3, -2.8), np.full(4, -2.8), location="element"
     )
     np.testing.assert_array_equal(got, np.tile(field, (3, 1)))
+
+
+def test_r13_internal_centre_crossing_computed_exactly():
+    """A target rounded across an INTERNAL centre next to a thin layer (round 13 #1)."""
+    op = _split_column(target_h=0.9999999999999999)
+    sigma = np.array([0.0, -0.5, -0.5000011, -0.5000022, -1.0])
+    bz = np.full(3, 0.40253340328616416)
+    tz = np.r_[bz, 0.4025334032861641]
+    field = np.tile([0.0, 1.0, 0.0, 0.0], (3, 1))
+    actual, _ = rt.apply_3d(op, field, sigma, bz, tz)
+    reference = rt.independent_evaluate(
+        op.base,
+        op.target,
+        op.node_map,
+        op.elem_map,
+        field,
+        sigma=sigma,
+        base_zeta=bz,
+        target_zeta=tz,
+    )
+    assert actual[-1, 2] == pytest.approx(reference[-1, 2], rel=1e-9, abs=0)
+    assert actual[-1, 2] > 1e-11
+    rt.check(op, field, sigma=sigma, base_zeta=bz, target_zeta=tz, actual=actual)
+
+
+def test_r13_cancelling_centroid_keeps_its_container():
+    """A centroid whose float mean cancels is located exactly (round 13 #2)."""
+    c = 1e-14 / 3
+    b = mesh(
+        [[c - 5e-17, -1e5], [c + 5e-17, 0], [c, 1e5], [c + 2e-16, 5e4]],
+        [[0, 1, 2], [1, 3, 2]],
+        1.0,
+    )
+    t = mesh(
+        [[1e-14, -1e-8], [100, 0], [-100, 0], [c, 50]], [[0, 1, 2], [2, 1, 3]], 1.0
+    )
+    op = rt.build_transfer(b, t, np.full(4, -1))
+    assert 0 not in op.element_report["outside_elements"]
+    rt.check(op, np.array([0.0, 1.0]), location="element")
+
+
+def test_r13_one_containment_policy():
+    """A point 1e-11 m outside, accepted by the clipping rule, in both (round 13 #3)."""
+    b = mesh([[0, 0], [200, 0], [0, 200]], [[0, 1, 2]], 4.0)
+    t = mesh(np.vstack((b.xy, [-1e-11, 50])), [[0, 1, 2], [0, 2, 3]], 4.0)
+    op = rt.build_transfer(b, t, np.arange(3))
+    field = np.array([0.0, 0.0, 1.0])
+    assert rt.apply_2d(op, field)[-1] == pytest.approx(0.25, abs=1e-12)
+    rt.check(op, field)
+
+
+def test_r13_nearly_dry_element_volume_exact():
+    """Element water columns are exact means of nodal columns (round 13 #4)."""
+    op = _split_column()
+    u = 2.0**-53
+    bz = np.array([-1 + u, -1 + u, -1 + 2 * u])
+    tz = np.r_[bz, -1 + u]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", rt.ExtensionWarning)
+        _, stats = rt.apply_3d(
+            op, np.ones((1, 2)), np.array([0.0, -0.5, -1.0]), bz, tz, location="element"
+        )
+    # nodal columns u, u, 2u and u at the new node: element columns u, 4u/3,
+    # 4u/3 on areas 1/8, 1/4, 1/8, total 5u/8 (separately rounded means of
+    # depth and elevation gave u/2)
+    assert stats["target_volume_m3"] == pytest.approx(0.625 * u, rel=1e-12, abs=0)
+    assert stats["clamping"]["fraction"] == pytest.approx(0.1, rel=1e-12, abs=0)
+
+
+@pytest.mark.parametrize("location", ["node", "element"])
+def test_r13_dry_node_refused_for_elements_too(location):
+    """A dry node is refused even where element means would be positive (round 13 #5)."""
+    op = _split_column()
+    bz = np.array([-1.0, 0.0, 0.0])
+    tz = np.r_[bz, 0.0]
+    n = 1 if location == "element" else 3
+    field = np.ones((n, 2))
+    sigma = np.array([0.0, -0.5, -1.0])
+    with pytest.raises(ValueError, match="positive in every column"):
+        rt.apply_3d(op, field, sigma, bz, tz, location=location)
+    with pytest.raises(ValueError, match="positive in every column"):
+        rt.check(
+            op, field, location=location, sigma=sigma, base_zeta=bz, target_zeta=tz
+        )
+
+
+def test_r13_search_cutoff_covers_the_tie_band():
+    """A candidate inside the tie band of a long path is enumerated (round 13 #6).
+
+    With the shortest edge 1e-6 m, a 3 m path may have 3e6 edges and its
+    rounding band exceeds 1e-9 relative; a fixed relative cutoff dropped it.
+    """
+    longer = 3.0
+    adjacency = [
+        [(1, 1.0), (4, longer / (1 + 1.07e-9))],
+        [(0, 1.0), (2, 1.0)],
+        [(1, 1.0), (3, 1.0)],
+        [(2, 1.0)],
+        [(0, longer / (1 + 1.07e-9))],
+    ]
+    inside = np.array([False, False, False, True, True])
+    found = rt._nearest(adjacency, inside, 0, math.inf, 1e-6, 0.0)
+    assert {v for _, v, _ in found} == {3, 4}
+    # with the hops actually taken, the two are ordered: the shorter wins
+    assert rt._choose(found, "node 0")[0] == 4
