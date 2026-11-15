@@ -79,8 +79,9 @@ def _physical_mesh(label, mesh):
         raise ValueError(
             f"{label}: a triangle smaller than {MIN_AREA_M2:g} m2 is outside the physical range"
         )
-    h = np.asarray(mesh.depths, dtype=np.float64)
-    if (h < DEPTH_RANGE_M[0]).any() or (h > DEPTH_RANGE_M[1]).any():
+    # compared in the input dtype, before any narrowing cast can overflow
+    h = np.asarray(mesh.depths)
+    if bool(((h < DEPTH_RANGE_M[0]) | (h > DEPTH_RANGE_M[1])).any()):
         raise ValueError(
             f"{label}: depths outside the physical range {DEPTH_RANGE_M} m"
         )
@@ -528,6 +529,10 @@ def apply_2d(op, field, *, location="node"):
 def _columns(op, location, sigma, base_zeta, target_zeta):
     sigma = np.asarray(sigma)
     _real(sigma, sigma.shape, "sigma")
+    # interfaces lie in [-1, 0]: checked in the input dtype, before the cast
+    # and the differences, which could otherwise overflow
+    if sigma.size and bool(((sigma < -1) | (sigma > 0)).any()):
+        raise ValueError("sigma: interfaces must lie in [-1, 0]")
     sigma = sigma.astype(np.float64)
     if (
         sigma.ndim != 1
@@ -551,7 +556,8 @@ def _columns(op, location, sigma, base_zeta, target_zeta):
     raw_tz = _real(target_zeta, th.shape, "target_zeta")
     # the range is tested in the input dtype, before a narrowing cast can overflow
     for label, z in (("base_zeta", raw_bz), ("target_zeta", raw_tz)):
-        if z.size and bool(np.abs(z).max() > ELEVATION_LIMIT_M):
+        # direct comparisons: abs() of the most negative integer is itself
+        if z.size and bool(((z < -ELEVATION_LIMIT_M) | (z > ELEVATION_LIMIT_M)).any()):
             raise ValueError(
                 f"{label}: outside the physical range |zeta| <= {ELEVATION_LIMIT_M:g} m"
             )

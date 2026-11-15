@@ -1496,3 +1496,32 @@ def test_r9_physical_range_refusals_under_strict_errors():
         zeta = np.full(4, np.longdouble("1e400"))
         with pytest.raises(ValueError, match="physical range"):
             rt.apply_3d(op, np.ones((4, 30)), SIGMA, zeta, np.zeros(5))
+
+
+@pytest.mark.parametrize("location", ["node", "element"])
+@pytest.mark.parametrize("which", ["base", "target"])
+def test_r10_minimum_signed_integer_elevation_refused(location, which):
+    op = rt.build_transfer(*synthetic_pair())
+    bz, tz = np.zeros(4), np.zeros(5)
+    if which == "base":
+        bz = np.full(4, -32768, dtype=np.int16)
+    else:
+        tz = np.full(5, -32768, dtype=np.int16)
+    n = 4 if location == "node" else 2
+    with pytest.raises(ValueError, match="physical range"):
+        rt.apply_3d(op, np.ones((n, 30)), SIGMA, bz, tz, location=location)
+
+
+def test_r10_wide_float_depths_and_sigma_refused_under_strict_errors():
+    b, t, nm, _ = synthetic_pair()
+    big = np.longdouble("1e400")
+    with np.errstate(over="raise", invalid="raise"):
+        deep = rm.Mesh(b.xy, b.triangles, np.full(len(b.xy), big))
+        with pytest.raises(ValueError):
+            rt.build_transfer(deep, t, nm)
+        op = rt.build_transfer(b, t, nm)
+        for sigma in (np.array([0, big, -1]), np.array([0.0, -1e308, 1e308, -1.0])):
+            with pytest.raises(ValueError, match="sigma"):
+                rt.apply_3d(
+                    op, np.ones((4, len(sigma) - 1)), sigma, np.zeros(4), np.zeros(5)
+                )

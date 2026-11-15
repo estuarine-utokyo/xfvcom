@@ -525,3 +525,40 @@ def test_r9_mesh_helpers_refuse_malformed_arrays(call):
 
     with pytest.raises(ValueError):
         call(mp)
+
+
+def _square():
+    from xfvcom.regrid import mesh_pair as mp
+
+    return mp.Mesh(
+        np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
+        np.array([[0, 1, 2], [0, 2, 3]]),
+        np.full(4, 4.0),
+    )
+
+
+def test_r10_r_factors_wide_float_refused():
+    from xfvcom.regrid import mesh_pair as mp
+
+    with np.errstate(over="raise", invalid="raise"), pytest.raises(ValueError):
+        mp.r_factors(np.full(2, np.longdouble("1e400")), np.array([[0, 1]]))
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda mp, sq: mp.reindex_one_based(np.array([1]), np.arange(4).reshape(2, 2)),
+        lambda mp, sq: mp.footprint_polygon(sq, np.array([-2, 1])),
+        lambda mp, sq: mp.validate_boundary_nodes(
+            np.array([0]), np.arange(4, dtype=float), sq, sq, "OBC"
+        ),
+        lambda mp, sq: mp.validate_boundary_nodes(
+            np.array([0]), np.array([4, 1, 2, 3]), sq, sq, "OBC"
+        ),
+    ],
+)
+def test_r10_map_helpers_refuse_malformed_maps(call):
+    from xfvcom.regrid import mesh_pair as mp
+
+    with pytest.raises(ValueError):
+        call(mp, _square())

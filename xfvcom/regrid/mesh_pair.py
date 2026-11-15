@@ -308,6 +308,10 @@ def footprint_polygon(base, elem_map):
     em = _integers(elem_map, "elem_map")
     if em.shape != (len(base.triangles),):
         raise ValueError("elem_map shape must be (number of base elements,)")
+    if (em < -1).any():
+        raise ValueError(
+            "elem_map: entries must be -1 (unmatched) or a refined element index"
+        )
     polygons = [Polygon(base.xy[row]) for row in base.triangles[em < 0]]
     result = unary_union(polygons) if polygons else MultiPolygon([])
     if not result.is_valid or result.geom_type not in ("Polygon", "MultiPolygon"):
@@ -334,7 +338,13 @@ def r_factors(depths, edges):
     if h.dtype.kind not in "fiu":
         raise ValueError("r-factor requires real numeric depths")
     # float64 working type: integer depths would wrap on subtraction or
-    # overflow on addition
+    # overflow on addition; a wider float must fit before the cast
+    if (
+        h.dtype.kind == "f"
+        and h.size
+        and bool((np.abs(h) > np.finfo(np.float64).max).any())
+    ):
+        raise ValueError("r-factor requires depths representable in float64")
     h = h.astype(np.float64)
     if h.ndim != 1 or not np.isfinite(h).all() or (h <= 0).any():
         raise ValueError("r-factor requires finite positive depths")
@@ -362,6 +372,12 @@ def reindex_one_based(ids, node_map):
     """Re-index FVCOM ids through node_map, refusing removed or invalid source nodes."""
     ids = _integers(ids, "FVCOM ids")
     nm = _integers(node_map, "node_map")
+    if nm.ndim != 1:
+        raise ValueError("node_map must be one-dimensional")
+    if (nm < -1).any():
+        raise ValueError(
+            "node_map: entries must be -1 (removed) or a refined node index"
+        )
     if (ids < 1).any() or (ids > len(nm)).any():
         raise ValueError("FVCOM ids outside the base node range")
     return to_one_based(nm[ids - 1])
@@ -370,9 +386,16 @@ def reindex_one_based(ids, node_map):
 def validate_boundary_nodes(ids, node_map, base, refined, label):
     """Require every boundary node to map to a frozen node with its original depth."""
     ids = _integers(ids, label)
+    node_map = _integers(node_map, "node_map")
+    if ids.ndim != 1 or node_map.ndim != 1:
+        raise ValueError(f"{label}: ids and node_map must be one-dimensional")
+    if len(node_map) != len(base.xy):
+        raise ValueError(f"{label}: node_map length differs from the base node count")
     if (ids < 0).any() or (ids >= len(node_map)).any():
         raise ValueError(f"{label}: node outside base range")
     mapped = node_map[ids]
+    if (mapped >= len(refined.xy)).any():
+        raise ValueError(f"{label}: node_map points outside the refined mesh")
     if (mapped < 0).any():
         raise ValueError(f"{label}: every node must be frozen; a node was removed")
     if not np.array_equal(
