@@ -103,3 +103,136 @@ def test_obc_netcdf_refusals(tmp_path):
         inputs.reindex_obc_netcdf(tmp_path / "c.nc", tmp_path / "d.nc", NODE_MAP)
     assert (tmp_path / "d.nc").read_bytes() == b"x"
     assert sorted(p.name for p in tmp_path.iterdir()) == ["a.nc", "c.nc", "d.nc"]
+
+
+def _forcing_pair():
+    from xfvcom.regrid import mesh_pair as rm
+    from xfvcom.regrid import transfer as rt
+
+    base = rm.Mesh(
+        np.array([[0.0, 0], [3, 0], [2, 2], [0, 1]]),
+        np.array([[0, 1, 2], [0, 2, 3]]),
+        np.array([8.0, 12, 16, 10]),
+    )
+    target = rm.Mesh(
+        np.vstack((base.xy, [0.6, 0.4])),
+        np.array([[0, 1, 4], [1, 2, 4], [2, 0, 4], [0, 2, 3]]),
+        np.array([8.0, 12, 16, 10, 11]),
+    )
+    return rt, rt.build_transfer(base, target, np.arange(4))
+
+
+def _forcing_file(path, times):
+    rng = np.random.default_rng(7)
+    with netCDF4.Dataset(path, "w", format="NETCDF4_CLASSIC") as d:
+        d.title = "forcing"
+        for name, n in (("node", 4), ("nele", 2), ("three", 3)):
+            d.createDimension(name, n)
+        d.createDimension("time", None)
+        x = d.createVariable("x", "f8", ("node",))
+        x.units = "meters"
+        x[:] = [0, 3, 2, 0]
+        nv = d.createVariable("nv", "i4", ("three", "nele"))
+        nv[:] = [[1, 1], [2, 3], [3, 4]]
+        t = d.createVariable("time", "f8", ("time",), chunksizes=(512,))
+        t.units = "days since 1858-11-17 00:00:00"
+        t[:] = times
+        for name, dim in (("air_temperature", "node"), ("uwind_speed", "nele")):
+            v = d.createVariable(
+                name, "f4", ("time", dim), chunksizes=(1, 4 if dim == "node" else 2)
+            )
+            v.units = "x"
+            v[:] = rng.normal(size=(len(times), 4 if dim == "node" else 2))
+        p = d.createVariable("precip", "f4", ("time", "node"))
+        p[:] = d["air_temperature"][:]
+
+
+def test_forcing_transferred_per_record_and_cut(tmp_path):
+    rt, op = _forcing_pair()
+    src, dst = tmp_path / "f.nc", tmp_path / "g.nc"
+    times = np.arange(10.0)
+    _forcing_file(src, times)
+    coords = {
+        "x": np.arange(5.0),
+        "nv": np.array([[1, 2, 3, 1], [2, 3, 1, 3], [5, 5, 5, 4]]),
+    }
+    report = inputs.transfer_forcing_netcdf(
+        src, dst, op, coords, start=2.5, end=6.0, block=2
+    )
+    assert report["records"] == (2, 6)
+    with netCDF4.Dataset(src) as a, netCDF4.Dataset(dst) as b:
+        assert b.data_model == "NETCDF4_CLASSIC"
+        assert b["time"][:].tolist() == [2, 3, 4, 5, 6]
+        assert b["x"][:].tolist() == list(range(5))
+        assert b["nv"][:].tolist() == coords["nv"].tolist()
+        for name, loc in (("air_temperature", "node"), ("uwind_speed", "element")):
+            assert b[name].dtype == np.float32
+            expected = rt.apply_2d(op, np.asarray(a[name][2:7]).T, location=loc).T
+            assert np.asarray(b[name][:]).tobytes() == expected.tobytes()
+            # frozen nodes / the matched element keep the source bytes
+        assert (
+            np.asarray(b["air_temperature"][:, :4]).tobytes()
+            == np.asarray(a["air_temperature"][2:7]).tobytes()
+        )
+        assert (
+            np.asarray(b["uwind_speed"][:, 3]).tobytes()
+            == np.asarray(a["uwind_speed"][2:7, 1]).tobytes()
+        )
+        assert (
+            np.asarray(b["precip"][:]).tobytes()
+            == np.asarray(b["air_temperature"][:]).tobytes()
+        )
+        assert b["air_temperature"].units == "x" and b.title == "forcing"
+
+
+@pytest.mark.parametrize(
+    "coords,kwargs,match",
+    [
+        ({"x": np.arange(5.0)}, {}, "nv"),
+        ({"x": np.arange(4.0), "nv": np.ones((3, 4))}, {}, "wrong shape"),
+        (
+            {"x": np.arange(5.0), "nv": np.ones((3, 4)), "y": np.arange(5.0)},
+            {},
+            "not in the source",
+        ),
+        ({"x": np.arange(5.0), "nv": np.ones((3, 4))}, {"start": -1.0}, "bracketed"),
+        ({"x": np.arange(5.0), "nv": np.ones((3, 4))}, {"end": 9.5}, "bracketed"),
+        (
+            {"x": np.arange(5.0), "nv": np.ones((3, 4))},
+            {"start": 5.0, "end": 4.0},
+            "exceed",
+        ),
+    ],
+)
+def test_forcing_refusals(tmp_path, coords, kwargs, match):
+    _, op = _forcing_pair()
+    src = tmp_path / "f.nc"
+    _forcing_file(src, np.arange(10.0))
+    window = {"start": 1.0, "end": 2.0, **kwargs}
+    with pytest.raises(ValueError, match=match):
+        inputs.transfer_forcing_netcdf(src, tmp_path / "g.nc", op, coords, **window)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["f.nc"]
+
+
+def test_forcing_unknown_layout_and_wrong_mesh_refused(tmp_path):
+    _, op = _forcing_pair()
+    src = tmp_path / "f.nc"
+    _forcing_file(src, np.arange(10.0))
+    with netCDF4.Dataset(src, "a") as d:
+        d.createDimension("other", 2)
+        d.createVariable("odd", "f4", ("time", "other"))
+    coords = {"x": np.arange(5.0), "nv": np.ones((3, 4))}
+    with pytest.raises(ValueError, match="no rule"):
+        inputs.transfer_forcing_netcdf(
+            src, tmp_path / "g.nc", op, coords, start=1.0, end=2.0
+        )
+    _, op2 = _forcing_pair()
+    other = tmp_path / "h.nc"
+    with netCDF4.Dataset(other, "w") as d:
+        d.createDimension("node", 7)
+        d.createDimension("time", None)
+        d.createVariable("time", "f8", ("time",))[:] = [0.0, 1.0]
+    with pytest.raises(ValueError, match="base mesh"):
+        inputs.transfer_forcing_netcdf(
+            other, tmp_path / "g.nc", op2, {}, start=0.0, end=1.0
+        )

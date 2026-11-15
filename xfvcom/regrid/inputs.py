@@ -15,6 +15,7 @@ import re
 import numpy as np
 
 from .mesh_pair import _integers, reindex_one_based
+from .transfer import apply_2d
 
 _LOCATION = re.compile(r"(?im)^([ \t]*RIVER_GRID_LOCATION[ \t]*=[ \t]*)([^,/\n!]*)")
 _BLOCK = re.compile(r"(?im)^[ \t]*&NML_RIVER\b")
@@ -93,25 +94,7 @@ def reindex_river_namelist(text, node_map):
 
 def _copy_variable(src, dst, name, data=None):
     var = src.variables[name]
-    kwargs = {}
-    filters = var.filters() or {}
-    if filters.get("zlib"):
-        kwargs.update(zlib=True, complevel=filters.get("complevel", 4))
-    if filters.get("shuffle"):
-        kwargs["shuffle"] = True
-    if filters.get("fletcher32"):
-        kwargs["fletcher32"] = True
-    chunking = var.chunking()
-    if chunking == "contiguous":
-        kwargs["contiguous"] = True
-    elif chunking is not None:
-        kwargs["chunksizes"] = chunking
-    if "_FillValue" in var.ncattrs():
-        kwargs["fill_value"] = var.getncattr("_FillValue")
-    else:
-        kwargs["fill_value"] = False
-    out = dst.createVariable(name, var.datatype, var.dimensions, **kwargs)
-    out.setncatts({a: var.getncattr(a) for a in var.ncattrs() if a != "_FillValue"})
+    out = _create_like(src, dst, name)
     var.set_auto_maskandscale(False)
     out.set_auto_maskandscale(False)
     if data is not None:
@@ -213,3 +196,154 @@ def _compare(source, written, variable, ids):
                 )
             if not same:
                 raise ValueError(f"copy: {name} values differ")
+
+
+TIME_VARIABLES = ("time", "Itime", "Itime2", "Times")
+
+
+def _window(time, start, end):
+    """Record indices [i0, i1] bracketing [start, end] (both inclusive)."""
+    time = np.asarray(time, dtype=np.float64)
+    if time.ndim != 1 or len(time) == 0 or not np.isfinite(time).all():
+        raise ValueError("forcing: time must be a finite non-empty vector")
+    if not (np.diff(time) > 0).all():
+        raise ValueError("forcing: time must increase strictly")
+    if not (np.isfinite(start) and np.isfinite(end)) or start > end:
+        raise ValueError("forcing: window start must not exceed its end")
+    if start < time[0] or end > time[-1]:
+        raise ValueError(
+            f"forcing: window [{start}, {end}] is not bracketed by the file "
+            f"[{time[0]}, {time[-1]}]"
+        )
+    i0 = int(np.searchsorted(time, start, side="right") - 1)
+    i1 = int(np.searchsorted(time, end, side="left"))
+    return i0, i1
+
+
+def transfer_forcing_netcdf(
+    source, destination, op, coordinates, *, start, end, block=240
+):
+    """Write ``destination``: an FVCOM grid forcing file carried to the target mesh.
+
+    ``op`` is a ``Transfer`` from ``build_transfer``. Every ``(time, node)`` and
+    ``(time, nele)`` variable is transferred record by record with
+    ``apply_2d`` (frozen nodes and matched elements copy their bytes); the time
+    variables (``time``, ``Itime``, ``Itime2``, ``Times``) are cut to the
+    records bracketing ``[start, end]`` (the ``time`` variable's units); every
+    variable on ``node``, ``nele`` or ``three`` alone (coordinates, ``nv``)
+    must be given in ``coordinates`` as the target's values. Any other
+    variable or dimension layout is refused. Attributes, dtypes and the file
+    format are kept; chunking follows the source with the target sizes.
+    The destination must not exist and is linked into place only when complete.
+    """
+    import netCDF4
+
+    destination = os.fspath(destination)
+    if os.path.lexists(destination):
+        raise ValueError(f"{destination}: exists; refusing to overwrite")
+    sizes = {
+        "node": op.node_matrix.shape[0],
+        "nele": op.element_matrix.shape[0],
+        "three": 3,
+    }
+    base_sizes = {
+        "node": op.node_matrix.shape[1],
+        "nele": op.element_matrix.shape[1],
+        "three": 3,
+    }
+    part = f"{destination}.part{os.getpid()}"
+    with netCDF4.Dataset(source) as src:
+        for name, dim in src.dimensions.items():
+            if name in base_sizes and len(dim) != base_sizes[name]:
+                raise ValueError(
+                    f"{source}: dimension {name} = {len(dim)}, the base mesh has "
+                    f"{base_sizes[name]}"
+                )
+        if "time" not in src.variables or src.variables["time"].dimensions != ("time",):
+            raise ValueError(f"{source}: no time(time) variable")
+        i0, i1 = _window(src.variables["time"][:], start, end)
+        plan = {}
+        for name, var in src.variables.items():
+            dims = var.dimensions
+            if name in TIME_VARIABLES and dims and dims[0] == "time":
+                plan[name] = "cut"
+            elif dims in (("time", "node"), ("time", "nele")):
+                plan[name] = "node" if dims[1] == "node" else "element"
+            elif dims and set(dims) <= set(sizes):
+                if name not in coordinates:
+                    raise ValueError(f"{name}{dims}: target values not given")
+                value = np.asarray(coordinates[name])
+                if value.shape != tuple(sizes[d] for d in dims):
+                    raise ValueError(f"{name}: target values have the wrong shape")
+                plan[name] = "given"
+            else:
+                raise ValueError(f"{name}{dims}: no rule to carry it to the target")
+        unused = set(coordinates) - {n for n, p in plan.items() if p == "given"}
+        if unused:
+            raise ValueError(f"coordinates not in the source: {sorted(unused)}")
+        try:
+            with netCDF4.Dataset(part, "w", format=src.data_model) as dst:
+                dst.setncatts({a: src.getncattr(a) for a in src.ncattrs()})
+                for name, dim in src.dimensions.items():
+                    if dim.isunlimited():
+                        dst.createDimension(name, None)
+                    elif name == "time":
+                        dst.createDimension(name, i1 - i0 + 1)
+                    else:
+                        dst.createDimension(name, sizes.get(name, len(dim)))
+                for name, var in src.variables.items():
+                    out = _create_like(src, dst, name)
+                    var.set_auto_maskandscale(False)
+                    out.set_auto_maskandscale(False)
+                    if plan[name] == "given":
+                        out[...] = np.asarray(coordinates[name]).astype(var.dtype)
+                    elif plan[name] == "cut":
+                        out[...] = var[i0 : i1 + 1]
+                    else:
+                        for k in range(i0, i1 + 1, block):
+                            stop = min(k + block, i1 + 1)
+                            values = np.asarray(var[k:stop]).T
+                            out[k - i0 : stop - i0] = apply_2d(
+                                op, values, location=plan[name]
+                            ).T
+            os.link(part, destination)
+        finally:
+            if os.path.lexists(part):
+                os.unlink(part)
+    return {"records": (i0, i1), "variables": plan}
+
+
+def _create_like(src, dst, name):
+    var = src.variables[name]
+    kwargs = {}
+    filters = var.filters() or {}
+    if filters.get("zlib"):
+        kwargs.update(zlib=True, complevel=filters.get("complevel", 4))
+    if filters.get("shuffle"):
+        kwargs["shuffle"] = True
+    if filters.get("fletcher32"):
+        kwargs["fletcher32"] = True
+    chunking = var.chunking()
+    if chunking == "contiguous":
+        kwargs["contiguous"] = True
+    elif chunking is not None:
+        # the time chunk is kept; a spatial chunk spanning the whole base
+        # dimension spans the target's, any other is capped by it
+        kwargs["chunksizes"] = [
+            (
+                c
+                if dst.dimensions[d].isunlimited() or d == "time"
+                else (
+                    len(dst.dimensions[d])
+                    if c == len(src.dimensions[d])
+                    else min(c, len(dst.dimensions[d]))
+                )
+            )
+            for c, d in zip(chunking, var.dimensions)
+        ]
+    kwargs["fill_value"] = (
+        var.getncattr("_FillValue") if "_FillValue" in var.ncattrs() else False
+    )
+    out = dst.createVariable(name, var.datatype, var.dimensions, **kwargs)
+    out.setncatts({a: var.getncattr(a) for a in var.ncattrs() if a != "_FillValue"})
+    return out

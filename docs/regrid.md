@@ -61,4 +61,9 @@ every `&NML_RIVER` block (plain integers only, comments kept) and
 `reindex_obc_netcdf` writes a copy of an open-boundary file with `obc_nodes`
 renumbered and every other variable, attribute and dimension compared equal
 after writing. A source node removed by the map is refused; the destination is
-never overwritten.
+never overwritten. `transfer_forcing_netcdf` carries an FVCOM grid forcing file (wind on
+elements, heat-flux and precipitation fields on nodes) to the target mesh:
+every `(time, node)` / `(time, nele)` variable record by record with
+`apply_2d`, the time variables cut to the records bracketing the run window,
+and the coordinates and `nv` replaced by the caller's target values; any other
+layout is refused.
