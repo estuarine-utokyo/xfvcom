@@ -454,12 +454,15 @@ def _horizontal_geometry(base, target, node_map, max_distance):
     for v in np.flatnonzero(nm >= 0):
         e, k = first_incident[int(v)]
         triangle[nm[v]], bary[nm[v]] = e, np.eye(3)[k]
-    donor, distance, graph = _paths(target, triangle >= 0, max_distance)
-    return nc, triangle, bary, donor, distance, graph
+    # Node donors are chosen only for the node operator (round 15): an
+    # ambiguous donor of an outside node must not stop the element operator,
+    # whose anchors are searched from the centroids.
+    return nc, triangle, bary, _graph(target, triangle >= 0)
 
 
 def _nodes(base, target, geometry, max_distance):
-    nc, triangle, bary, donor, distance, _ = geometry
+    nc, triangle, bary, _ = geometry
+    donor, distance, graph = _paths(target, triangle >= 0, max_distance)
     outside = np.flatnonzero(triangle < 0)
     if (distance[outside] > max_distance).any():
         raise ValueError(
@@ -511,7 +514,7 @@ def _nodes(base, target, geometry, max_distance):
 
 
 def _elements(base, target, em, geometry, max_distance):
-    _, triangle, bary, donor, distance, graph = geometry
+    _, triangle, bary, graph = geometry
     ec = np.full(len(target.triangles), -1, dtype=int)
     ec[em[em >= 0]] = np.flatnonzero(em >= 0)
     # Area share at a base vertex = incident triangle area / all incident areas.

@@ -1956,3 +1956,23 @@ def test_r14_anchor_searched_from_the_centroid():
     rm.validate_topology(target)
     with pytest.raises(ValueError, match="ambiguous"):
         rt.build_transfer(base, target, np.arange(4))
+
+
+def test_r15_element_operator_ignores_ambiguous_node_donor():
+    """An ambiguous OUTSIDE NODE donor stops only the node operator (round 15)."""
+    base = mesh([[0, 0], [2, 0], [0, 2]], [[0, 1, 2]], 4.0)
+    target = mesh(
+        [[0, 0], [2, 0], [0, 2], [1 + 1e-15, -1], [0.6, -0.2]],
+        [[0, 1, 2], [1, 0, 4], [3, 1, 4], [0, 3, 4]],
+        4.0,
+    )
+    nm = np.arange(3)
+    rm.validate_topology(target)
+    with pytest.raises(ValueError, match="ambiguous"):
+        rt.build_node_operator(base, target, nm)
+    matrix, report = rt.build_element_operator(base, target, nm)
+    em = rm.build_element_map(base, target, nm)
+    expected = rt.independent_evaluate(
+        base, target, nm, em, np.array([7.0]), location="element"
+    )
+    np.testing.assert_array_equal(matrix @ np.array([7.0]), expected)
