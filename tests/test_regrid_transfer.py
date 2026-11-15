@@ -1476,3 +1476,23 @@ def test_r8_check_tolerance_sign_and_overflow(key, value):
     op = _split([0.25, 0.25])
     with pytest.raises(ValueError, match=key):
         rt.check(op, np.ones(3), **{key: value})
+
+
+def test_r9_reference_exterior_boundary_point():
+    """The evaluator applies the same clipped-weight criterion as production."""
+    b = mesh([[0, 0], [200, 0], [0, 200]], [[0, 1, 2]], 4.0)
+    t = mesh(np.vstack((b.xy, [100, 100 + 3e-10])), [[0, 1, 2], [1, 3, 2]], 4.0)
+    op = rt.build_transfer(b, t, np.arange(3))
+    rt.check(op, np.array([0.0, 1.0, 2.0]))
+
+
+def test_r9_physical_range_refusals_under_strict_errors():
+    with np.errstate(over="raise", invalid="raise"):
+        xy = [[0, 0], [1e200, 0], [0, 1e200]]
+        b = mesh(xy, [[0, 1, 2]], 4.0)
+        with pytest.raises(ValueError, match="physical range"):
+            rt.build_transfer(b, b, np.arange(3))
+        op = rt.build_transfer(*synthetic_pair())
+        zeta = np.full(4, np.longdouble("1e400"))
+        with pytest.raises(ValueError, match="physical range"):
+            rt.apply_3d(op, np.ones((4, 30)), SIGMA, zeta, np.zeros(5))

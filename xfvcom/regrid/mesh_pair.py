@@ -318,6 +318,10 @@ def footprint_polygon(base, elem_map):
 def mesh_edges(triangles):
     """Return unique undirected zero-based edges in sorted order."""
     tri = _integers(triangles, "triangles")
+    if tri.ndim != 2 or tri.shape[1] != 3:
+        raise ValueError("triangles: expected an (E, 3) integer array")
+    if (tri < 0).any():
+        raise ValueError("triangles: negative node index")
     return np.unique(
         np.sort(np.vstack((tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [2, 0]])), axis=1),
         axis=0,
@@ -327,9 +331,19 @@ def mesh_edges(triangles):
 def r_factors(depths, edges):
     """Recompute |hi-hj|/(hi+hj), rejecting nonpositive/nonfinite depths."""
     h = np.asarray(depths)
+    if h.dtype.kind not in "fiu":
+        raise ValueError("r-factor requires real numeric depths")
+    # float64 working type: integer depths would wrap on subtraction or
+    # overflow on addition
+    h = h.astype(np.float64)
     if h.ndim != 1 or not np.isfinite(h).all() or (h <= 0).any():
         raise ValueError("r-factor requires finite positive depths")
-    pair = h[edges]
+    e = _integers(edges, "edges")
+    if e.ndim != 2 or e.shape[1] != 2:
+        raise ValueError("edges: expected a (K, 2) integer array")
+    if (e < 0).any() or (e >= len(h)).any():
+        raise ValueError("edges: node index outside the depth vector")
+    pair = h[e]
     return np.abs(pair[:, 0] - pair[:, 1]) / (pair[:, 0] + pair[:, 1])
 
 
@@ -338,7 +352,10 @@ def to_one_based(indices):
     ids = _integers(indices, "indices")
     if (ids < 0).any():
         raise ValueError("Cannot convert a removed/negative index to one-based ids")
-    return ids + 1
+    # int64 before adding one: a narrow unsigned dtype would wrap 255 to 0
+    if ids.size and int(ids.max()) >= np.iinfo(np.int64).max:
+        raise ValueError("index too large for a one-based id")
+    return ids.astype(np.int64) + 1
 
 
 def reindex_one_based(ids, node_map):

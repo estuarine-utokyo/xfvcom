@@ -78,9 +78,17 @@ def independent_evaluate(
                 w1 = (dy - v[1] * w2) / u[1]
             weights = [1 - w1 - w2, w1, w2]
             if min(weights) >= -Fraction(2, 10**12):
-                weights = [max(w, 0) for w in weights]
-                s = sum(weights)
-                return int(e), [float(w / s) for w in weights]
+                clipped = [max(w, 0) for w in weights]
+                s = sum(clipped)
+                clipped = [w / s for w in clipped]
+                # Same acceptance criterion as production, reached with exact
+                # arithmetic: a boundary candidate whose clipped weights are not
+                # within 1e-12 of the point's own weights does not contain it.
+                if max(abs(c - w) for c, w in zip(clipped, weights)) > Fraction(
+                    1, 10**12
+                ):
+                    continue
+                return int(e), [float(w) for w in clipped]
         return -1, None
 
     # This is intentionally not the production multi-source shortest-path walk.

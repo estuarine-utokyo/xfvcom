@@ -487,3 +487,41 @@ def test_named_gate_detects_mutation(tmp_path, monkeypatch, name, replacements, 
         with pytest.raises((AssertionError, ValueError, pytest.fail.Exception)):
             for test in tests:
                 globals()[test]()
+
+
+def test_r9_r_factors_integer_depths():
+    from xfvcom.regrid import mesh_pair as mp
+
+    edges = np.array([[0, 1]])
+    assert mp.r_factors(np.array([3, 6], dtype=np.uint8), edges)[0] == pytest.approx(
+        1 / 3
+    )
+    assert mp.r_factors(np.array([20000, 30000], dtype=np.int16), edges)[
+        0
+    ] == pytest.approx(0.2)
+
+
+def test_r9_one_based_does_not_wrap():
+    from xfvcom.regrid import mesh_pair as mp
+
+    assert mp.to_one_based(np.array([255], dtype=np.uint8))[0] == 256
+    assert (
+        mp.reindex_one_based(np.array([1]), np.array([255], dtype=np.uint8))[0] == 256
+    )
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda mp: mp.mesh_edges(np.array([[0, 1, 2, 3]])),
+        lambda mp: mp.mesh_edges(np.array([0, 1, 2])),
+        lambda mp: mp.r_factors(np.array([3.0, 6.0]), np.array([[-1, 0]])),
+        lambda mp: mp.r_factors(np.array([3.0, 6.0]), np.array([[0.0, 1.0]])),
+        lambda mp: mp.r_factors(np.array([3.0, 6.0]), np.array([[0, 2]])),
+    ],
+)
+def test_r9_mesh_helpers_refuse_malformed_arrays(call):
+    from xfvcom.regrid import mesh_pair as mp
+
+    with pytest.raises(ValueError):
+        call(mp)

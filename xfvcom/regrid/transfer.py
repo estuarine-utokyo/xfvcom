@@ -100,6 +100,11 @@ def _validate_pair(base, target, nm, em=None):
             raise ValueError(
                 f"{label}.xy: expected float64 coordinates, got {xy.dtype}"
             )
+        # the coordinate range first, before any geometry arithmetic can overflow
+        if float(np.abs(xy).max(initial=0.0)) > COORDINATE_LIMIT_M:
+            raise ValueError(
+                f"{label}: coordinates outside the physical range |x| <= {COORDINATE_LIMIT_M:g} m"
+            )
         rm._validate_geometry(xy, np.asarray(mesh.triangles))
         h = _real(mesh.depths, (len(xy),), f"{label}.depths")
         if (h <= 0).any():
@@ -542,13 +547,15 @@ def _columns(op, location, sigma, base_zeta, target_zeta):
     # and overflow on addition.
     bh = np.asarray(op.base.depths, dtype=np.float64)
     th = np.asarray(op.target.depths, dtype=np.float64)
-    bz = _real(base_zeta, bh.shape, "base_zeta").astype(np.float64)
-    tz = _real(target_zeta, th.shape, "target_zeta").astype(np.float64)
-    for label, z in (("base_zeta", bz), ("target_zeta", tz)):
-        if np.abs(z).max(initial=0.0) > ELEVATION_LIMIT_M:
+    raw_bz = _real(base_zeta, bh.shape, "base_zeta")
+    raw_tz = _real(target_zeta, th.shape, "target_zeta")
+    # the range is tested in the input dtype, before a narrowing cast can overflow
+    for label, z in (("base_zeta", raw_bz), ("target_zeta", raw_tz)):
+        if z.size and bool(np.abs(z).max() > ELEVATION_LIMIT_M):
             raise ValueError(
                 f"{label}: outside the physical range |zeta| <= {ELEVATION_LIMIT_M:g} m"
             )
+    bz, tz = raw_bz.astype(np.float64), raw_tz.astype(np.float64)
     if location == "element":
         bh, bz = bh[op.base.triangles].mean(axis=1), bz[op.base.triangles].mean(axis=1)
         th, tz = th[op.target.triangles].mean(axis=1), tz[op.target.triangles].mean(
