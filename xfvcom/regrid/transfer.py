@@ -52,7 +52,6 @@ MIN_AREA_M2 = 1e-12  # smallest triangle area (an edge bound alone does not boun
 MIN_SIGMA_THICKNESS = 1e-6  # thinnest sigma layer (fraction of the column)
 DEPTH_RANGE_M = (1e-3, 1e5)  # positive-down depth
 ELEVATION_LIMIT_M = 1e3  # |zeta|
-BOUNDARY_TOLERANCE = 2e-12  # exact weight below which a point is outside
 FRACTION_TOLERANCE = 1e-12  # certified error of a vertical interpolation fraction
 _UNIT_ROUNDOFF = np.finfo(np.float64).eps / 2
 
@@ -70,6 +69,21 @@ def _outside(values, low, high):
         return False
     bounds = np.array([low, high], dtype=np.result_type(values.dtype, np.float64))
     return bool(((values < bounds[0]) | (values > bounds[1])).any())
+
+
+def _exact_in_float64(values, label):
+    """Refuse values that float64, the working type, cannot hold exactly.
+
+    A wider float (longdouble) or a large integer would be narrowed silently,
+    and the certified bounds (and the evaluator) would then describe the
+    narrowed problem, not the given one (round 12). Called after the range
+    check, so the cast cannot overflow.
+    """
+    values = np.asarray(values)
+    if values.dtype.kind in "iu" or values.dtype.itemsize > 8:
+        narrowed = values.astype(np.float64)
+        if not (narrowed.astype(values.dtype) == values).all():
+            raise ValueError(f"{label}: values not exactly representable in float64")
 
 
 def _physical_mesh(label, mesh):
@@ -102,6 +116,7 @@ def _physical_mesh(label, mesh):
         raise ValueError(
             f"{label}: depths outside the physical range {DEPTH_RANGE_M} m"
         )
+    _exact_in_float64(h, f"{label}.depths")
 
 
 def _validate_pair(base, target, nm, em=None):
@@ -180,77 +195,128 @@ def _areas(mesh):
     return area
 
 
+def _rational(x):
+    return x if isinstance(x, Fraction) else Fraction(float(x))
+
+
 def _exact_weights(vertices, point):
-    """Exact barycentric weights of the input floats (Cramer determinants)."""
-    a, b, c, q = [[Fraction(float(x)) for x in p] for p in (*vertices, point)]
+    """Exact barycentric weights (Cramer determinants) of exact coordinates.
+
+    Floats are taken as the exact values they hold; a point may also be given
+    as Fractions (an exact centroid).
+    """
+    a, b, c, q = [[_rational(x) for x in p] for p in (*vertices, point)]
     u, v, d = ([p[k] - a[k] for k in (0, 1)] for p in (b, c, q))
     determinant = u[0] * v[1] - u[1] * v[0]
     if determinant <= 0:
-        raise ValueError(
-            "Triangle weights cannot be established to 1e-12: degenerate triangle"
-        )
+        raise ValueError("Triangle weights cannot be established: degenerate triangle")
     w1 = (d[0] * v[1] - d[1] * v[0]) / determinant
     w2 = (u[0] * d[1] - u[1] * d[0]) / determinant
     return (1 - w1 - w2, w1, w2)
 
 
-def _certify_weights(exact, weights):
-    """Certify floating weights against the exact ones of ``_exact_weights``.
+def _exact_centroids(mesh):
+    """Exact centroids of the triangles (sums of the vertex floats over 3)."""
+    xy = np.asarray(mesh.xy, dtype=np.float64)
+    return [
+        tuple(sum(Fraction(float(xy[v, k])) for v in tri) / 3 for k in (0, 1))
+        for tri in mesh.triangles
+    ]
 
-    This is a guard, not a fallback: geometry with >1e-12 absolute weight error
-    is refused. The evaluator independently uses rational elimination instead.
+
+def _locate(mesh, points, exact_points=None):
+    """Search actual mesh triangles (never a Delaunay fill across land).
+
+    Containment and weights are EXACT (rational) for the exact query point --
+    the given float, or ``exact_points`` (e.g. exact centroids, which a float
+    cannot hold) -- and are rounded once at the end (round 12). The bounding
+    boxes only preselect candidates, widened so that rounding a centroid to
+    ``points`` cannot drop its container.
     """
-    if not np.isfinite(weights).all() or any(
-        abs(Fraction(float(w)) - r) > Fraction(1, 10**12)
-        for w, r in zip(weights, exact)
-    ):
-        raise ValueError(
-            "Triangle weights cannot be established to 1e-12 against exact values"
-        )
-
-
-def _locate(mesh, points):
-    """Search actual mesh triangles (never a Delaunay fill across land)."""
     p = np.asarray(mesh.xy, dtype=float)[mesh.triangles]
     lo, hi = p.min(axis=1), p.max(axis=1)
-    u, v = p[:, 1] - p[:, 0], p[:, 2] - p[:, 0]
-    determinant = np.array([_cross(a, b) for a, b in zip(u, v)])
+    slack = 4 * np.finfo(np.float64).eps * (np.abs(p).max(axis=1) + 1.0)
     ids = np.full(len(points), -1, dtype=int)
     weights = np.zeros((len(points), 3))
+    tolerance = Fraction(1, 10**12)
     for i, q in enumerate(points):
-        candidates = np.flatnonzero(((q >= lo) & (q <= hi)).all(axis=1))
+        exact_q = exact_points[i] if exact_points is not None else q
+        candidates = np.flatnonzero(((q >= lo - slack) & (q <= hi + slack)).all(axis=1))
         for e in candidates:
-            # Containment is decided on the EXACT weights, so a thin candidate
-            # whose bounding box merely covers the point (and whose floating
-            # extrapolation weights are meaningless) is passed over rather
-            # than aborting the search. Only an accepted container's floating
-            # weights must certify.
-            exact = _exact_weights(p[e], q)
-            if min(exact) < -BOUNDARY_TOLERANCE:
-                continue
-            d = q - p[e, 0]
-            with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-                b = _cross(d, v[e]) / determinant[e]
-                c = _cross(u[e], d) / determinant[e]
-                w = np.array([1 - b - c, b, c])
-            _certify_weights(exact, w)
-            clipped = np.maximum(w, 0)
-            clipped /= clipped.sum()
-            try:
-                _certify_weights(exact, clipped)
-            except ValueError:
-                # a neighbour within the boundary tolerance whose weights,
-                # once clipped, are not those of the point: the point lies
-                # in another candidate; keep searching
+            # A point is in a candidate when clipping its exact weights onto
+            # the triangle moves them by at most 1e-12 (a boundary point is
+            # clipped onto it); a candidate whose box merely covers the point
+            # moves them far more and is passed over.
+            exact = _exact_weights(p[e], exact_q)
+            clipped = [max(w, Fraction(0)) for w in exact]
+            total = sum(clipped)
+            clipped = [w / total for w in clipped]
+            if max(abs(c - w) for c, w in zip(clipped, exact)) > tolerance:
                 continue
             ids[i] = e
-            weights[i] = clipped
+            weights[i] = [float(w) for w in clipped]
             break
     return ids, weights
 
 
-def _paths(mesh, inside):
-    """Multi-source Dijkstra; label is (distance, donor ID)."""
+def _tied(a, b, offset_error):
+    """Whether two computed path lengths (d, node, hops) cannot be ordered.
+
+    Each edge length (a rounded coordinate difference and hypot) and each
+    addition along a path rounds by at most about 2u of the path length, so a
+    path of h edges is within 4u (h + 1) d of its exact length; ``offset_error``
+    adds the rounding of a query point that is itself rounded (a centroid).
+    """
+    u = _UNIT_ROUNDOFF
+    bound = 4 * u * (a[2] + b[2] + 2) * max(a[0], b[0]) + 2 * offset_error
+    return abs(a[0] - b[0]) <= bound
+
+
+def _choose(found, label, offset_error=0.0):
+    """The donor among (distance, node, hops) candidates, or refuse an ambiguous one.
+
+    Candidates whose lengths differ by less than their rounding bound are
+    ties. Bit-equal ties go to the lowest ID; other ties cannot be ordered by
+    the float arithmetic and are refused (round 12), never decided by rounding.
+    """
+    # an unreachable vertex (no inside node within the limit) is no candidate
+    found = [c for c in found if c[1] >= 0 and math.isfinite(c[0])]
+    if not found:
+        return -1, math.inf, 0
+    best = min(found)
+    close = [c for c in found if _tied(c, best, offset_error)]
+    if any(d != best[0] for d, v, _ in close if v != best[1]):
+        raise ValueError(
+            f"{label}: donors {sorted({int(v) for _, v, _ in close})} have water-path "
+            "lengths closer than their rounding bound; the choice is numerically "
+            "ambiguous and is refused"
+        )
+    return min(v for d, v, _ in close if d == best[0]), best[0], best[2]
+
+
+def _nearest(adjacency, inside, start, limit):
+    """Reverse Dijkstra from ``start`` to the inside nodes near the shortest path."""
+    queue, seen, found, bound = [(0.0, 0, int(start))], set(), [], limit
+    while queue:
+        d, hops, a = heapq.heappop(queue)
+        if d > bound:
+            break
+        if a in seen:
+            continue
+        seen.add(a)
+        if inside[a]:
+            found.append((d, a, hops))
+            # far beyond any rounding bound (relative 1e-9)
+            bound = min(bound, found[0][0] * (1 + 1e-9) + 1e-12)
+            continue  # anything beyond an inside node is an edge farther
+        for b, length in adjacency[a]:
+            if b not in seen:
+                heapq.heappush(queue, (d + length, hops + 1, b))
+    return found
+
+
+def _paths(mesh, inside, max_distance=math.inf):
+    """Nearest inside node of every node along refined edges (ties: lowest ID)."""
     adjacency = [[] for _ in mesh.xy]
     for a, b in _mesh_module().mesh_edges(mesh.triangles):
         length = math.hypot(
@@ -259,22 +325,15 @@ def _paths(mesh, inside):
         )
         adjacency[a].append((b, length))
         adjacency[b].append((a, length))
-    distance = np.full(len(mesh.xy), np.inf)
-    donor = np.full(len(mesh.xy), -1, dtype=int)
-    queue = []
-    for i in np.flatnonzero(inside):
-        distance[i], donor[i] = 0.0, i
-        heapq.heappush(queue, (0.0, int(i), int(i)))
-    while queue:
-        d, source, a = heapq.heappop(queue)
-        if (d, source) != (distance[a], donor[a]):
-            continue
-        for b, length in adjacency[a]:
-            candidate = (d + length, source)
-            if candidate < (distance[b], donor[b]):
-                distance[b], donor[b] = candidate
-                heapq.heappush(queue, (*candidate, int(b)))
-    return donor, distance
+    inside = np.asarray(inside, dtype=bool)
+    distance = np.where(inside, 0.0, np.inf)
+    donor = np.where(inside, np.arange(len(mesh.xy)), -1)
+    hops = np.zeros(len(mesh.xy), dtype=int)
+    limit = max_distance * (1 + 1e-9) + 1e-12
+    for i in np.flatnonzero(~inside):
+        found = _nearest(adjacency, inside, i, limit)
+        donor[i], distance[i], hops[i] = _choose(found, f"node {i}")
+    return donor, distance, hops
 
 
 def _matrix(rows, nbase):
@@ -353,12 +412,12 @@ def _horizontal_geometry(base, target, node_map, max_distance):
     for v in np.flatnonzero(nm >= 0):
         e, k = first_incident[int(v)]
         triangle[nm[v]], bary[nm[v]] = e, np.eye(3)[k]
-    donor, distance = _paths(target, triangle >= 0)
-    return nc, triangle, bary, donor, distance
+    donor, distance, hops = _paths(target, triangle >= 0, max_distance)
+    return nc, triangle, bary, donor, distance, hops
 
 
 def _nodes(base, target, geometry, max_distance):
-    nc, triangle, bary, donor, distance = geometry
+    nc, triangle, bary, donor, distance, _ = geometry
     outside = np.flatnonzero(triangle < 0)
     if (distance[outside] > max_distance).any():
         raise ValueError(
@@ -410,7 +469,7 @@ def _nodes(base, target, geometry, max_distance):
 
 
 def _elements(base, target, em, geometry, max_distance):
-    _, triangle, bary, donor, distance = geometry
+    _, triangle, bary, donor, distance, hops = geometry
     ec = np.full(len(target.triangles), -1, dtype=int)
     ec[em[em >= 0]] = np.flatnonzero(em >= 0)
     # Area share at a base vertex = incident triangle area / all incident areas.
@@ -421,7 +480,7 @@ def _elements(base, target, em, geometry, max_distance):
             incident[v].append(e)
     vertex_area = np.array([area[es].sum() for es in incident])
     centroids = target.xy[target.triangles].mean(axis=1)
-    ct, cb = _locate(base, centroids)
+    ct, cb = _locate(base, centroids, _exact_centroids(target))
     anchors = np.full(len(centroids), -1, dtype=int)
     ad = np.zeros(len(centroids))
     anchored = np.flatnonzero((ct < 0) & (ec < 0))
@@ -434,10 +493,14 @@ def _elements(base, target, em, geometry, max_distance):
                 )
                 + distance[v],
                 int(donor[v]),
+                int(hops[v]) + 1,
             )
             for v in target.triangles[i]
         ]
-        ad[i], anchors[i] = min(choices)
+        # the centroid is rounded to float64: its position errs by about
+        # 2u of its largest coordinate
+        offset = 2 * _UNIT_ROUNDOFF * float(np.abs(centroids[i]).max())
+        anchors[i], ad[i], _ = _choose(choices, f"element {i}", offset)
         if not np.isfinite(ad[i]) or ad[i] > max_distance:
             raise ValueError(
                 "Outside centroid anchor exceeds max_distance or is disconnected"
@@ -561,6 +624,7 @@ def _columns(op, location, sigma, base_zeta, target_zeta):
     # and the differences, which could otherwise overflow
     if sigma.size and bool(((sigma < -1) | (sigma > 0)).any()):
         raise ValueError("sigma: interfaces must lie in [-1, 0]")
+    _exact_in_float64(sigma, "sigma")
     sigma = sigma.astype(np.float64)
     if (
         sigma.ndim != 1
@@ -589,7 +653,10 @@ def _columns(op, location, sigma, base_zeta, target_zeta):
             raise ValueError(
                 f"{label}: outside the physical range |zeta| <= {ELEVATION_LIMIT_M:g} m"
             )
+    _exact_in_float64(raw_bz, "base_zeta")
+    _exact_in_float64(raw_tz, "target_zeta")
     bz, tz = raw_bz.astype(np.float64), raw_tz.astype(np.float64)
+    nodal = (bh, bz, th, tz)
     u = _UNIT_ROUNDOFF
     # absolute error bounds of the column inputs: exact for nodes; an element
     # column is the node mean, whose rounding (two additions and a division)
@@ -657,7 +724,12 @@ def _columns(op, location, sigma, base_zeta, target_zeta):
         tz,
         etz,
         base_depth,
+        base_error,
         volumes,
+        nodal,
+        (op.base.triangles, op.target.triangles) if location == "element" else None,
+        tuple(float(x) for x in sigma),
+        {},
     )
 
 
@@ -674,7 +746,44 @@ class _Columns:
     target_zeta: np.ndarray
     target_zeta_error: np.ndarray
     base_depth: np.ndarray  # h + zeta of the base columns
+    base_depth_error: np.ndarray
     volumes: np.ndarray  # (target columns, layers)
+    nodal: tuple  # float64 node depths/elevations: base h, base zeta, target h, target zeta
+    triangles: object  # (base, target) triangles for element columns, else None
+    sigma: tuple
+    cache: dict  # exact donor columns
+
+    def _exact(self, values, triangles, i):
+        """Exact column value: the node's, or the exact mean of an element's nodes."""
+        if triangles is None:
+            return Fraction(float(values[i]))
+        return sum(Fraction(float(values[v])) for v in triangles[i]) / 3
+
+    def exact(self, i, j, layers):
+        """Exact (rational) geometry of target i against donor j.
+
+        Returns the donor's water column and layer centres (relative to its
+        surface) and target i's centres of ``layers`` relative to the same
+        surface, from the float64 inputs without rounding (round 12).
+        """
+        bh, bz, th, tz = self.nodal
+        tb, tt = self.triangles or (None, None)
+        sigma = [Fraction(x) for x in self.sigma]
+        middles = [(a + b) / 2 for a, b in zip(sigma, sigma[1:])]
+        if j not in self.cache:
+            column = self._exact(bh, tb, j) + self._exact(bz, tb, j)
+            self.cache[j] = (
+                self._exact(bz, tb, j),
+                column,
+                [m * column for m in middles],
+            )
+        surface, column, centres = self.cache[j]
+        target_surface = self._exact(tz, tt, i)
+        target_column = self._exact(th, tt, i) + target_surface
+        targets = [
+            target_surface - surface + middles[k] * target_column for k in layers
+        ]
+        return column, centres, targets
 
     def relative(self, i, j):
         """Target i's layer centres relative to donor j's surface, with error bounds.
@@ -696,20 +805,69 @@ class _Columns:
         return z, error
 
 
-def _interpolate(z, values, targets, z_error=None, target_error=None):
-    """Return constant-end interpolation and its unbounded linear alternative.
-
-    With error bounds of the donor centres ``z`` and of the ``targets``, every
-    fraction used inside the donor column is certified to FRACTION_TOLERANCE;
-    geometry that cannot resolve it is refused rather than interpolated.
-    """
+def _fractions(z, targets):
+    """Bracket index, fraction and end classification of targets in donor centres z."""
     order = np.searchsorted(-z, -targets, side="right") - 1
     j = np.clip(order, 0, len(z) - 2)
     with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
         t = (targets - z[j]) / (z[j + 1] - z[j])
     _finite("interpolation fractions", t)
-    if z_error is not None:
-        _certify_fractions(z, z_error, targets, target_error, j, t)
+    return j, t, targets >= z[0], targets <= z[-1]
+
+
+def _uncertain(z, z_error, targets, target_error, j, t):
+    """Layers whose float classification or fraction cannot be certified.
+
+    A target within its error of an end centre may be classified on the wrong
+    side (and an end value is not continuous with a far bracket when the error
+    exceeds a layer); inside the column, t = N / D with N = z[j] - target and
+    D = z[j] - z[j+1] > 0 has the first-order bound (eN + |t| eD) / (D - eD)
+    plus the quotient's rounding, certified to FRACTION_TOLERANCE.
+    """
+    u = _UNIT_ROUNDOFF
+    near_end = (np.abs(targets - z[0]) <= target_error + z_error[0]) | (
+        np.abs(targets - z[-1]) <= target_error + z_error[-1]
+    )
+    numerator = z[j] - targets
+    denominator = z[j] - z[j + 1]
+    e_numerator = z_error[j] + target_error + 2 * u * np.abs(numerator)
+    e_denominator = z_error[j] + z_error[j + 1] + 2 * u * denominator
+    fraction = np.abs(t)
+    margin = denominator - e_denominator
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        bound = np.where(
+            margin > 0,
+            (e_numerator + fraction * e_denominator) / margin + 2 * u * fraction,
+            np.inf,
+        )
+    inside = (targets < z[0]) & (targets > z[-1])
+    return near_end | (inside & ~(bound <= FRACTION_TOLERANCE))
+
+
+def _exact_fractions(column, centres, targets):
+    """Exact bracket, fraction, end and extension classes of rational targets."""
+    n = len(targets)
+    j, t = np.zeros(n, dtype=int), np.zeros(n)
+    above, below = np.zeros(n, dtype=bool), np.zeros(n, dtype=bool)
+    extended, beyond = np.zeros(n, dtype=bool), np.zeros(n, dtype=bool)
+    position, extension, clamping = np.zeros(n), np.zeros(n), np.zeros(n)
+    for k, r in enumerate(targets):
+        above[k], below[k] = r >= centres[0], r <= centres[-1]
+        beyond[k] = r > centres[0] or r < centres[-1]
+        extended[k] = r > 0 or r < -column
+        b = 0
+        while b < len(centres) - 2 and r < centres[b + 1]:
+            b += 1
+        j[k] = b
+        t[k] = float((r - centres[b]) / (centres[b + 1] - centres[b]))
+        position[k] = float(r)
+        extension[k] = float(max(r, -column - r))
+        clamping[k] = float(max(r - centres[0], centres[-1] - r))
+    return j, t, above, below, extended, beyond, position, extension, clamping
+
+
+def _interpolate(values, j, t, above, below):
+    """Return constant-end interpolation and its unbounded linear alternative."""
     shape = (len(t),) + (1,) * (values.ndim - 1)
     a, b = values[j], values[j + 1]
     fraction = np.broadcast_to(np.clip(t, 0, 1).reshape(shape), a.shape)
@@ -724,11 +882,10 @@ def _interpolate(z, values, targets, z_error=None, target_error=None):
         ~same_sign
     ] * b[~same_sign]
     clipped = np.clip(clipped, np.minimum(a, b), np.maximum(a, b))
-    above, below = targets >= z[0], targets <= z[-1]
     clipped[above] = values[0]
     clipped[below] = values[-1]
     linear = clipped.copy()
-    outside = (targets > z[0]) | (targets < z[-1])
+    outside = above | below
     # Extrapolation is only a statistic. Wider intermediates avoid a spurious
     # overflow of b-a; an unrepresentable float64 statistic is still refused.
     with np.errstate(over="ignore", invalid="ignore"):
@@ -738,40 +895,6 @@ def _interpolate(z, values, targets, z_error=None, target_error=None):
         ) * (bb - aa)
     _finite("vertical interpolation/extrapolation", clipped, linear)
     return clipped, linear
-
-
-def _certify_fractions(z, z_error, targets, target_error, j, t):
-    """Refuse a fraction inside the donor column whose error may exceed 1e-12.
-
-    t = N / D with N = z[j] - target and D = z[j] - z[j+1] > 0; first-order
-    bound (eN + |t| eD) / (D - eD) plus the rounding of the quotient. Fractions
-    at or beyond the end centres are not used (the end value is), so they are
-    not certified; a target on the wrong side of a centre by its own error
-    gives the same value on either side, interpolation being continuous.
-    """
-    u = _UNIT_ROUNDOFF
-    inside = (targets < z[0]) & (targets > z[-1])
-    if not inside.any():
-        return
-    k = j[inside]
-    numerator = z[k] - targets[inside]
-    denominator = z[k] - z[k + 1]
-    e_numerator = z_error[k] + target_error[inside] + 2 * u * np.abs(numerator)
-    e_denominator = z_error[k] + z_error[k + 1] + 2 * u * denominator
-    fraction = np.abs(t[inside])
-    margin = denominator - e_denominator
-    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-        bound = np.where(
-            margin > 0,
-            (e_numerator + fraction * e_denominator) / margin + 2 * u * fraction,
-            np.inf,
-        )
-    if not (bound <= FRACTION_TOLERANCE).all():
-        raise ValueError(
-            "Vertical interpolation fraction cannot be established to "
-            f"{FRACTION_TOLERANCE:g} (layer centres too close for the column "
-            "geometry): numerically unresolved columns are refused"
-        )
 
 
 def _statistic(events, denominator, delta):
@@ -864,21 +987,35 @@ def apply_3d(op, field, sigma, base_zeta, target_zeta, *, location="node"):
             j, w = matrix.indices[k], matrix.data[k]
             # every coordinate is relative to donor j's own surface
             zt, zt_error = columns.relative(i, j)
-            values, linear = _interpolate(
-                zb[j],
-                field[j].astype(float),
-                zt,
-                columns.base_centre_error[j],
-                zt_error,
-            )
-            with np.errstate(over="ignore", invalid="ignore"):
-                result[i] += w * values
+            ze = columns.base_centre_error[j]
+            bracket, t, above, below = _fractions(zb[j], zt)
             extended = (zt > 0) | (zt < -depth[j])
             beyond_centres = (zt > zb[j, 0]) | (zt < zb[j, -1])
             distances = {
                 "extension": np.maximum(zt, -depth[j] - zt),
                 "clamping": np.maximum(zt - zb[j, 0], zb[j, -1] - zt),
             }
+            # Layers the float64 frame cannot certify are computed exactly
+            # (rational arithmetic on the inputs), never refused (round 12).
+            uncertain = _uncertain(zb[j], ze, zt, zt_error, bracket, t) | (
+                (np.abs(zt) <= zt_error)
+                | (np.abs(zt + depth[j]) <= zt_error + columns.base_depth_error[j])
+            )
+            if uncertain.any():
+                layers = np.flatnonzero(uncertain)
+                exact = _exact_fractions(*columns.exact(i, j, layers))
+                for array, value in zip(
+                    (bracket, t, above, below, extended, beyond_centres),
+                    exact[:6],
+                ):
+                    array[layers] = value
+                distances["extension"][layers] = exact[7]
+                distances["clamping"][layers] = exact[8]
+            values, linear = _interpolate(
+                field[j].astype(float), bracket, t, above, below
+            )
+            with np.errstate(over="ignore", invalid="ignore"):
+                result[i] += w * values
             for key, mask in (
                 ("extension", extended),
                 ("clamping", beyond_centres & ~extended),

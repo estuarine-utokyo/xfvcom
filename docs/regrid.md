@@ -23,9 +23,12 @@ remaps each donor in physical z using a common decreasing sigma interface vector
 from 0 to -1 and each mesh's depth and elevation, then combines donor values.
 Vertical positions are taken relative to each donor's own surface (the surface
 difference plus sigma times the water column), never as rounded absolute z, so
-nearly dry columns keep their exact geometry; every interpolation fraction used
-inside a donor column is certified to `1e-12` from error bounds and otherwise
-refused.
+nearly dry columns keep their exact geometry. Every classification (above,
+inside, below the donor centres; inside or beyond the donor's water column)
+and every interpolation fraction is certified from forward error bounds; a
+layer that cannot be certified is computed exactly in rational arithmetic
+instead (never refused). Depths, elevations and sigma that float64 cannot hold
+exactly (a wider float, a large integer) are refused.
 It continues endpoint layer values beyond the donor layer centres. Statistics
 separate clamping within the donor water column from extension beyond its
 surface/bottom. They report donor-weighted target volumes, fractions, distance
@@ -38,10 +41,14 @@ The physical input range is enforced: float64 projected coordinates with
 depths from `1e-3` to `1e5` m, elevations with magnitude at most `1e3` m, and
 sigma layer thickness at least `1e-6` of the column. Fields are finite
 float32/float64 with magnitude at most `1e100`, spatial axis first. Geometry
-whose areas or weights cannot be certified to `1e-12` is refused. Containment
-in a triangle is decided on exact weights, so a thin candidate that only covers
-a point by its bounding box is passed over; only an accepted container's
-floating weights must certify.
+whose areas cannot be certified to `1e-12` is refused. Barycentric weights are
+exact (rational) for the exact query point -- a node, or the exact centroid of
+an element, which a float cannot hold -- and rounded once; a point lies in a
+triangle when clipping its exact weights onto it moves them by at most `1e-12`.
+Donors and anchors are the nearest inside node along refined edges, searched
+from each query: two path lengths closer than their rounding bound (about
+`4u` per edge of the path length) are ties, bit-equal ties go to the lowest
+ID, and ties that differ are refused as numerically ambiguous.
 
 `transfer_reference.independent_evaluate` independently searches triangles,
 walks water connections, forms area shares and remaps vertical profiles. It

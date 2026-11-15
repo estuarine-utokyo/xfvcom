@@ -84,15 +84,22 @@ def independent_evaluate(
     def find(point):
         # Bounding boxes only accelerate the search. Solve the translated 2x2
         # system by exact rational elimination, without production determinants.
+        # A point may be exact (Fractions: an element centroid); the boxes,
+        # widened by a relative 1e-12, only preselect.
+        x, y = (float(c) for c in point)
+        pad = 1e-12 * (abs(x) + abs(y) + 1.0)
         possible = np.flatnonzero(
-            (lower[:, 0] <= point[0])
-            & (upper[:, 0] >= point[0])
-            & (lower[:, 1] <= point[1])
-            & (upper[:, 1] >= point[1])
+            (lower[:, 0] <= x + pad)
+            & (upper[:, 0] >= x - pad)
+            & (lower[:, 1] <= y + pad)
+            & (upper[:, 1] >= y - pad)
         )
         for e in possible:
             a, u, v = rational[e]
-            dx, dy = (Fraction(float(point[k])) - a[k] for k in (0, 1))
+            dx, dy = (
+                (c if isinstance(c, Fraction) else Fraction(float(c))) - a[k]
+                for k, c in enumerate(point)
+            )
             if u[0]:
                 ratio = u[1] / u[0]
                 w2 = (dy - ratio * dx) / (v[1] - ratio * v[0])
@@ -136,23 +143,42 @@ def independent_evaluate(
             neighbours[a][b] = length
             neighbours[b][a] = length
 
-    def anchor(starts):
-        queue = [(d, int(v)) for d, v in starts]
+    # Two candidate paths are tied when their computed lengths differ by no
+    # more than their rounding bound: 4u per edge (and one) of the longer path,
+    # plus twice the rounding of a rounded query point. Bit-equal ties go to
+    # the lowest ID; other ties are refused, as in production.
+    unit = 2.0**-53
+
+    def anchor(starts, point_error=0.0):
+        queue = [(d, hop, int(v)) for d, v, hop in starts]
         heapq.heapify(queue)
-        visited = set()
+        visited, found, bound = set(), [], max_distance * (1 + 1e-9) + 1e-12
         while queue:
-            distance, v = heapq.heappop(queue)
+            distance, hop, v = heapq.heappop(queue)
             if v in visited:
                 continue
             visited.add(v)
-            if distance > max_distance:
+            if distance > bound:
                 break
             if membership[v][0] >= 0:
-                return membership[v]
+                found.append((distance, v, hop))
+                bound = min(bound, found[0][0] * (1 + 1e-9) + 1e-12)
+                continue
             for neighbour, length in neighbours[v].items():
                 if neighbour not in visited:
-                    heapq.heappush(queue, (distance + length, neighbour))
-        raise ValueError("Independent evaluator: no anchor within max_distance")
+                    heapq.heappush(queue, (distance + length, hop + 1, neighbour))
+        if not found:
+            raise ValueError("Independent evaluator: no anchor within max_distance")
+        best = min(found)
+        close = [
+            c
+            for c in found
+            if abs(c[0] - best[0])
+            <= 4 * unit * (c[2] + best[2] + 2) * max(c[0], best[0]) + 2 * point_error
+        ]
+        if any(c[0] != best[0] for c in close if c[1] != best[1]):
+            raise ValueError("Independent evaluator: ambiguous anchor (rounding band)")
+        return membership[min(c[1] for c in close if c[0] == best[0])]
 
     inverse = {}
     mapping = node_map if location == "node" else elem_map
@@ -168,8 +194,11 @@ def independent_evaluate(
         old_cells = [[v] for v in range(len(base.xy))]
         new_cells = [[v] for v in range(len(target.xy))]
     else:
+        # exact centroids: the sum of the vertex floats over three
         points = [
-            sum((target.xy[v] for v in tri), np.zeros(2)) / 3
+            tuple(
+                sum(Fraction(float(target.xy[v, k])) for v in tri) / 3 for k in (0, 1)
+            )
             for tri in target.triangles
         ]
         old_cells = [[int(v) for v in tri] for tri in base.triangles]
@@ -223,13 +252,17 @@ def independent_evaluate(
         e, weights = membership[i] if location == "node" else find(point)
         if e < 0:
             if location == "node":
-                e, weights = anchor([(0.0, i)])
+                e, weights = anchor([(0.0, i, 0)])
             else:
                 starts = []
                 for v in target.triangles[i]:
-                    dx, dy = point[0] - target.xy[v, 0], point[1] - target.xy[v, 1]
-                    starts.append((math.hypot(dx, dy), v))
-                e, weights = anchor(starts)
+                    dx = float(point[0]) - float(target.xy[v, 0])
+                    dy = float(point[1]) - float(target.xy[v, 1])
+                    starts.append((math.hypot(dx, dy), v, 1))
+                # the anchor search starts from the centroid rounded to float64
+                e, weights = anchor(
+                    starts, 2 * unit * max(abs(float(c)) for c in point)
+                )
         donors = {}
         for v, w in zip(base.triangles[e], weights):
             if location == "node":

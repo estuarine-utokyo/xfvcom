@@ -1,6 +1,7 @@
 """Synthetic transfer, analytic statistics, independent checks and in-memory faults."""
 
 import io
+import math
 import sys
 import warnings
 from pathlib import Path
@@ -55,6 +56,10 @@ def centres(mesh, sigma, zeta, location):
         h = h[mesh.triangles].mean(axis=1)
         zeta = zeta[mesh.triangles].mean(axis=1)
     return zeta[:, None] + ((sigma[:-1] + sigma[1:]) / 2) * (h + zeta)[:, None]
+
+
+def interpolate(z, values, targets):
+    return rt._interpolate(values, *rt._fractions(z, targets))
 
 
 def bitwise(actual, expected):
@@ -488,16 +493,17 @@ def test_nearly_degenerate_exact_areas(offset):
     np.testing.assert_array_equal(rt._areas(t) * 65536**2, [29.25, 58.5, 29.25])
 
 
-def test_uncertifiable_triangle_refused():
-    # Subtracting the local origin rounds the long edges, and the triangle is
-    # thin, so the floating weights of a point INSIDE it (exact weights
-    # [.5, .4516.., .0484..]) are wrong: a true container is refused, never
-    # passed over. (An exterior point is passed over: round 11 #2.)
+def test_thin_triangle_weights_are_exact():
+    # Subtracting the local origin rounds the long edges and the triangle is
+    # thin, so floating weights of a point INSIDE it would be wrong; the
+    # weights are the exact ones, rounded once (round 12).
     b = mesh([[-1.0, -1.0], [1e16 + 2, 1e16 + 4], [1e16, 1e16 + 64]], [[0, 1, 2]], 4.0)
     q = np.array([5e15, 5e15 + 16])
-    assert min(rt._exact_weights(b.xy[[0, 1, 2]], q)) > 0
-    with pytest.raises(ValueError, match="weights cannot be established to 1e-12"):
-        rt._locate(b, q[None])
+    exact = rt._exact_weights(b.xy[[0, 1, 2]], q)
+    assert min(exact) > 0
+    ids, weights = rt._locate(b, q[None])
+    assert ids[0] == 0
+    assert weights[0].tolist() == [float(w) for w in exact]
 
 
 def test_rational_evaluator_uses_no_production_geometry(monkeypatch):
@@ -507,7 +513,7 @@ def test_rational_evaluator_uses_no_production_geometry(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("Evaluator shared production geometry")
 
-    for name in ("_locate", "_areas", "_cross", "_certify_weights"):
+    for name in ("_locate", "_areas", "_cross", "_exact_weights", "_paths"):
         monkeypatch.setattr(rt, name, forbidden)
     np.testing.assert_array_equal(
         rt.independent_evaluate(b, t, nm, em, np.arange(2.0), location="element"),
@@ -542,7 +548,7 @@ def test_large_constant_ends(dtype):
         actual=got,
     )
     # Both ends must assign directly, including the top endpoint when t=0.
-    clipped, _ = rt._interpolate(
+    clipped, _ = interpolate(
         np.array([-1.0, -3.0]), field[0].astype(float), np.array([1.0, -9.0])
     )
     np.testing.assert_array_equal(clipped, field[0])
@@ -570,7 +576,7 @@ def test_extreme_extension_refused():
 def test_extreme_interior_interpolation_bounded(values):
     targets = np.array([0.0, -0.125, -0.5, -0.875, -1.0])
     for field in (np.array(values), np.array([values, values]).T):
-        got, linear = rt._interpolate(np.array([0.0, -1.0]), field, targets)
+        got, linear = interpolate(np.array([0.0, -1.0]), field, targets)
         assert np.isfinite(got).all() and np.isfinite(linear).all()
         assert (got >= min(values)).all() and (got <= max(values)).all()
         np.testing.assert_array_equal(got[[0, -1]], field)
@@ -957,8 +963,8 @@ MUTATIONS = [
     ),
     (
         "node-barycentrics",
-        "weights[i] = clipped",
-        "weights[i] = np.array([1., 0., 0.])",
+        "weights[i] = [float(w) for w in clipped]",
+        "weights[i] = [1.0, 0.0, 0.0]",
         "test_g2_constants_linear_nodes_and_weights",
         True,
     ),
@@ -999,29 +1005,29 @@ MUTATIONS = [
     ),
     (
         "across-land",
-        "donor, distance = _paths(target, triangle >= 0)",
-        "donor, distance = _paths(target, triangle >= 0)\n    donor[triangle < 0] = [int(np.argmin(np.linalg.norm(target.xy - p, axis=1) + np.where(triangle >= 0, 0., np.inf))) for p in target.xy[triangle < 0]]",
+        "donor, distance, hops = _paths(target, triangle >= 0, max_distance)",
+        "donor, distance, hops = _paths(target, triangle >= 0, max_distance)\n    donor[triangle < 0] = [int(np.argmin(np.linalg.norm(target.xy - p, axis=1) + np.where(triangle >= 0, 0., np.inf))) for p in target.xy[triangle < 0]]",
         "test_outside_path_anchor_limit_and_ties",
         False,
     ),
     (
         "anchor-tie",
-        "ad[i], anchors[i] = min(choices)",
-        "ad[i], anchors[i] = min(choices, key=lambda item: (item[0], -item[1]))",
+        'anchors[i], ad[i], _ = _choose(choices, f"element {i}", offset)',
+        "anchors[i], ad[i] = max((c for c in choices if c[0] == min(choices)[0]), key=lambda c: c[1])[1], min(choices)[0]",
         "test_outside_path_anchor_limit_and_ties",
         False,
     ),
     (
         "node-tie",
-        "candidate < (distance[b], donor[b])",
-        "(candidate[0] < distance[b] or (candidate[0] == distance[b] and source > donor[b]))",
+        "return min(v for d, v, _ in close if d == best[0]), best[0], best[2]",
+        "return max(v for d, v, _ in close if d == best[0]), best[0], best[2]",
         "test_outside_path_anchor_limit_and_ties",
         False,
     ),
     (
         "anchor-across-land",
-        "ad[i], anchors[i] = min(choices)",
-        "ad[i], anchors[i] = min(choices)\n        anchors[i] = int(np.argmin(np.linalg.norm(target.xy - centroids[i], axis=1) + np.where(triangle >= 0, 0., np.inf)))",
+        'anchors[i], ad[i], _ = _choose(choices, f"element {i}", offset)',
+        'anchors[i], ad[i], _ = _choose(choices, f"element {i}", offset)\n        anchors[i] = int(np.argmin(np.linalg.norm(target.xy - centroids[i], axis=1) + np.where(triangle >= 0, 0., np.inf)))',
         "test_anchor_reaches_inside_via_outside_vertices",
         False,
     ),
@@ -1034,8 +1040,8 @@ MUTATIONS = [
     ),
     (
         "new-inside-donor",
-        "donor, distance = _paths(target, triangle >= 0)",
-        "donor, distance = _paths(target, nc >= 0)",
+        "donor, distance, hops = _paths(target, triangle >= 0, max_distance)",
+        "donor, distance, hops = _paths(target, nc >= 0, max_distance)",
         "test_outside_donor_can_be_new_inside_node",
         False,
     ),
@@ -1118,15 +1124,15 @@ MUTATIONS = [
     ),
     (
         "fraction-certificate",
-        "if not (bound <= FRACTION_TOLERANCE).all():",
+        "if uncertain.any():",
         "if False:",
-        "test_r11_unresolved_fraction_refused",
+        "test_r12_endpoint_rounding_uses_exact_classification",
         False,
     ),
     (
         "exact-containment",
-        "if min(exact) < -BOUNDARY_TOLERANCE:\n                continue",
-        "pass",
+        "if max(abs(c - w) for c, w in zip(clipped, exact)) > tolerance:",
+        "if False:",
         "test_r11_thin_candidate_does_not_abort_search",
         False,
     ),
@@ -1598,18 +1604,23 @@ def test_r11_thin_column_interpolates_in_donor_relative_frame():
     rt.check(op, field, sigma=sigma, base_zeta=bz, target_zeta=tz, actual=actual)
 
 
-def test_r11_unresolved_fraction_refused():
-    """A fraction the float64 frame cannot resolve to 1e-12 is refused.
+def test_r11_unresolved_fraction_computed_exactly():
+    """A fraction the float64 frame cannot certify is computed exactly (round 12).
 
     The target surface stands 500 m above a 1 m donor column, so its centre in
-    that column is a difference of ~800 m terms resolved against 1/30 m layers.
+    that column is a difference of ~800 m terms resolved against 1/30 m layers;
+    round 11 refused it, the exact fallback now matches the evaluator.
     """
     op = _thin_column_case()
     target = rm.Mesh(op.target.xy, op.target.triangles, np.r_[np.ones(3), 930.0])
     op = rt.build_transfer(op.base, target, np.arange(3))
     sigma = np.linspace(0.0, -1.0, 31)
-    with pytest.raises(ValueError, match="cannot be established"):
-        rt.apply_3d(op, np.ones((3, 30)), sigma, np.zeros(3), np.r_[np.zeros(3), 500.0])
+    field = np.tile(np.arange(30.0), (3, 1))
+    bz, tz = np.zeros(3), np.r_[np.zeros(3), 500.0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", rt.ExtensionWarning)
+        actual, _ = rt.apply_3d(op, field, sigma, bz, tz)
+        rt.check(op, field, sigma=sigma, base_zeta=bz, target_zeta=tz, actual=actual)
 
 
 def test_r11_thin_candidate_does_not_abort_search():
@@ -1624,6 +1635,16 @@ def test_r11_thin_candidate_does_not_abort_search():
     op = rt.build_transfer(m, m, np.arange(6))
     assert (op.node_copy == np.arange(6)).all()
     rt.check(op, np.arange(6.0))
+    # a new node inside the ordinary triangle, inside the thin one's box too:
+    # its exact weights must come from its own container
+    split = mesh(
+        np.vstack((m.xy, [102.0, 302.0])),
+        [[0, 1, 2], [3, 4, 6], [4, 5, 6], [5, 3, 6]],
+        4.0,
+    )
+    op = rt.build_transfer(m, split, np.arange(6))
+    assert op.node_matrix[6].toarray().ravel().tolist() == [0, 0, 0, 0.6, 0.2, 0.2]
+    rt.check(op, np.arange(6.0))
 
 
 def test_r11_float16_depths_strict_errors():
@@ -1635,3 +1656,150 @@ def test_r11_float16_depths_strict_errors():
         with pytest.raises(ValueError, match="physical range"):
             deep = rm.Mesh(b.xy, b.triangles, np.full(3, 1e-4, dtype=np.float16))
             rt.build_transfer(deep, deep, np.arange(3))
+
+
+def _split_column(h=1.0, target_h=1.0):
+    b = mesh([[0, 0], [1, 0], [0, 1]], [[0, 1, 2]], h)
+    t = mesh(
+        np.vstack((b.xy, [0.25, 0.25])),
+        [[0, 1, 3], [1, 2, 3], [2, 0, 3]],
+        np.r_[b.depths, target_h],
+    )
+    return rt.build_transfer(b, t, np.arange(3))
+
+
+def test_r12_endpoint_rounding_uses_exact_classification():
+    """A target rounded across an end centre is classified exactly (round 12 #1).
+
+    The target's upper centre is exactly 3 - .25 * (13 + 3) = -1, the donor's
+    bottom; the rounded surface difference (4) put it at the donor surface.
+    Both target levels must take the donor's bottom value 1.
+    """
+    op = _split_column(target_h=13.0)
+    sigma = np.array([0.0, -0.5, -1.0])
+    field = np.tile([0.0, 1.0], (3, 1))
+    bz = np.full(3, np.nextafter(-1.0, 0.0))
+    tz = np.r_[bz, 3.0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", rt.ExtensionWarning)
+        actual, _ = rt.apply_3d(op, field, sigma, bz, tz)
+        assert actual[-1].tolist() == [1.0, 1.0]
+        rt.check(op, field, sigma=sigma, base_zeta=bz, target_zeta=tz, actual=actual)
+
+
+@pytest.mark.parametrize("which", ["base_zeta", "target_zeta", "sigma", "depth"])
+def test_r12_inexact_wide_inputs_refused(which):
+    """longdouble values float64 cannot hold are refused, not narrowed (round 12 #2)."""
+    ld = np.longdouble
+    tiny = ld(2) ** -60
+    if np.finfo(ld).eps >= 2.0**-52:
+        pytest.skip("longdouble is float64 on this platform")
+    sigma = np.array([0.0, -0.5, -1.0])
+    bz, tz = np.zeros(3), np.zeros(4)
+    if which == "depth":
+        b = rm.Mesh(
+            np.array([[0.0, 0], [1, 0], [0, 1]]),
+            np.array([[0, 1, 2]]),
+            np.full(3, ld(4) + tiny),
+        )
+        with pytest.raises(ValueError, match="exactly representable"):
+            rt.build_transfer(b, b, np.arange(3))
+        return
+    op = _split_column(4.0, 4.0)
+    if which == "base_zeta":
+        bz = np.full(3, ld(0.5) + tiny)
+    elif which == "target_zeta":
+        tz = np.full(4, ld(0.5) + tiny)
+    else:
+        sigma = np.array([0, -ld(0.5) - tiny, -1], dtype=ld)
+    with pytest.raises(ValueError, match="exactly representable"):
+        rt.apply_3d(op, np.tile([0.0, 1.0], (3, 1)), sigma, bz, tz)
+    # representable wide values are accepted
+    rt.apply_3d(
+        op,
+        np.tile([0.0, 1.0], (3, 1)),
+        np.array([0, -0.5, -1], dtype=ld),
+        np.full(3, ld(0.25)),
+        np.full(4, ld(0.25)),
+    )
+
+
+def test_r12_element_weights_use_the_exact_centroid():
+    """The area-share operator at an exact centroid is exactly 1/4 (round 12 #3)."""
+    big, g = 2.0**20, 2.0**-10
+    p = np.array([[0.0, 0.0], [big, big], [big, big + g], [0.0, g]])
+    b = mesh(p, [[0, 1, 2], [0, 2, 3]], 1.0)
+    t = mesh(np.vstack((p, (p[1] + p[2]) / 2)), [[0, 1, 4], [0, 4, 2], [0, 2, 3]], 1.0)
+    op = rt.build_transfer(b, t, np.arange(4))
+    field = np.array([0.0, 1.0])
+    value = rt.apply_2d(op, field, location="element")[0]
+    assert value == pytest.approx(0.25, abs=1e-15)
+    rt.check(op, field, location="element")
+
+
+def _strip_tie():
+    """Two inside banks reached from node (0, 0) by 100 m paths summed differently."""
+    xs = [
+        -100,
+        -16.469547616858964,
+        -14.051964577777293,
+        0,
+        83.53045238314103,
+        85.9480354222227,
+        100,
+    ]
+    xy = [[x, 0.0] for x in xs] + [[x, 1.0] for x in xs]
+    n = len(xs)
+    tri = []
+    for k in range(n - 1):
+        tri += [[k, k + 1, n + k + 1], [k, n + k + 1, n + k]]
+    base_xy = [[-100, 0], [-100, 1], [-200, 0.5], [100, 0], [200, 0.5], [100, 1]]
+    b = mesh(base_xy, [[0, 1, 2], [3, 4, 5]], 3.0)
+    t = mesh(
+        np.vstack((xy, [[-200, 0.5], [200, 0.5]])),
+        np.vstack((tri, [[0, n, 2 * n], [n - 1, 2 * n + 1, 2 * n - 1]])),
+        3.0,
+    )
+    node_map = np.array([0, n, 2 * n, n - 1, 2 * n + 1, 2 * n - 1])
+    return b, t, node_map
+
+
+def test_r12_multi_edge_tie_goes_to_lowest_id():
+    """Both 100 m paths from (0, 0) tie; the lowest ID (0) is the donor (round 12 #4).
+
+    The paths telescope over unequal segments; a forward multi-source sum gave
+    100.00000000000001 for one of them and picked the other bank.
+    """
+    b, t, node_map = _strip_tie()
+    rm.validate_topology(b)
+    rm.validate_topology(t)
+    op = rt.build_transfer(b, t, node_map)
+    report = op.node_report
+    k = list(report["outside_nodes"]).index(3)
+    assert report["donor_nodes"][3] == 0 and report["donor_distances_m"][3] == 100.0
+    field = np.array([0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+    assert rt.apply_2d(op, field)[3] == 0.0
+    rt.check(op, field)
+    assert k >= 0
+
+
+def test_r12_unorderable_tie_refused():
+    """Lengths within their rounding bound that differ cannot be ordered: refused."""
+    with pytest.raises(ValueError, match="ambiguous"):
+        rt._choose([(100.0, 3, 3), (100.00000000000001, 0, 3)], "node 9")
+    assert rt._choose([(100.0, 3, 3), (100.0, 0, 3)], "node 9")[0] == 0
+    # beyond the bound the shorter path wins whatever its ID
+    assert rt._choose([(100.0, 3, 3), (100.000001, 0, 3)], "node 9")[0] == 3
+    # an unreachable candidate is no candidate
+    assert rt._choose([(math.inf, -1, 0), (2.0, 5, 1)], "element 1")[:2] == (5, 2.0)
+
+
+def test_r12_shallow_identical_element_columns_accepted():
+    """Identical, well-resolved 0.2 m element columns are the identity (round 12 #5)."""
+    op = _split_column(3.0, 3.0)
+    sigma = np.linspace(0.0, -1.0, 31)
+    field = np.arange(30, dtype=float)[None, :]
+    got, _ = rt.apply_3d(
+        op, field, sigma, np.full(3, -2.8), np.full(4, -2.8), location="element"
+    )
+    np.testing.assert_array_equal(got, np.tile(field, (3, 1)))
